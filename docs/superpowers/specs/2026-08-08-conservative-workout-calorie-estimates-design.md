@@ -129,9 +129,10 @@ Failure to load or calculate an estimate must not prevent workout completion. In
 Backfill is a focused local repository operation, not background sync.
 
 - Schedule it after an explicit profile save that produces a valid calorie profile, or after the preference changes from disabled to enabled while the profile is valid.
-- Fetch only completed sessions whose `estimatedActiveCalories` is `nil`.
+- Fetch only completed sessions whose `calorieEstimateVersion` is `nil`.
 - Calculate each missing estimate using the current eligible profile and each session's persisted workout facts.
-- Persist successful estimates with version 1 in bounded batches.
+- A successful evaluation always stores version 1. It stores `estimatedActiveCalories` only when the rounded estimate is at least 5 kcal, so a successfully evaluated no-activity workout is not retried forever.
+- Persist successful evaluations in bounded batches.
 - Never overwrite a non-`nil` estimate, even if the profile or formula version later changes.
 - Re-running backfill is idempotent.
 - A failed batch leaves affected sessions eligible for a later retry at another explicit profile/settings save boundary.
