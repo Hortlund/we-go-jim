@@ -2017,6 +2017,8 @@ final class WorkoutSession {
     var totalVolume: Double = 0
     var prHitsCount: Int = 0
     var summaryMetricsVersion: Int = 0
+    var estimatedActiveCalories: Int?
+    var calorieEstimateVersion: Int?
     var notes: String = ""
     var archivedAt: Date?
     var createdAt: Date = Date()
@@ -2042,6 +2044,8 @@ final class WorkoutSession {
         totalVolume: Double = 0,
         prHitsCount: Int = 0,
         summaryMetricsVersion: Int = 0,
+        estimatedActiveCalories: Int? = nil,
+        calorieEstimateVersion: Int? = nil,
         notes: String = "",
         archivedAt: Date? = nil,
         createdAt: Date = .now,
@@ -2057,6 +2061,8 @@ final class WorkoutSession {
         self.totalVolume = totalVolume
         self.prHitsCount = prHitsCount
         self.summaryMetricsVersion = summaryMetricsVersion
+        self.estimatedActiveCalories = estimatedActiveCalories
+        self.calorieEstimateVersion = calorieEstimateVersion
         self.notes = notes
         self.archivedAt = archivedAt
         self.createdAt = createdAt

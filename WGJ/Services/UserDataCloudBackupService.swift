@@ -1524,6 +1524,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
     var totalVolume: Double
     var prHitsCount: Int
     var summaryMetricsVersion: Int
+    var estimatedActiveCalories: Int?
+    var calorieEstimateVersion: Int?
     var notes: String
     var archivedAt: Date?
     var createdAt: Date
@@ -1540,6 +1542,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         totalVolume = model.totalVolume
         prHitsCount = model.prHitsCount
         summaryMetricsVersion = model.summaryMetricsVersion
+        estimatedActiveCalories = model.estimatedActiveCalories
+        calorieEstimateVersion = model.calorieEstimateVersion
         notes = model.notes
         archivedAt = model.archivedAt
         createdAt = model.createdAt
@@ -1558,6 +1562,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
             totalVolume: totalVolume,
             prHitsCount: prHitsCount,
             summaryMetricsVersion: summaryMetricsVersion,
+            estimatedActiveCalories: estimatedActiveCalories,
+            calorieEstimateVersion: calorieEstimateVersion,
             notes: notes,
             archivedAt: archivedAt,
             createdAt: createdAt,
@@ -1575,6 +1581,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         model.totalVolume = totalVolume
         model.prHitsCount = prHitsCount
         model.summaryMetricsVersion = summaryMetricsVersion
+        model.estimatedActiveCalories = estimatedActiveCalories
+        model.calorieEstimateVersion = calorieEstimateVersion
         model.notes = notes
         model.archivedAt = archivedAt
         model.createdAt = createdAt

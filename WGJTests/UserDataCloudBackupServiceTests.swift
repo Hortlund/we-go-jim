@@ -971,6 +971,79 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(restoredActivity.targetDistanceMeters)
     }
 
+    func testBackupRoundTripPersistsSessionCalorieEstimateResults() async throws {
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(WorkoutSession(
+            id: sessionID,
+            name: "Upper",
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000),
+            estimatedActiveCalories: 145,
+            calorieEstimateVersion: 1
+        ))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+
+        let restored = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restored,
+            backupStore: backupStore
+        ).restoreLatestBackup()
+        let restoredSession = try XCTUnwrap(
+            ModelContext(restored).fetch(FetchDescriptor<WorkoutSession>()).first { $0.id == sessionID }
+        )
+
+        XCTAssertEqual(restoredSession.estimatedActiveCalories, 145)
+        XCTAssertEqual(restoredSession.calorieEstimateVersion, 1)
+    }
+
+    func testBackupWithoutSessionCalorieEstimateFieldsRestoresNilValues() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(WorkoutSession(
+            name: "Upper",
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000)
+        ))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let fetchedRecord = try await backupStore.fetchBackup()
+        let exported = try XCTUnwrap(fetchedRecord)
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: exported.payloadData) as? [String: Any]
+        )
+        var workoutSessions = try XCTUnwrap(json["workoutSessions"] as? [[String: Any]])
+        workoutSessions[0].removeValue(forKey: "estimatedActiveCalories")
+        workoutSessions[0].removeValue(forKey: "calorieEstimateVersion")
+        json["workoutSessions"] = workoutSessions
+        await backupStore.replaceRecord(UserDataCloudBackupRemoteRecord(
+            updatedAt: exported.updatedAt,
+            payloadData: try JSONSerialization.data(withJSONObject: json)
+        ))
+
+        let restored = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restored,
+            backupStore: backupStore
+        ).restoreLatestBackup()
+        let restoredSession = try XCTUnwrap(
+            ModelContext(restored).fetch(FetchDescriptor<WorkoutSession>()).first
+        )
+
+        XCTAssertNil(restoredSession.estimatedActiveCalories)
+        XCTAssertNil(restoredSession.calorieEstimateVersion)
+    }
+
     func testRestoreLatestBackupCanReplaceBrokenLocalTemplates() async throws {
         let templateID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
         let exerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
