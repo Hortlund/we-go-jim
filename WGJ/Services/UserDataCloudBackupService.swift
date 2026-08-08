@@ -919,6 +919,11 @@ private struct Profile: Codable, BackupModel {
     var displayName: String
     var athleteTypeRaw: String?
     var avatarImageData: Data?
+    var calorieEstimateSexRaw: String?
+    var dateOfBirth: Date?
+    var heightCentimeters: Double?
+    var bodyWeightKilograms: Double?
+    var showsCalorieEstimates: Bool?
     var preferredWeightUnitRaw: String
     var preferredDistanceUnitRaw: String?
     var workoutNotificationStyleRaw: String
@@ -935,6 +940,11 @@ private struct Profile: Codable, BackupModel {
         displayName = model.displayName
         athleteTypeRaw = model.athleteTypeRaw
         avatarImageData = model.avatarImageData
+        calorieEstimateSexRaw = model.calorieEstimateSexRaw
+        dateOfBirth = model.dateOfBirth
+        heightCentimeters = model.heightCentimeters
+        bodyWeightKilograms = model.bodyWeightKilograms
+        showsCalorieEstimates = model.showsCalorieEstimates
         preferredWeightUnitRaw = model.preferredWeightUnitRaw
         preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
         workoutNotificationStyleRaw = model.workoutNotificationStyleRaw
@@ -953,6 +963,11 @@ private struct Profile: Codable, BackupModel {
             displayName: displayName,
             athleteType: athleteTypeRaw.flatMap(ProfileAthleteType.init(rawValue:)),
             avatarImageData: avatarImageData,
+            calorieEstimateSex: calorieEstimateSexRaw.flatMap(CalorieEstimateSex.init(rawValue:)),
+            dateOfBirth: dateOfBirth,
+            heightCentimeters: heightCentimeters,
+            bodyWeightKilograms: bodyWeightKilograms,
+            showsCalorieEstimates: showsCalorieEstimates ?? true,
             preferredWeightUnit: PreferredWeightUnit(rawValue: preferredWeightUnitRaw) ?? .kg,
             preferredDistanceUnit: preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)),
             workoutNotificationStyle: WorkoutNotificationStyle(rawValue: workoutNotificationStyleRaw) ?? .timeSensitive,
@@ -970,6 +985,11 @@ private struct Profile: Codable, BackupModel {
         model.displayName = displayName
         model.athleteTypeRaw = athleteTypeRaw
         model.avatarImageData = avatarImageData
+        model.calorieEstimateSexRaw = calorieEstimateSexRaw
+        model.dateOfBirth = dateOfBirth
+        model.heightCentimeters = heightCentimeters
+        model.bodyWeightKilograms = bodyWeightKilograms
+        model.showsCalorieEstimates = showsCalorieEstimates ?? true
         model.preferredWeightUnitRaw = preferredWeightUnitRaw
         model.preferredDistanceUnitRaw = preferredDistanceUnitRaw
         model.workoutNotificationStyleRaw = workoutNotificationStyleRaw

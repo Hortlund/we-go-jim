@@ -681,9 +681,17 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)
         sourceContext.autosaveEnabled = false
+        let dateOfBirth = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "1990-05-20T00:00:00Z")
+        )
         sourceContext.insert(UserProfile(
             displayName: "Peter",
             athleteType: .powerlifting,
+            calorieEstimateSex: .female,
+            dateOfBirth: dateOfBirth,
+            heightCentimeters: 172.5,
+            bodyWeightKilograms: 68.25,
+            showsCalorieEstimates: false,
             preferredWeightUnit: .lb,
             preferredDistanceUnit: .miles,
             workoutNotificationStyle: .standard,
@@ -712,6 +720,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNotNil(restoreResult)
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.displayName, "Peter")
+        XCTAssertEqual(profiles.first?.calorieEstimateSex, .female)
+        XCTAssertEqual(profiles.first?.dateOfBirth, dateOfBirth)
+        XCTAssertEqual(profiles.first?.heightCentimeters, 172.5)
+        XCTAssertEqual(profiles.first?.bodyWeightKilograms, 68.25)
+        XCTAssertEqual(profiles.first?.showsCalorieEstimates, false)
         XCTAssertEqual(profiles.first?.preferredWeightUnit, .lb)
         XCTAssertEqual(profiles.first?.preferredDistanceUnit, .miles)
         XCTAssertEqual(profiles.first?.workoutNotificationStyle, .standard)
@@ -914,6 +927,15 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         var json = try XCTUnwrap(try JSONSerialization.jsonObject(with: record.payloadData) as? [String: Any])
         var profiles = try XCTUnwrap(json["profiles"] as? [[String: Any]])
         profiles[0].removeValue(forKey: "preferredDistanceUnitRaw")
+        for key in [
+            "calorieEstimateSexRaw",
+            "dateOfBirth",
+            "heightCentimeters",
+            "bodyWeightKilograms",
+            "showsCalorieEstimates",
+        ] {
+            profiles[0].removeValue(forKey: key)
+        }
         json["profiles"] = profiles
         var customExercises = try XCTUnwrap(json["customExercises"] as? [[String: Any]])
         customExercises[0].removeValue(forKey: "cardioTrackingProfileRaw")
@@ -937,6 +959,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
 
         XCTAssertNil(restoredProfile.preferredDistanceUnitRaw)
         XCTAssertEqual(restoredProfile.preferredDistanceUnit, .regionalDefault(locale: .current))
+        XCTAssertNil(restoredProfile.calorieEstimateSex)
+        XCTAssertNil(restoredProfile.dateOfBirth)
+        XCTAssertNil(restoredProfile.heightCentimeters)
+        XCTAssertNil(restoredProfile.bodyWeightKilograms)
+        XCTAssertTrue(restoredProfile.showsCalorieEstimates)
         XCTAssertNil(restoredCustom.cardioTrackingProfileRaw)
         XCTAssertEqual(restoredActivity.role, .finisher)
         XCTAssertEqual(restoredActivity.sortOrder, 0)

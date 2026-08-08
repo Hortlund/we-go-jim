@@ -40,6 +40,27 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
         XCTAssertEqual(draft.weeklyWorkoutGoal, 4)
     }
 
+    func testCalorieEstimatesDefaultOnAndCopiesDisabledProfileValue() {
+        XCTAssertTrue(UserSettingsDraft.default.showsCalorieEstimates)
+
+        let profile = UserProfile(
+            displayName: "Peter",
+            showsCalorieEstimates: false
+        )
+
+        XCTAssertFalse(UserSettingsDraft(profile: profile).showsCalorieEstimates)
+    }
+
+    func testCalorieEstimatesPatchChangesOnlyCaloriePreference() {
+        var draft = UserSettingsDraft.default
+        let weeklyWorkoutGoal = draft.weeklyWorkoutGoal
+
+        draft.apply(.init(showsCalorieEstimates: false))
+
+        XCTAssertFalse(draft.showsCalorieEstimates)
+        XCTAssertEqual(draft.weeklyWorkoutGoal, weeklyWorkoutGoal)
+    }
+
     func testNewerRevisionPersistsAfterDelayedOlderWriteAndOwnsSideEffects() async throws {
         let store = SettingsTestStore(
             draft: UserSettingsDraft(

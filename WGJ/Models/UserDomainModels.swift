@@ -905,6 +905,11 @@ final class UserProfile {
     var displayName: String = ""
     var athleteTypeRaw: String?
     var avatarImageData: Data?
+    var calorieEstimateSexRaw: String?
+    var dateOfBirth: Date?
+    var heightCentimeters: Double?
+    var bodyWeightKilograms: Double?
+    var showsCalorieEstimates: Bool = true
     var preferredWeightUnitRaw: String = PreferredWeightUnit.kg.rawValue
     var preferredDistanceUnitRaw: String?
     var workoutNotificationStyleRaw: String = WorkoutNotificationStyle.timeSensitive.rawValue
@@ -924,6 +929,26 @@ final class UserProfile {
         set {
             athleteTypeRaw = newValue?.rawValue
         }
+    }
+
+    var calorieEstimateSex: CalorieEstimateSex? {
+        get {
+            guard let calorieEstimateSexRaw else { return nil }
+            return CalorieEstimateSex(rawValue: calorieEstimateSexRaw)
+        }
+        set {
+            calorieEstimateSexRaw = newValue?.rawValue
+        }
+    }
+
+    var calorieProfileSnapshot: WorkoutCalorieProfileSnapshot {
+        WorkoutCalorieProfileSnapshot(
+            sex: calorieEstimateSex,
+            dateOfBirth: dateOfBirth,
+            heightCentimeters: heightCentimeters,
+            bodyWeightKilograms: bodyWeightKilograms,
+            showsCalorieEstimates: showsCalorieEstimates
+        )
     }
 
     var preferredWeightUnit: PreferredWeightUnit {
@@ -953,6 +978,11 @@ final class UserProfile {
         displayName: String,
         athleteType: ProfileAthleteType? = nil,
         avatarImageData: Data? = nil,
+        calorieEstimateSex: CalorieEstimateSex? = nil,
+        dateOfBirth: Date? = nil,
+        heightCentimeters: Double? = nil,
+        bodyWeightKilograms: Double? = nil,
+        showsCalorieEstimates: Bool = true,
         preferredWeightUnit: PreferredWeightUnit = .kg,
         preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive,
@@ -968,6 +998,11 @@ final class UserProfile {
         self.displayName = displayName
         self.athleteTypeRaw = athleteType?.rawValue
         self.avatarImageData = avatarImageData
+        self.calorieEstimateSexRaw = calorieEstimateSex?.rawValue
+        self.dateOfBirth = dateOfBirth
+        self.heightCentimeters = heightCentimeters
+        self.bodyWeightKilograms = bodyWeightKilograms
+        self.showsCalorieEstimates = showsCalorieEstimates
         self.preferredWeightUnitRaw = preferredWeightUnit.rawValue
         self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
         self.workoutNotificationStyleRaw = workoutNotificationStyle.rawValue

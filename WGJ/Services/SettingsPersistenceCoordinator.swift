@@ -9,6 +9,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
     var preferredDistanceUnit: WorkoutDistanceUnit
     var workoutNotificationStyle: WorkoutNotificationStyle
     var automaticallyClosesCompletedExercises: Bool
+    var showsCalorieEstimates: Bool
 
     static let `default` = UserSettingsDraft(
         weeklyWorkoutGoal: 4,
@@ -17,7 +18,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         preferredWeightUnit: .kg,
         preferredDistanceUnit: .regionalDefault(locale: .current),
         workoutNotificationStyle: .timeSensitive,
-        automaticallyClosesCompletedExercises: true
+        automaticallyClosesCompletedExercises: true,
+        showsCalorieEstimates: true
     )
 
     init(
@@ -27,7 +29,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         preferredWeightUnit: PreferredWeightUnit,
         preferredDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current),
         workoutNotificationStyle: WorkoutNotificationStyle,
-        automaticallyClosesCompletedExercises: Bool = true
+        automaticallyClosesCompletedExercises: Bool = true,
+        showsCalorieEstimates: Bool = true
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
@@ -36,6 +39,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
+        self.showsCalorieEstimates = showsCalorieEstimates
     }
 
     init(profile: UserProfile) {
@@ -46,7 +50,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
             preferredWeightUnit: profile.preferredWeightUnit,
             preferredDistanceUnit: profile.preferredDistanceUnit,
             workoutNotificationStyle: profile.workoutNotificationStyle,
-            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
+            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises,
+            showsCalorieEstimates: profile.showsCalorieEstimates
         )
     }
 
@@ -72,6 +77,9 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         if let value = patch.automaticallyClosesCompletedExercises {
             automaticallyClosesCompletedExercises = value
         }
+        if let value = patch.showsCalorieEstimates {
+            showsCalorieEstimates = value
+        }
     }
 }
 
@@ -83,6 +91,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
     var preferredDistanceUnit: WorkoutDistanceUnit?
     var workoutNotificationStyle: WorkoutNotificationStyle?
     var automaticallyClosesCompletedExercises: Bool?
+    var showsCalorieEstimates: Bool?
 
     init(
         weeklyWorkoutGoal: Int? = nil,
@@ -91,7 +100,8 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         preferredWeightUnit: PreferredWeightUnit? = nil,
         preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         workoutNotificationStyle: WorkoutNotificationStyle? = nil,
-        automaticallyClosesCompletedExercises: Bool? = nil
+        automaticallyClosesCompletedExercises: Bool? = nil,
+        showsCalorieEstimates: Bool? = nil
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
@@ -100,6 +110,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
+        self.showsCalorieEstimates = showsCalorieEstimates
     }
 
     mutating func merge(_ newer: UserSettingsPatch) {
@@ -111,6 +122,9 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         if let value = newer.workoutNotificationStyle { workoutNotificationStyle = value }
         if let value = newer.automaticallyClosesCompletedExercises {
             automaticallyClosesCompletedExercises = value
+        }
+        if let value = newer.showsCalorieEstimates {
+            showsCalorieEstimates = value
         }
     }
 }
