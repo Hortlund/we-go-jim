@@ -20,6 +20,32 @@ nonisolated enum ActiveWorkoutRestorePolicy {
     }
 }
 
+nonisolated enum WorkoutCaloriePersistedFactsAdapter {
+    static func facts(from session: WorkoutSession) -> WorkoutCalorieFacts {
+        let completedWorkingSetCount = (session.exercises ?? [])
+            .flatMap { $0.sets ?? [] }
+            .filter { set in
+                !set.isWarmup && WorkoutSessionSetDraft(model: set).isCycleCompleted
+            }
+            .count
+        let completedCardioDurationsSeconds: [Int] = (session.cardioBlocks ?? []).compactMap { block in
+            guard block.isCompleted,
+                  let durationSeconds = block.actualDurationSeconds,
+                  durationSeconds > 0
+            else {
+                return nil
+            }
+            return durationSeconds
+        }
+
+        return WorkoutCalorieFacts(
+            durationSeconds: session.durationSeconds,
+            completedWorkingSetCount: completedWorkingSetCount,
+            completedCardioDurationsSeconds: completedCardioDurationsSeconds
+        )
+    }
+}
+
 nonisolated final class WorkoutCompletionRepository {
     private let modelContext: ModelContext
 
@@ -186,6 +212,8 @@ nonisolated private final class WorkoutCompletionMaterializer {
         completedSession.prHitsCount = summary.prHitsCount
         completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
+        applyCalorieEstimate(to: completedSession, referenceDate: completedAt)
+
         try WGJPerformance.measure("workout-completion.save") {
             try modelContext.save()
         }
@@ -207,6 +235,29 @@ nonisolated private final class WorkoutCompletionMaterializer {
         )
 
         return completedSession.id
+    }
+
+    private func applyCalorieEstimate(to session: WorkoutSession, referenceDate: Date) {
+        guard let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() else {
+            return
+        }
+
+        let result = WorkoutCalorieEstimator.estimate(
+            profile: profile.calorieProfileSnapshot,
+            facts: WorkoutCaloriePersistedFactsAdapter.facts(from: session),
+            referenceDate: referenceDate,
+            calendar: .current
+        )
+
+        switch result {
+        case let .estimated(activeCalories, version):
+            session.estimatedActiveCalories = activeCalories
+            session.calorieEstimateVersion = version
+        case let .evaluatedWithoutEstimate(version):
+            session.calorieEstimateVersion = version
+        case .disabled, .unavailable:
+            break
+        }
     }
 
     private func materializeSets(
