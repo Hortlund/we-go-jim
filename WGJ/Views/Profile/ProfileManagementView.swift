@@ -6,6 +6,7 @@ import UIKit
 struct ProfileManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @State private var displayName = ""
@@ -14,6 +15,10 @@ struct ProfileManagementView: View {
     @State private var savedAthleteType: ProfileAthleteType?
     @State private var avatarSelection = AvatarSelectionCoordinator()
     @State private var savedAvatarImageData: Data?
+    @State private var calorieDetailsDraft = ProfileCalorieDetailsDraft()
+    @State private var savedCalorieDetailsDraft = ProfileCalorieDetailsDraft()
+    @State private var savedShowsCalorieEstimates = true
+    @State private var calorieDetailsValidationError: ProfileCalorieDetailsDraftError?
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
     @State private var showingAthleteTypePicker = false
@@ -42,16 +47,21 @@ struct ProfileManagementView: View {
                     Text("Your name, avatar, and athlete type shape your profile.")
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
-
-                    Button("Save Profile") {
-                        saveProfile()
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(trimmedDisplayName.isEmpty || !hasPendingChanges)
-                    .accessibilityIdentifier("profile-save-button")
                 }
                 .padding(14)
                 .wgjCardContainer(strong: true)
+
+                ProfileCalorieDetailsSection(
+                    draft: $calorieDetailsDraft,
+                    validationError: calorieDetailsValidationError
+                )
+
+                Button("Save Profile") {
+                    saveProfile()
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .disabled(trimmedDisplayName.isEmpty || !hasPendingChanges)
+                .accessibilityIdentifier("profile-save-button")
             }
             .padding(.top, 8)
             .padding(16)
@@ -80,6 +90,9 @@ struct ProfileManagementView: View {
             guard let errorDescription else { return }
             errorMessage = errorDescription
             showingError = true
+        }
+        .onChange(of: calorieDetailsDraft) { _, _ in
+            refreshCalorieDetailsValidationIfNeeded()
         }
         .onDisappear {
             avatarSelection.cancel()
@@ -222,6 +235,7 @@ struct ProfileManagementView: View {
         trimmedDisplayName != savedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             || athleteType != savedAthleteType
             || avatarImageData != savedAvatarImageData
+            || calorieDetailsDraft != savedCalorieDetailsDraft
     }
 
     private func loadProfileIfNeeded() async {
@@ -243,7 +257,8 @@ struct ProfileManagementView: View {
                             guard hasLoadedProfile else { return }
                             guard displayName == savedDisplayName,
                                   athleteType == savedAthleteType,
-                                  avatarImageData == savedAvatarImageData else {
+                                  avatarImageData == savedAvatarImageData,
+                                  calorieDetailsDraft == savedCalorieDetailsDraft else {
                                 return
                             }
                             apply(profile: ProfileIdentitySnapshot(profile: published))
@@ -259,16 +274,29 @@ struct ProfileManagementView: View {
     }
 
     private func saveProfile() {
+        let calorieProfile: WorkoutCalorieProfileSnapshot
+        switch calorieDetailsDraft.canonicalSnapshot(
+            showsCalorieEstimates: savedShowsCalorieEstimates,
+            referenceDate: .now,
+            calendar: .current
+        ) {
+        case let .success(snapshot):
+            calorieProfile = snapshot
+            calorieDetailsValidationError = nil
+        case let .failure(error):
+            calorieDetailsValidationError = error
+            return
+        }
+
         do {
             try profileRepository.saveProfile(
                 name: displayName,
                 athleteType: athleteType,
-                avatarImageData: avatarImageData
+                avatarImageData: avatarImageData,
+                calorieProfile: calorieProfile
             )
-            if let profile = try profileRepository.currentProfile() {
-                apply(profile: ProfileIdentitySnapshot(profile: profile))
-            }
             dismiss()
+            scheduleCalorieHistoryRefreshAndBackfill()
         } catch {
             showError(error)
         }
@@ -285,6 +313,34 @@ struct ProfileManagementView: View {
         showingError = true
     }
 
+    private func refreshCalorieDetailsValidationIfNeeded() {
+        guard calorieDetailsValidationError != nil else { return }
+        switch calorieDetailsDraft.canonicalSnapshot(
+            showsCalorieEstimates: savedShowsCalorieEstimates,
+            referenceDate: .now,
+            calendar: .current
+        ) {
+        case .success:
+            calorieDetailsValidationError = nil
+        case let .failure(error):
+            calorieDetailsValidationError = error
+        }
+    }
+
+    private func scheduleCalorieHistoryRefreshAndBackfill() {
+        let container = modelContext.container
+        let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: container)
+        Task { @MainActor in
+            HistoryAnalyticsCache.shared.invalidate(container: container)
+            WorkoutHistoryChangeBroadcaster.post()
+            WorkoutCalorieBackfillScheduler.schedule(
+                backgroundStore: backgroundStore,
+                container: container,
+                reason: .profileSaved
+            )
+        }
+    }
+
     @MainActor
     private func apply(profile: ProfileIdentitySnapshot) {
         displayName = profile.displayName
@@ -293,6 +349,21 @@ struct ProfileManagementView: View {
         savedAthleteType = profile.athleteType
         avatarSelection.reset(to: profile.avatarImageData)
         savedAvatarImageData = profile.avatarImageData
+        let loadedCalorieDetails = ProfileCalorieDetailsDraft(
+            snapshot: WorkoutCalorieProfileSnapshot(
+                sex: profile.calorieEstimateSex,
+                dateOfBirth: profile.dateOfBirth,
+                heightCentimeters: profile.heightCentimeters,
+                bodyWeightKilograms: profile.bodyWeightKilograms,
+                showsCalorieEstimates: profile.showsCalorieEstimates
+            ),
+            preferredWeightUnit: profile.preferredWeightUnit,
+            locale: .current
+        )
+        calorieDetailsDraft = loadedCalorieDetails
+        savedCalorieDetailsDraft = loadedCalorieDetails
+        savedShowsCalorieEstimates = profile.showsCalorieEstimates
+        calorieDetailsValidationError = nil
     }
 }
 
