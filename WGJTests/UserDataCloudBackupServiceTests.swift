@@ -685,6 +685,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             displayName: "Peter",
             athleteType: .powerlifting,
             preferredWeightUnit: .lb,
+            preferredDistanceUnit: .miles,
             workoutNotificationStyle: .standard,
             weeklyWorkoutGoal: 5,
             isTrainingGuidanceEnabled: false,
@@ -712,12 +713,235 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.displayName, "Peter")
         XCTAssertEqual(profiles.first?.preferredWeightUnit, .lb)
+        XCTAssertEqual(profiles.first?.preferredDistanceUnit, .miles)
         XCTAssertEqual(profiles.first?.workoutNotificationStyle, .standard)
         XCTAssertEqual(profiles.first?.weeklyWorkoutGoal, 5)
         XCTAssertEqual(profiles.first?.isTrainingGuidanceEnabled, false)
         XCTAssertEqual(profiles.first?.keepsScreenAwake, true)
         XCTAssertEqual(profiles.first?.automaticallyClosesCompletedExercises, false)
         XCTAssertEqual(profiles.first?.isBozarModeEnabled, true)
+    }
+
+    func testBackupRoundTripPreservesFlexibleCardioAndCustomTrackingProfile() async throws {
+        let sourceContainer = try makeInMemoryContainer()
+        let sourceContext = ModelContext(sourceContainer)
+        sourceContext.autosaveEnabled = false
+        let customExercise = ExerciseCatalogItem(
+            remoteUUID: "custom-rower",
+            displayName: "Garage Rower",
+            categoryName: "Cardio",
+            equipmentSummary: "Rower",
+            cardioTrackingProfileRaw: WorkoutCardioTrackingProfile.rower.rawValue,
+            isCurated: false,
+            sourceName: "custom"
+        )
+        let template = WorkoutTemplate(
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Double Main"
+        )
+        let firstTemplateActivity = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 0,
+            catalogExerciseUUID: customExercise.remoteUUID,
+            exerciseNameSnapshot: customExercise.displayName,
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Full Body",
+            trackingProfile: .rower,
+            goalKind: .time,
+            targetDurationSeconds: 900,
+            preferredDistanceUnit: .meters,
+            template: template
+        )
+        let secondTemplateActivity = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 1,
+            catalogExerciseUUID: "custom-run",
+            exerciseNameSnapshot: "Run",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .walkRun,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 10_000,
+            preferredDistanceUnit: .miles,
+            template: template
+        )
+        template.cardioBlocks = [firstTemplateActivity, secondTemplateActivity]
+
+        let session = WorkoutSession(
+            templateID: template.id,
+            name: template.name,
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let firstResult = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            sourceTemplateCardioID: firstTemplateActivity.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 0,
+            catalogExerciseUUID: customExercise.remoteUUID,
+            exerciseNameSnapshot: customExercise.displayName,
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Full Body",
+            trackingProfile: .rower,
+            goalKind: .time,
+            targetDurationSeconds: 900,
+            actualDurationSeconds: 875,
+            actualDistanceMeters: 5_000,
+            preferredDistanceUnit: .meters,
+            resistanceLevel: 7,
+            cardioNotes: "Steady",
+            isCompleted: true,
+            session: session
+        )
+        let secondResult = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            sourceTemplateCardioID: secondTemplateActivity.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 1,
+            catalogExerciseUUID: "custom-run",
+            exerciseNameSnapshot: "Run",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .walkRun,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 10_000,
+            actualDurationSeconds: 3_600,
+            actualDistanceMeters: 10_000,
+            preferredDistanceUnit: .miles,
+            inclinePercent: 2.5,
+            cardioNotes: "Negative split",
+            isCompleted: true,
+            session: session
+        )
+        session.cardioBlocks = [firstResult, secondResult]
+
+        for model in [
+            customExercise,
+            template,
+            firstTemplateActivity,
+            secondTemplateActivity,
+            session,
+            firstResult,
+            secondResult,
+        ] as [any PersistentModel] {
+            sourceContext.insert(model)
+        }
+        try sourceContext.save()
+
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: sourceContainer,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let restoredContainer = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restoredContainer,
+            backupStore: backupStore
+        ).restoreLatestBackup()
+        let restoredContext = ModelContext(restoredContainer)
+        let restoredTemplateActivities = try restoredContext.fetch(FetchDescriptor<TemplateCardioBlock>())
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let restoredResults = try restoredContext.fetch(FetchDescriptor<WorkoutSessionCardioBlock>())
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let restoredCustom = try restoredContext.fetch(FetchDescriptor<ExerciseCatalogItem>()).first
+
+        XCTAssertEqual(restoredTemplateActivities.map(\.role), [.main, .main])
+        XCTAssertEqual(restoredTemplateActivities.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(restoredTemplateActivities.map(\.trackingProfile), [.rower, .walkRun])
+        XCTAssertEqual(restoredTemplateActivities.map(\.goalKind), [.time, .distance])
+        XCTAssertEqual(restoredTemplateActivities.map(\.targetDistanceMeters), [nil, 10_000])
+        XCTAssertEqual(restoredResults.map(\.sourceTemplateCardioID), [firstTemplateActivity.id, secondTemplateActivity.id])
+        XCTAssertEqual(restoredResults.map(\.role), [.main, .main])
+        XCTAssertEqual(restoredResults.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(restoredResults.map(\.trackingProfile), [.rower, .walkRun])
+        XCTAssertEqual(restoredResults.map(\.goalKind), [.time, .distance])
+        XCTAssertEqual(restoredResults.map(\.targetDurationSeconds), [900, 0])
+        XCTAssertEqual(restoredResults.map(\.targetDistanceMeters), [nil, 10_000])
+        XCTAssertEqual(restoredResults.map(\.actualDurationSeconds), [875, 3_600])
+        XCTAssertEqual(restoredResults.map(\.actualDistanceMeters), [5_000, 10_000])
+        XCTAssertEqual(restoredResults.map(\.preferredDistanceUnit), [.meters, .miles])
+        XCTAssertEqual(restoredResults.map(\.inclinePercent), [nil, 2.5])
+        XCTAssertEqual(restoredResults.map(\.resistanceLevel), [7, nil])
+        XCTAssertEqual(restoredResults.map(\.cardioNotes), ["Steady", "Negative split"])
+        XCTAssertEqual(restoredResults.map(\.isCompleted), [true, true])
+        XCTAssertEqual(restoredCustom?.cardioTrackingProfileRaw, WorkoutCardioTrackingProfile.rower.rawValue)
+    }
+
+    func testBackupWithoutNewCardioProfileFieldsUsesLegacyFallbacks() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(UserProfile(displayName: "Legacy", preferredDistanceUnit: .miles))
+        let custom = ExerciseCatalogItem(
+            remoteUUID: "legacy-cardio",
+            displayName: "Legacy Cardio",
+            categoryName: "Cardio",
+            equipmentSummary: "Machine",
+            cardioTrackingProfileRaw: WorkoutCardioTrackingProfile.rower.rawValue,
+            isCurated: false,
+            sourceName: "custom"
+        )
+        let template = WorkoutTemplate(
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Legacy"
+        )
+        let activity = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .postWorkout,
+            catalogExerciseUUID: custom.remoteUUID,
+            exerciseNameSnapshot: custom.displayName,
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "",
+            targetDurationSeconds: 600,
+            template: template
+        )
+        template.cardioBlocks = [activity]
+        for model in [custom, template, activity] as [any PersistentModel] {
+            sourceContext.insert(model)
+        }
+        try sourceContext.save()
+        let store = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let fetchedRecord = try await store.fetchBackup()
+        let record = try XCTUnwrap(fetchedRecord)
+        var json = try XCTUnwrap(try JSONSerialization.jsonObject(with: record.payloadData) as? [String: Any])
+        var profiles = try XCTUnwrap(json["profiles"] as? [[String: Any]])
+        profiles[0].removeValue(forKey: "preferredDistanceUnitRaw")
+        json["profiles"] = profiles
+        var customExercises = try XCTUnwrap(json["customExercises"] as? [[String: Any]])
+        customExercises[0].removeValue(forKey: "cardioTrackingProfileRaw")
+        json["customExercises"] = customExercises
+        var templateActivities = try XCTUnwrap(json["templateCardioBlocks"] as? [[String: Any]])
+        for key in ["roleRaw", "sortOrder", "trackingProfileRaw", "goalKindRaw", "targetDistanceMeters", "preferredDistanceUnitRaw"] {
+            templateActivities[0].removeValue(forKey: key)
+        }
+        json["templateCardioBlocks"] = templateActivities
+        await store.replaceRecord(UserDataCloudBackupRemoteRecord(
+            updatedAt: record.updatedAt,
+            payloadData: try JSONSerialization.data(withJSONObject: json)
+        ))
+
+        let restored = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(localContainer: restored, backupStore: store).restoreLatestBackup()
+        let restoredContext = ModelContext(restored)
+        let restoredProfile = try XCTUnwrap(restoredContext.fetch(FetchDescriptor<UserProfile>()).first)
+        let restoredCustom = try XCTUnwrap(restoredContext.fetch(FetchDescriptor<ExerciseCatalogItem>()).first)
+        let restoredActivity = try XCTUnwrap(restoredContext.fetch(FetchDescriptor<TemplateCardioBlock>()).first)
+
+        XCTAssertNil(restoredProfile.preferredDistanceUnitRaw)
+        XCTAssertEqual(restoredProfile.preferredDistanceUnit, .regionalDefault(locale: .current))
+        XCTAssertNil(restoredCustom.cardioTrackingProfileRaw)
+        XCTAssertEqual(restoredActivity.role, .finisher)
+        XCTAssertEqual(restoredActivity.sortOrder, 0)
+        XCTAssertEqual(restoredActivity.goalKind, .time)
+        XCTAssertNil(restoredActivity.targetDistanceMeters)
     }
 
     func testRestoreLatestBackupCanReplaceBrokenLocalTemplates() async throws {

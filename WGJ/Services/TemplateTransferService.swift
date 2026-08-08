@@ -96,7 +96,8 @@ nonisolated enum TemplateTransferArtifact: Codable, Equatable, Sendable {
 }
 
 nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
-    static let currentFormatVersion = 6
+    static let artifactFormatVersion = 6
+    static let currentFormatVersion = 7
 
     let formatVersion: Int
     let exportedAt: Date
@@ -136,7 +137,7 @@ nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
         formatVersion = try container.decode(Int.self, forKey: .formatVersion)
         exportedAt = try container.decode(Date.self, forKey: .exportedAt)
 
-        if formatVersion >= TemplateTransferEnvelope.currentFormatVersion,
+        if formatVersion >= TemplateTransferEnvelope.artifactFormatVersion,
            container.contains(.artifact)
         {
             artifact = try container.decode(TemplateTransferArtifact.self, forKey: .artifact)
@@ -151,7 +152,7 @@ nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
         try container.encode(formatVersion, forKey: .formatVersion)
         try container.encode(exportedAt, forKey: .exportedAt)
 
-        if formatVersion >= TemplateTransferEnvelope.currentFormatVersion {
+        if formatVersion >= TemplateTransferEnvelope.artifactFormatVersion {
             try container.encode(artifact, forKey: .artifact)
             return
         }
@@ -180,6 +181,7 @@ nonisolated struct TemplateTransferTemplate: Codable, Equatable, Sendable {
     let notes: String
     let preWorkoutCardio: TemplateTransferCardioBlock?
     let postWorkoutCardio: TemplateTransferCardioBlock?
+    let cardioActivities: [TemplateTransferCardioBlock]?
     let exercises: [TemplateTransferExercise]
 
     init(
@@ -187,22 +189,56 @@ nonisolated struct TemplateTransferTemplate: Codable, Equatable, Sendable {
         notes: String,
         preWorkoutCardio: TemplateTransferCardioBlock? = nil,
         postWorkoutCardio: TemplateTransferCardioBlock? = nil,
+        cardioActivities: [TemplateTransferCardioBlock]? = nil,
         exercises: [TemplateTransferExercise]
     ) {
         self.name = name
         self.notes = notes
         self.preWorkoutCardio = preWorkoutCardio
         self.postWorkoutCardio = postWorkoutCardio
+        self.cardioActivities = cardioActivities
         self.exercises = exercises
     }
 }
 
 nonisolated struct TemplateTransferCardioBlock: Codable, Equatable, Sendable {
+    let role: WorkoutCardioRole?
+    let sortOrder: Int?
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let trackingProfile: WorkoutCardioTrackingProfile?
+    let goalKind: WorkoutCardioGoalKind?
     let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit?
+
+    init(
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int? = nil,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
+        targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil
+    ) {
+        self.role = role
+        self.sortOrder = sortOrder
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.trackingProfile = trackingProfile
+        self.goalKind = goalKind
+        self.targetDurationSeconds = targetDurationSeconds
+        self.targetDistanceMeters = targetDistanceMeters
+        self.preferredDistanceUnit = preferredDistanceUnit
+    }
 }
 
 nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
@@ -545,7 +581,7 @@ nonisolated final class TemplateTransferService {
                     try exerciseDraft(from: $0, catalogRepository: catalogRepository)
                 }
             )
-            try repository.setCardioBlocks(
+            try repository.setCardioActivities(
                 templateID: template.id,
                 drafts: try cardioDrafts(from: transferTemplate, catalogRepository: catalogRepository)
             )
@@ -580,7 +616,7 @@ nonisolated final class TemplateTransferService {
                         try exerciseDraft(from: $0, catalogRepository: catalogRepository)
                     }
                 )
-                try repository.setCardioBlocks(
+                try repository.setCardioActivities(
                     templateID: template.id,
                     drafts: try cardioDrafts(from: transferTemplate, catalogRepository: catalogRepository)
                 )
@@ -620,11 +656,7 @@ nonisolated final class TemplateTransferService {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        let cardioBlocks = try repository.cardioBlocks(templateID: templateID)
-        let cardioByPhase = Dictionary(
-            cardioBlocks.map { ($0.phase, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let cardioActivities = try repository.cardioActivities(templateID: templateID)
 
         let exercises = try repository.exercises(in: templateID).map { exercise in
             let components = try repository.components(for: exercise.id).map { component in
@@ -654,10 +686,7 @@ nonisolated final class TemplateTransferService {
         return TemplateTransferTemplate(
             name: template.name,
             notes: template.notes,
-            preWorkoutCardio: cardioByPhase[.preWorkout].map {
-                transferCardio(from: TemplateCardioBlockDraft(model: $0))
-            },
-            postWorkoutCardio: cardioByPhase[.postWorkout].map {
+            cardioActivities: cardioActivities.map {
                 transferCardio(from: TemplateCardioBlockDraft(model: $0))
             },
             exercises: exercises
@@ -703,11 +732,17 @@ nonisolated final class TemplateTransferService {
 
     private func transferCardio(from draft: TemplateCardioBlockDraft) -> TemplateTransferCardioBlock {
         TemplateTransferCardioBlock(
+            role: draft.role,
+            sortOrder: draft.sortOrder,
             catalogExerciseUUID: draft.catalogExerciseUUID,
             exerciseNameSnapshot: draft.exerciseNameSnapshot,
             categorySnapshot: draft.categorySnapshot,
             muscleSummarySnapshot: draft.muscleSummarySnapshot,
-            targetDurationSeconds: draft.targetDurationSeconds
+            trackingProfile: draft.trackingProfile,
+            goalKind: draft.goalKind,
+            targetDurationSeconds: draft.targetDurationSeconds,
+            targetDistanceMeters: draft.targetDistanceMeters,
+            preferredDistanceUnit: draft.preferredDistanceUnit
         )
     }
 
@@ -787,49 +822,44 @@ nonisolated final class TemplateTransferService {
         from template: TemplateTransferTemplate,
         catalogRepository: ExerciseCatalogRepository
     ) throws -> [TemplateCardioBlockDraft] {
-        var drafts: [TemplateCardioBlockDraft] = []
-
-        if let preWorkoutCardio = template.preWorkoutCardio {
-            let resolvedPreWorkoutCardio = try resolveImportedExercise(
-                catalogExerciseUUID: preWorkoutCardio.catalogExerciseUUID,
-                exerciseNameSnapshot: preWorkoutCardio.exerciseNameSnapshot,
-                categorySnapshot: preWorkoutCardio.categorySnapshot,
-                muscleSummarySnapshot: preWorkoutCardio.muscleSummarySnapshot,
-                catalogRepository: catalogRepository
-            )
-            drafts.append(
-                TemplateCardioBlockDraft(
-                    phase: .preWorkout,
-                    catalogExerciseUUID: resolvedPreWorkoutCardio.catalogExerciseUUID,
-                    exerciseNameSnapshot: resolvedPreWorkoutCardio.exerciseNameSnapshot,
-                    categorySnapshot: resolvedPreWorkoutCardio.categorySnapshot,
-                    muscleSummarySnapshot: resolvedPreWorkoutCardio.muscleSummarySnapshot,
-                    targetDurationSeconds: preWorkoutCardio.targetDurationSeconds
-                )
-            )
+        let activities: [(block: TemplateTransferCardioBlock, legacyRole: WorkoutCardioRole?)]
+        if let cardioActivities = template.cardioActivities {
+            activities = cardioActivities.map { ($0, nil) }
+        } else {
+            activities = [
+                template.preWorkoutCardio.map { ($0, WorkoutCardioRole.warmUp) },
+                template.postWorkoutCardio.map { ($0, WorkoutCardioRole.finisher) },
+            ].compactMap { $0 }
         }
 
-        if let postWorkoutCardio = template.postWorkoutCardio {
-            let resolvedPostWorkoutCardio = try resolveImportedExercise(
-                catalogExerciseUUID: postWorkoutCardio.catalogExerciseUUID,
-                exerciseNameSnapshot: postWorkoutCardio.exerciseNameSnapshot,
-                categorySnapshot: postWorkoutCardio.categorySnapshot,
-                muscleSummarySnapshot: postWorkoutCardio.muscleSummarySnapshot,
+        var nextOrderByRole: [String: Int] = [:]
+        return try activities.map { activity in
+            let block = activity.block
+            let role = block.role ?? activity.legacyRole ?? .main
+            let fallbackOrder = nextOrderByRole[role.rawValue, default: 0]
+            nextOrderByRole[role.rawValue] = fallbackOrder + 1
+            let resolved = try resolveImportedExercise(
+                catalogExerciseUUID: block.catalogExerciseUUID,
+                exerciseNameSnapshot: block.exerciseNameSnapshot,
+                categorySnapshot: block.categorySnapshot,
+                muscleSummarySnapshot: block.muscleSummarySnapshot,
                 catalogRepository: catalogRepository
             )
-            drafts.append(
-                TemplateCardioBlockDraft(
-                    phase: .postWorkout,
-                    catalogExerciseUUID: resolvedPostWorkoutCardio.catalogExerciseUUID,
-                    exerciseNameSnapshot: resolvedPostWorkoutCardio.exerciseNameSnapshot,
-                    categorySnapshot: resolvedPostWorkoutCardio.categorySnapshot,
-                    muscleSummarySnapshot: resolvedPostWorkoutCardio.muscleSummarySnapshot,
-                    targetDurationSeconds: postWorkoutCardio.targetDurationSeconds
-                )
+            return TemplateCardioBlockDraft(
+                phase: TemplateCardioDraftReducer.legacyPhase(for: role),
+                role: role,
+                sortOrder: block.sortOrder ?? fallbackOrder,
+                catalogExerciseUUID: resolved.catalogExerciseUUID,
+                exerciseNameSnapshot: resolved.exerciseNameSnapshot,
+                categorySnapshot: resolved.categorySnapshot,
+                muscleSummarySnapshot: resolved.muscleSummarySnapshot,
+                trackingProfile: block.trackingProfile,
+                goalKind: block.goalKind,
+                targetDurationSeconds: block.targetDurationSeconds,
+                targetDistanceMeters: block.targetDistanceMeters,
+                preferredDistanceUnit: block.preferredDistanceUnit
             )
         }
-
-        return drafts
     }
 
     private func resolveImportedExercise(
@@ -980,14 +1010,21 @@ nonisolated final class TemplateTransferService {
         var lines: [String] = [heading]
         lines.append("Notes: \(template.notes.isEmpty ? "-" : template.notes)")
 
-        if let preWorkoutCardio = template.preWorkoutCardio {
+        let cardioActivities = template.cardioActivities ?? [
+            template.preWorkoutCardio.map { legacyCardio($0, role: .warmUp) },
+            template.postWorkoutCardio.map { legacyCardio($0, role: .finisher) },
+        ].compactMap { $0 }
+        for role in WorkoutCardioRole.allCases {
+            let roleActivities = cardioActivities
+                .filter { ($0.role ?? .main) == role }
+                .sorted { ($0.sortOrder ?? 0) < ($1.sortOrder ?? 0) }
+            guard !roleActivities.isEmpty else { continue }
             lines.append("")
-            lines.append(contentsOf: render(cardio: preWorkoutCardio, title: "Pre-workout cardio"))
-        }
-
-        if let postWorkoutCardio = template.postWorkoutCardio {
-            lines.append("")
-            lines.append(contentsOf: render(cardio: postWorkoutCardio, title: "Post-workout cardio"))
+            lines.append(roleExportTitle(role))
+            for (index, cardio) in roleActivities.enumerated() {
+                if index > 0 { lines.append("") }
+                lines.append(contentsOf: render(cardio: cardio))
+            }
         }
 
         if template.exercises.isEmpty {
@@ -1004,14 +1041,58 @@ nonisolated final class TemplateTransferService {
         return lines.joined(separator: "\n")
     }
 
-    private func render(cardio: TemplateTransferCardioBlock, title: String) -> [String] {
+    private func render(cardio: TemplateTransferCardioBlock) -> [String] {
         [
-            title,
             "Exercise: \(cardio.exerciseNameSnapshot)",
-            "Duration: \(cardio.targetDurationSeconds)s",
-            "Category: \(cardio.categorySnapshot)",
-            "Muscles: \(cardio.muscleSummarySnapshot)",
+            "Goal: \(cardioGoalDescription(cardio))",
         ]
+    }
+
+    private func cardioGoalDescription(_ cardio: TemplateTransferCardioBlock) -> String {
+        switch cardio.goalKind ?? (cardio.targetDurationSeconds > 0 ? .time : .open) {
+        case .time:
+            return formattedDuration(cardio.targetDurationSeconds)
+        case .distance:
+            guard let meters = cardio.targetDistanceMeters, meters.isFinite, meters > 0 else {
+                return "Open"
+            }
+            let unit = cardio.preferredDistanceUnit ?? .meters
+            return "\(formattedNumber(unit.value(fromMeters: meters))) \(unit.symbol)"
+        case .open:
+            return "Open"
+        }
+    }
+
+    private func legacyCardio(
+        _ cardio: TemplateTransferCardioBlock,
+        role: WorkoutCardioRole
+    ) -> TemplateTransferCardioBlock {
+        TemplateTransferCardioBlock(
+            role: role,
+            sortOrder: 0,
+            catalogExerciseUUID: cardio.catalogExerciseUUID,
+            exerciseNameSnapshot: cardio.exerciseNameSnapshot,
+            categorySnapshot: cardio.categorySnapshot,
+            muscleSummarySnapshot: cardio.muscleSummarySnapshot,
+            trackingProfile: cardio.trackingProfile,
+            goalKind: cardio.goalKind,
+            targetDurationSeconds: cardio.targetDurationSeconds,
+            targetDistanceMeters: cardio.targetDistanceMeters,
+            preferredDistanceUnit: cardio.preferredDistanceUnit
+        )
+    }
+
+    private func roleExportTitle(_ role: WorkoutCardioRole) -> String {
+        switch role {
+        case .warmUp: "Warm-up"
+        case .main: "Main cardio"
+        case .finisher: "Finisher"
+        }
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        return String(format: "%d:%02d", safeSeconds / 60, safeSeconds % 60)
     }
 
     private func render(exercise: TemplateTransferExercise, index: Int) -> [String] {

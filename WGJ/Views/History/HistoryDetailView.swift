@@ -28,6 +28,7 @@ struct HistoryDetailView: View {
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
     @State private var showingExercisePicker = false
+    @State private var pendingCardioResultEdit: HistoryDetailSnapshotBuilder.CardioBlockSnapshot?
     @State private var showingArchiveConfirmation = false
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -130,6 +131,17 @@ struct HistoryDetailView: View {
                 return .accepted
             }
             .wgjSheetSurface()
+        }
+        .sheet(item: $pendingCardioResultEdit) { cardioBlock in
+            WorkoutCardioResultEditor(
+                activityName: cardioBlock.exerciseNameSnapshot,
+                draft: cardioBlock.resultDraft
+            ) { result in
+                try await saveCardioResult(
+                    activityID: cardioBlock.id,
+                    result: result
+                )
+            }
         }
         .confirmationDialog("Hide workout?", isPresented: $showingArchiveConfirmation, titleVisibility: .visible) {
             Button("Hide Workout") {
@@ -304,26 +316,64 @@ struct HistoryDetailView: View {
         if !orderedCardioBlocks.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Phases",
-                    subtitle: "Warmup and cooldown work from this session."
+                    String(localized: "Cardio Activities"),
+                    subtitle: String(localized: "Saved results grouped by workout role.")
                 )
 
-                ForEach(orderedCardioBlocks, id: \.id) { cardioBlock in
-                    WorkoutCardioPhaseCard(
-                        phase: cardioBlock.phase,
-                        exerciseName: cardioBlock.exerciseNameSnapshot,
-                        descriptor: cardioDescriptor(
-                            category: cardioBlock.categorySnapshot,
-                            muscleSummary: cardioBlock.muscleSummarySnapshot
-                        ),
-                        targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                        statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
-                        statusTint: cardioBlock.isCompleted ? WGJTheme.success : WGJTheme.warning,
-                        footnote: cardioBlock.isCompleted ? nil : "This cardio block was not completed before the workout ended."
-                    )
+                ForEach(WorkoutCardioRole.allCases) { role in
+                    let roleActivities = orderedCardioBlocks.filter { $0.role == role }
+                    if !roleActivities.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(role.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+
+                            ForEach(roleActivities) { cardioBlock in
+                                WorkoutCardioResultSummaryCard(
+                                    role: cardioBlock.role,
+                                    exerciseName: cardioBlock.exerciseNameSnapshot,
+                                    descriptor: cardioDescriptor(
+                                        category: cardioBlock.categorySnapshot,
+                                        muscleSummary: cardioBlock.muscleSummarySnapshot
+                                    ),
+                                    summary: cardioBlock.resultSummary,
+                                    statusText: cardioBlock.isCompleted
+                                        ? String(localized: "Complete")
+                                        : String(localized: "Not finished"),
+                                    isCompleted: cardioBlock.isCompleted,
+                                    footnote: cardioBlock.isCompleted
+                                        ? nil
+                                        : String(
+                                            localized: "This activity was not completed before the workout ended."
+                                        )
+                                ) {
+                                    Button("Edit Result") {
+                                        pendingCardioResultEdit = cardioBlock
+                                    }
+                                    .buttonStyle(WGJGhostButtonStyle())
+                                    .accessibilityLabel("Edit Result \(cardioBlock.exerciseNameSnapshot)")
+                                    .accessibilityIdentifier("history-cardio-\(cardioBlock.id)-edit-result-button")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    @MainActor
+    private func saveCardioResult(
+        activityID: UUID,
+        result: ValidatedWorkoutCardioResult
+    ) async throws {
+        let service = WorkoutHistoryMutationService(backgroundStore: historyBackgroundStore)
+        try await service.updateCardioResult(
+            sessionID: sessionID,
+            activityID: activityID,
+            result: result
+        )
+        await reloadSnapshot(preservingExerciseEdits: true)
     }
 
     @MainActor
@@ -334,7 +384,7 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func reloadSnapshot() async {
+    private func reloadSnapshot(preservingExerciseEdits: Bool = false) async {
         do {
             let loadedSnapshot: HistoryDetailSnapshotBuilder.Snapshot
             let backgroundStore = historyBackgroundStore
@@ -342,7 +392,10 @@ struct HistoryDetailView: View {
                 try Self.loadSnapshot(modelContext: backgroundContext, sessionID: sessionID)
             }
 
-            applySnapshot(loadedSnapshot)
+            applySnapshot(
+                loadedSnapshot,
+                preservingExerciseEdits: preservingExerciseEdits
+            )
         } catch WorkoutSessionRepositoryError.sessionNotFound {
             snapshot = nil
             renderProjection = .empty
@@ -355,15 +408,27 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func applySnapshot(_ loadedSnapshot: HistoryDetailSnapshotBuilder.Snapshot) {
+    private func applySnapshot(
+        _ loadedSnapshot: HistoryDetailSnapshotBuilder.Snapshot,
+        preservingExerciseEdits: Bool
+    ) {
+        let validIDs = Set(loadedSnapshot.exercises.map(\.id))
+        let preservedExerciseEdits = preservingExerciseEdits
+            ? HistoryDetailCardioRefreshPolicy.preserveExerciseEdits(
+                baseline: loadedLocalState,
+                drafts: draftStateStore.snapshot(),
+                keeping: validIDs
+            )
+            : nil
+
         snapshot = loadedSnapshot
         didLoadSnapshot = true
         sessionNameDraft = loadedSnapshot.session.name
         notesDraft = loadedSnapshot.session.notes
         preferredLoadUnit = loadedSnapshot.preferredLoadUnit
-        loadedLocalState = loadedSnapshot.localState
+        loadedLocalState = preservedExerciseEdits?.baseline ?? loadedSnapshot.localState
         draftStateStore.replace(
-            with: WorkoutExerciseDraftStateSnapshot(
+            with: preservedExerciseEdits?.drafts ?? WorkoutExerciseDraftStateSnapshot(
                 draftsByExerciseID: loadedSnapshot.localState.setDraftsByExerciseID,
                 restsByExerciseID: loadedSnapshot.localState.restByExerciseID,
                 notesByExerciseID: loadedSnapshot.localState.notesByExerciseID
@@ -374,7 +439,6 @@ struct HistoryDetailView: View {
         loadingHydrationExerciseIDs.removeAll()
         hydrationLoadGeneration = UUID()
 
-        let validIDs = Set(loadedSnapshot.exercises.map(\.id))
         let draftState = draftStateStore.snapshot()
         for exerciseID in Set(draftState.draftsByExerciseID.keys)
             .union(draftState.restsByExerciseID.keys)
@@ -763,6 +827,10 @@ struct HistoryDetailView: View {
     @MainActor
     private func makeSaveCommand() -> HistorySaveCommand {
         let draftState = draftStateStore.snapshot()
+        let preservedState = HistoryDetailPreservedExerciseEditState(
+            baseline: loadedLocalState,
+            drafts: draftState
+        )
         let snapshots = Dictionary<UUID, HistoryExerciseSaveSnapshot>(
             sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
                 guard let drafts = draftState.draftsByExerciseID[exercise.id] else {
@@ -774,12 +842,10 @@ struct HistoryDetailView: View {
                     restSeconds: draftState.restsByExerciseID[exercise.id] ?? exercise.restSeconds,
                     notes: draftState.notesByExerciseID[exercise.id] ?? exercise.notes
                 )
-                let baseline = HistoryExerciseSaveSnapshot(
-                    setDrafts: loadedLocalState.setDraftsByExerciseID[exercise.id] ?? [],
-                    restSeconds: loadedLocalState.restByExerciseID[exercise.id] ?? exercise.restSeconds,
-                    notes: loadedLocalState.notesByExerciseID[exercise.id] ?? exercise.notes
-                )
-                guard snapshot != baseline else { return nil }
+                guard HistoryDetailCardioRefreshPolicy.isDirty(
+                    exerciseID: exercise.id,
+                    state: preservedState
+                ) else { return nil }
 
                 return (exercise.id, snapshot)
             },
@@ -858,6 +924,9 @@ struct HistoryDetailView: View {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 }

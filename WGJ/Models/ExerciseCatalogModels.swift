@@ -9,6 +9,7 @@ final class ExerciseCatalogItem {
     var categoryName: String
     var equipmentSummary: String
     var instructionText: String?
+    var cardioTrackingProfileRaw: String?
     var isCurated: Bool
     var isHidden: Bool
     var sourceName: String
@@ -28,6 +29,7 @@ final class ExerciseCatalogItem {
         categoryName: String = "Unknown",
         equipmentSummary: String = "",
         instructionText: String? = nil,
+        cardioTrackingProfileRaw: String? = nil,
         isCurated: Bool = false,
         isHidden: Bool = false,
         sourceName: String = "seed",
@@ -40,6 +42,7 @@ final class ExerciseCatalogItem {
         self.categoryName = categoryName
         self.equipmentSummary = equipmentSummary
         self.instructionText = instructionText
+        self.cardioTrackingProfileRaw = cardioTrackingProfileRaw
         self.isCurated = isCurated
         self.isHidden = isHidden
         self.sourceName = sourceName
@@ -59,19 +62,26 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
     let categoryName: String
     let equipmentSummary: String
     let primaryMuscleNames: String
+    let cardioTrackingProfileRaw: String?
+
+    var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
+        cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:))
+    }
 
     init(
         remoteUUID: String,
         displayName: String,
         categoryName: String,
         equipmentSummary: String,
-        primaryMuscleNames: String
+        primaryMuscleNames: String,
+        cardioTrackingProfileRaw: String? = nil
     ) {
         self.remoteUUID = remoteUUID
         self.displayName = displayName
         self.categoryName = categoryName
         self.equipmentSummary = equipmentSummary
         self.primaryMuscleNames = primaryMuscleNames
+        self.cardioTrackingProfileRaw = cardioTrackingProfileRaw
     }
 
     init(catalogItem: ExerciseCatalogItem) {
@@ -80,7 +90,8 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
             displayName: catalogItem.displayName,
             categoryName: catalogItem.categoryName,
             equipmentSummary: catalogItem.equipmentSummary,
-            primaryMuscleNames: catalogItem.primaryMuscleNames
+            primaryMuscleNames: catalogItem.primaryMuscleNames,
+            cardioTrackingProfileRaw: catalogItem.cardioTrackingProfile?.rawValue
         )
     }
 }
@@ -214,6 +225,20 @@ nonisolated struct ExerciseFilters: Equatable {
     var categoryName: String?
     var includeUncurated: Bool
 
+    init(
+        primaryMuscleID: Int? = nil,
+        secondaryMuscleID: Int? = nil,
+        equipmentToken: String? = nil,
+        categoryName: String? = nil,
+        includeUncurated: Bool = false
+    ) {
+        self.primaryMuscleID = primaryMuscleID
+        self.secondaryMuscleID = secondaryMuscleID
+        self.equipmentToken = equipmentToken
+        self.categoryName = categoryName
+        self.includeUncurated = includeUncurated
+    }
+
     static let `default` = ExerciseFilters(
         primaryMuscleID: nil,
         secondaryMuscleID: nil,
@@ -231,6 +256,12 @@ nonisolated struct CustomExerciseDraft: Equatable {
     var primaryMuscleIDs: [Int]
     var secondaryMuscleIDs: [Int]
     var instructionText: String
+    var cardioTrackingProfileRaw: String?
+
+    var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
+        get { cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { cardioTrackingProfileRaw = newValue?.rawValue }
+    }
 
     static let empty = CustomExerciseDraft(
         name: "",
@@ -239,7 +270,19 @@ nonisolated struct CustomExerciseDraft: Equatable {
         aliases: [],
         primaryMuscleIDs: [],
         secondaryMuscleIDs: [],
-        instructionText: ""
+        instructionText: "",
+        cardioTrackingProfile: nil
+    )
+
+    static let emptyCardio = CustomExerciseDraft(
+        name: "",
+        categoryName: "Cardio",
+        equipmentSummary: "",
+        aliases: [],
+        primaryMuscleIDs: [],
+        secondaryMuscleIDs: [],
+        instructionText: "",
+        cardioTrackingProfile: .machineDistance
     )
 
     init(
@@ -249,7 +292,8 @@ nonisolated struct CustomExerciseDraft: Equatable {
         aliases: [String],
         primaryMuscleIDs: [Int],
         secondaryMuscleIDs: [Int],
-        instructionText: String
+        instructionText: String,
+        cardioTrackingProfile: WorkoutCardioTrackingProfile? = nil
     ) {
         self.name = name
         self.categoryName = categoryName
@@ -258,6 +302,7 @@ nonisolated struct CustomExerciseDraft: Equatable {
         self.primaryMuscleIDs = primaryMuscleIDs
         self.secondaryMuscleIDs = secondaryMuscleIDs
         self.instructionText = instructionText
+        self.cardioTrackingProfileRaw = cardioTrackingProfile?.rawValue
     }
 
     init(exercise: ExerciseCatalogItem) {
@@ -270,7 +315,8 @@ nonisolated struct CustomExerciseDraft: Equatable {
             },
             primaryMuscleIDs: exercise.primaryMuscles.map(\.remoteID).sorted(),
             secondaryMuscleIDs: exercise.secondaryMuscles.map(\.remoteID).sorted(),
-            instructionText: exercise.instructionTextValue
+            instructionText: exercise.instructionTextValue,
+            cardioTrackingProfile: exercise.cardioTrackingProfile
         )
     }
 }
@@ -282,6 +328,32 @@ nonisolated struct ExerciseMuscleGroupSection: Identifiable {
 }
 
 extension ExerciseCatalogItem {
+    var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
+        if let explicit = cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) {
+            return explicit
+        }
+
+        let normalizedCategory = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedCategory.localizedCaseInsensitiveCompare("Cardio") == .orderedSame else {
+            return nil
+        }
+
+        let identity = "\(remoteUUID) \(equipmentSummary)".lowercased()
+        if identity.contains("treadmill") {
+            return .treadmill
+        }
+        if identity.contains("rower") || identity.contains("row-machine") || identity.contains("rowing") {
+            return .rower
+        }
+        if identity.contains("stair") {
+            return .stairClimber
+        }
+        if identity.contains("outdoor") || identity.contains("walk") || identity.contains("run") {
+            return .walkRun
+        }
+        return .machineDistance
+    }
+
     var searchableTerms: [String] {
         let aliasTerms = aliases.map(\.value)
         return ([displayName] + aliasTerms)

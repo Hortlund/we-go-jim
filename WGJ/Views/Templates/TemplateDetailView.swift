@@ -151,10 +151,10 @@ struct TemplateDetailView: View {
                         tint: WGJTheme.accentCyan
                     )
 
-                    if !orderedCardioBlocks.isEmpty {
+                    if !orderedCardioActivities.isEmpty {
                         WGJMetricPill(
                             systemImage: "figure.run",
-                            value: "\(orderedCardioBlocks.count) cardio",
+                            value: cardioActivityMetricText(orderedCardioActivities.count),
                             tint: WGJTheme.accentGold
                         )
                     }
@@ -179,11 +179,11 @@ struct TemplateDetailView: View {
 
     @ViewBuilder
     private var cardioSections: some View {
-        if !orderedCardioBlocks.isEmpty {
+        if !orderedCardioActivities.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Phases",
-                    subtitle: "Warmup and cooldown saved with this template."
+                    String(localized: "Cardio Plan"),
+                    subtitle: String(localized: "Ordered activities saved with this template.")
                 ) {
                     Button {
                         showingEditor = true
@@ -193,19 +193,38 @@ struct TemplateDetailView: View {
                     .buttonStyle(WGJGhostButtonStyle())
                 }
 
-                ForEach(WorkoutCardioPhase.allCases, id: \.id) { phase in
-                    if let cardioBlock = cardioBlock(for: phase) {
-                        WorkoutCardioPhaseCard(
-                            phase: phase,
-                            exerciseName: cardioBlock.exerciseNameSnapshot,
-                            descriptor: cardioDescriptor(
-                                category: cardioBlock.categorySnapshot,
-                                muscleSummary: cardioBlock.muscleSummarySnapshot
-                            ),
-                            targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                            footnote: cardioFootnote(for: phase)
-                        )
-                    }
+                ForEach(WorkoutCardioRole.allCases) { role in
+                    cardioRoleSection(role)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cardioRoleSection(_ role: WorkoutCardioRole) -> some View {
+        let activities = cardioActivities(for: role)
+
+        if !activities.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                WGJSectionHeader(
+                    role.title,
+                    subtitle: cardioActivityCountText(activities.count)
+                )
+
+                ForEach(activities) { activity in
+                    WorkoutCardioActivityPlanCard(
+                        activityName: activity.exerciseNameSnapshot,
+                        role: activity.role,
+                        descriptor: cardioDescriptor(
+                            category: activity.categorySnapshot,
+                            muscleSummary: activity.muscleSummarySnapshot
+                        ),
+                        goalKind: activity.goalKind,
+                        targetDurationSeconds: activity.targetDurationSeconds,
+                        targetDistanceMeters: activity.targetDistanceMeters,
+                        preferredDistanceUnit: activity.preferredDistanceUnit
+                    )
+                    .id(activity.id)
                 }
             }
         }
@@ -655,12 +674,21 @@ struct TemplateDetailView: View {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
     }
 
-    private var orderedCardioBlocks: [TemplateDetailCardioBlockSnapshot] {
+    private var orderedCardioActivities: [TemplateDetailCardioBlockSnapshot] {
         controller.snapshot.cardioBlocks
     }
 
-    private func cardioBlock(for phase: WorkoutCardioPhase) -> TemplateDetailCardioBlockSnapshot? {
-        orderedCardioBlocks.first(where: { $0.phase == phase })
+    private func cardioActivities(
+        for role: WorkoutCardioRole
+    ) -> [TemplateDetailCardioBlockSnapshot] {
+        orderedCardioActivities
+            .filter { $0.role == role }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
@@ -670,16 +698,18 @@ struct TemplateDetailView: View {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 
-    private func cardioFootnote(for phase: WorkoutCardioPhase) -> String {
-        switch phase {
-        case .preWorkout:
-            return "Warmup cardio saved with this template."
-        case .postWorkout:
-            return "Cooldown cardio saved with this template."
-        }
+    private func cardioActivityMetricText(_ count: Int) -> String {
+        CardioLocalizedCopy.cardioActivityCount(count)
+    }
+
+    private func cardioActivityCountText(_ count: Int) -> String {
+        CardioLocalizedCopy.activityCount(count)
     }
 
     private var exerciseRows: [TemplateExerciseRowData] {
@@ -831,11 +861,15 @@ nonisolated struct TemplateDetailTemplateSnapshot: Identifiable, Sendable, Equat
 
 nonisolated struct TemplateDetailCardioBlockSnapshot: Identifiable, Sendable, Equatable {
     let id: UUID
-    let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
+    let sortOrder: Int
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let goalKind: WorkoutCardioGoalKind
     let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit
 }
 
 nonisolated struct TemplateDetailExerciseSnapshot: Identifiable, Sendable, Equatable {
@@ -910,7 +944,7 @@ nonisolated enum TemplateDetailSnapshotLoader {
             by: \.folderID
         ).mapValues(\.count)
         let exercises = try templateRepository.exercises(in: templateID)
-        let cardioBlocks = try templateRepository.cardioBlocks(templateID: templateID)
+        let cardioBlocks = try templateRepository.cardioActivities(templateID: templateID)
         let currentProfile = try? ProfileRepository(modelContext: modelContext).currentProfile()
         let contentUpdatedAt = [
             template.updatedAt,
@@ -940,11 +974,17 @@ nonisolated enum TemplateDetailSnapshotLoader {
             cardioBlocks: cardioBlocks.map { block in
                 TemplateDetailCardioBlockSnapshot(
                     id: block.id,
-                    phase: block.phase,
+                    role: block.role,
+                    sortOrder: block.sortOrder,
                     exerciseNameSnapshot: block.exerciseNameSnapshot,
                     categorySnapshot: block.categorySnapshot,
                     muscleSummarySnapshot: block.muscleSummarySnapshot,
-                    targetDurationSeconds: block.targetDurationSeconds
+                    goalKind: block.goalKind,
+                    targetDurationSeconds: block.targetDurationSeconds,
+                    targetDistanceMeters: block.targetDistanceMeters,
+                    preferredDistanceUnit: block.preferredDistanceUnit
+                        ?? currentProfile?.preferredDistanceUnit
+                        ?? .regionalDefault(locale: .current)
                 )
             },
             exercises: exercises.map(Self.exerciseSnapshot),

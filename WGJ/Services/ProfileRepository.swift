@@ -209,6 +209,10 @@ nonisolated final class ProfileRepository {
             profile.preferredWeightUnit = value
             changed = true
         }
+        if let value = patch.preferredDistanceUnit {
+            profile.preferredDistanceUnit = value
+            changed = true
+        }
         if let value = patch.workoutNotificationStyle {
             profile.workoutNotificationStyle = value
             changed = true

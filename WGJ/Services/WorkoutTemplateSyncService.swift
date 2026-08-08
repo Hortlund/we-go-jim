@@ -75,27 +75,30 @@ nonisolated struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable, Sendable {
 }
 
 nonisolated struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
-    let phase: WorkoutCardioPhase
+    let activityID: UUID
+    let role: WorkoutCardioRole
     let exerciseName: String
     let summary: String
 
-    var id: String { phase.rawValue }
+    var id: UUID { activityID }
 }
 
 nonisolated struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable {
-    let phase: WorkoutCardioPhase
+    let activityID: UUID
+    let role: WorkoutCardioRole
     let exerciseName: String
     let summary: String
 
-    var id: String { phase.rawValue }
+    var id: UUID { activityID }
 }
 
 nonisolated struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
-    let phase: WorkoutCardioPhase
+    let activityID: UUID
+    let role: WorkoutCardioRole
     let exerciseName: String
     let changes: [String]
 
-    var id: String { phase.rawValue }
+    var id: UUID { activityID }
 }
 
 nonisolated struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable, Sendable {
@@ -138,12 +141,20 @@ nonisolated struct WorkoutTemplateSyncMutation: Equatable, Sendable {
 }
 
 nonisolated struct WorkoutTemplateSyncCardioMutation: Equatable, Sendable {
+    let activityID: UUID
+    let sourceTemplateCardioID: UUID?
     let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
+    let sortOrder: Int
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let trackingProfile: WorkoutCardioTrackingProfile?
+    let goalKind: WorkoutCardioGoalKind
     let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit?
 }
 
 nonisolated struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {

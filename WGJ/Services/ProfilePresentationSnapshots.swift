@@ -11,6 +11,7 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
     let keepsScreenAwake: Bool
     let automaticallyClosesCompletedExercises: Bool
     let preferredWeightUnit: PreferredWeightUnit
+    let preferredDistanceUnit: WorkoutDistanceUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
     let updatedAt: Date
 
@@ -24,6 +25,7 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
         keepsScreenAwake = profile.keepsScreenAwake
         automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
+        preferredDistanceUnit = profile.preferredDistanceUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
         updatedAt = profile.updatedAt
     }

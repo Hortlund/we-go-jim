@@ -24,7 +24,40 @@
         }
       }
     },
+    "%@ kilometers" : {
+
+    },
+    "%@ kilometers per hour" : {
+
+    },
+    "%@ meters" : {
+
+    },
+    "%@ meters per hour" : {
+
+    },
+    "%@ miles" : {
+
+    },
+    "%@ miles per hour" : {
+
+    },
     "%@ muscle map" : {
+
+    },
+    "%@ per 500 meters" : {
+
+    },
+    "%@ per kilometer" : {
+
+    },
+    "%@ per meter" : {
+
+    },
+    "%@ per mile" : {
+
+    },
+    "%@ percent incline" : {
 
     },
     "%@ weekly muscle heatmap" : {
@@ -32,6 +65,16 @@
     },
     "%@ workout muscle heatmap" : {
 
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
     },
     "%@, set %lld, actions" : {
       "localizations" : {
@@ -59,7 +102,19 @@
         }
       }
     },
+    "%lld activities" : {
+
+    },
     "%lld cardio" : {
+
+    },
+    "%lld cardio activities" : {
+
+    },
+    "%lld cardio sections added to the workout" : {
+
+    },
+    "%lld cardio sections removed from the template" : {
 
     },
     "%lld dropset stage%@" : {
@@ -78,6 +133,16 @@
     "%lld exercises" : {
 
     },
+    "%lld hours, %lld minutes, %lld seconds" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld hours, %2$lld minutes, %3$lld seconds"
+          }
+        }
+      }
+    },
     "%lld logged workout%@" : {
       "localizations" : {
         "en" : {
@@ -90,6 +155,19 @@
     },
     "%lld min" : {
 
+    },
+    "%lld minutes" : {
+
+    },
+    "%lld minutes, %lld seconds" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld minutes, %2$lld seconds"
+          }
+        }
+      }
     },
     "%lld of %lld workouts" : {
       "localizations" : {
@@ -123,7 +201,22 @@
     "0" : {
 
     },
+    "1 activity" : {
+
+    },
+    "1 cardio activity" : {
+
+    },
+    "1 cardio section added to the workout" : {
+
+    },
+    "1 cardio section removed from the template" : {
+
+    },
     "1 session" : {
+
+    },
+    "500 m Pace" : {
 
     },
     "Actions" : {
@@ -132,16 +225,34 @@
     "Active Workout" : {
 
     },
+    "Activities to close out the workout." : {
+
+    },
+    "Activities to prepare for the main work." : {
+
+    },
     "Add" : {
 
     },
     "Add %@" : {
 
     },
+    "Add %@ cardio" : {
+
+    },
+    "Add a final activity after the main work." : {
+
+    },
+    "Add an easy walk, bike, row, or other warm-up." : {
+
+    },
     "Add another exercise metric card to your profile." : {
 
     },
     "Add Cardio" : {
+
+    },
+    "Add detail" : {
 
     },
     "Add Drop" : {
@@ -162,6 +273,12 @@
     "Add Set" : {
 
     },
+    "Add the primary activities for a cardio-focused workout." : {
+
+    },
+    "Added Cardio" : {
+
+    },
     "AI" : {
 
     },
@@ -172,6 +289,9 @@
 
     },
     "Analyzing your recent sessions…" : {
+
+    },
+    "Another cardio activity is running" : {
 
     },
     "Any Body Part" : {
@@ -198,6 +318,9 @@
     "Available Body Parts" : {
 
     },
+    "Avg Speed" : {
+
+    },
     "Back Up Now" : {
 
     },
@@ -210,7 +333,13 @@
     "Best Set" : {
 
     },
+    "Bike" : {
+
+    },
     "Body Part" : {
+
+    },
+    "Calculated" : {
 
     },
     "Calendar" : {
@@ -222,10 +351,37 @@
     "Cancel Workout" : {
 
     },
+    "Cardio" : {
+
+    },
     "Cardio Actions" : {
 
     },
+    "Cardio Activities" : {
+
+    },
+    "Cardio Error" : {
+
+    },
+    "Cardio phase settings that changed during the workout." : {
+
+    },
+    "Cardio Plan" : {
+
+    },
+    "Cardio Result" : {
+
+    },
     "Cardio Settings" : {
+
+    },
+    "Cardio Setup" : {
+
+    },
+    "Cardio to close out the workout." : {
+
+    },
+    "Cardio to prepare for the main work." : {
 
     },
     "Catalog Credits" : {
@@ -238,6 +394,9 @@
 
     },
     "Change" : {
+
+    },
+    "Change %@?" : {
 
     },
     "Change Exercise" : {
@@ -255,10 +414,19 @@
     "Choose an exercise before enabling this graph." : {
 
     },
+    "Choose Cardio" : {
+
+    },
     "Choose exercise" : {
 
     },
     "Choose Exercise" : {
+
+    },
+    "Choose where it fits and what to aim for." : {
+
+    },
+    "Clear data and change exercise" : {
 
     },
     "Clear Disposable Storage" : {
@@ -294,6 +462,9 @@
     "Commas and line breaks will appear as separate steps." : {
 
     },
+    "Complete" : {
+
+    },
     "Complete A1, move straight into A2, then rest %@." : {
 
     },
@@ -301,6 +472,9 @@
 
     },
     "Complete Workout" : {
+
+    },
+    "Completed" : {
 
     },
     "Continue Locally" : {
@@ -318,6 +492,12 @@
     "Create a template in this folder to keep it organized." : {
 
     },
+    "Create Cardio" : {
+
+    },
+    "Create Custom Cardio" : {
+
+    },
     "Create Custom Exercise" : {
 
     },
@@ -325,6 +505,9 @@
 
     },
     "Create Folder" : {
+
+    },
+    "Crosstrainer" : {
 
     },
     "Current" : {
@@ -402,6 +585,24 @@
     "Dismiss rest timer" : {
 
     },
+    "Distance" : {
+
+    },
+    "Distance (optional)" : {
+
+    },
+    "Distance goal" : {
+
+    },
+    "Distance target updated" : {
+
+    },
+    "Distance unit" : {
+
+    },
+    "Distance unit updated" : {
+
+    },
     "Done" : {
 
     },
@@ -420,25 +621,89 @@
     "Duplicate" : {
 
     },
-    "Edit" : {
+    "Duration" : {
 
     },
-    "Edit Duration" : {
+    "Duration %@ -> %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Duration %1$@ -> %2$@"
+          }
+        }
+      }
+    },
+    "Duration cannot be negative." : {
+
+    },
+    "Duration in minutes" : {
+
+    },
+    "Edit" : {
 
     },
     "Edit Folder" : {
 
     },
+    "Edit Plan" : {
+
+    },
     "Edit Profile" : {
+
+    },
+    "Edit Result" : {
+
+    },
+    "Edit Result %@" : {
+
+    },
+    "Log Result" : {
+
+    },
+    "Log Result %@" : {
 
     },
     "Edit Template" : {
 
     },
+    "Edited Cardio" : {
+
+    },
     "Elapsed Time" : {
 
     },
+    "Elapsed time %@" : {
+
+    },
     "Enable training guidance" : {
+
+    },
+    "Enter a distance greater than 0 kilometers." : {
+
+    },
+    "Enter a distance greater than 0 meters." : {
+
+    },
+    "Enter a distance greater than 0 miles." : {
+
+    },
+    "Enter a duration greater than 0 minutes." : {
+
+    },
+    "Enter a duration or distance." : {
+
+    },
+    "Enter a valid distance, or leave it empty." : {
+
+    },
+    "Enter a valid duration in minutes, or leave it empty." : {
+
+    },
+    "Enter a valid incline percentage." : {
+
+    },
+    "Enter a valid resistance or level." : {
 
     },
     "Enter Temporary Diagnostics" : {
@@ -448,6 +713,19 @@
 
     },
     "Exercise" : {
+
+    },
+    "Exercise %@ -> %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Exercise %1$@ -> %2$@"
+          }
+        }
+      }
+    },
+    "Exercise details updated" : {
 
     },
     "Exercise Error" : {
@@ -483,6 +761,9 @@
     "Finish" : {
 
     },
+    "Finish %@" : {
+
+    },
     "Finish a few workouts and your top lifts will show up here." : {
 
     },
@@ -492,10 +773,19 @@
     "Finish a workout to start tracking your weekly pace." : {
 
     },
+    "Finish current and resume" : {
+
+    },
+    "Finish current and start new" : {
+
+    },
     "Finish or cancel the current workout before starting a new one." : {
 
     },
     "Finish the main set before completing the drop stages." : {
+
+    },
+    "Finisher" : {
 
     },
     "Folder" : {
@@ -508,6 +798,15 @@
 
     },
     "Goal" : {
+
+    },
+    "Goal · %@" : {
+
+    },
+    "Goal updated" : {
+
+    },
+    "Goal, %@" : {
 
     },
     "Goal: %lld workouts each week" : {
@@ -526,6 +825,9 @@
 
     },
     "Hide backup contents" : {
+
+    },
+    "Hide detail" : {
 
     },
     "Hide Workout" : {
@@ -562,10 +864,16 @@
         }
       }
     },
+    "How did it feel?" : {
+
+    },
     "How to perform (optional)" : {
 
     },
     "Import Template" : {
+
+    },
+    "Incline" : {
 
     },
     "Insert below" : {
@@ -580,6 +888,9 @@
     "Jump to %@" : {
 
     },
+    "Keep current running" : {
+
+    },
     "Keep logging sessions and your go-to lifts will rise here." : {
 
     },
@@ -592,6 +903,9 @@
     "Keep Workout" : {
 
     },
+    "Kilometers" : {
+
+    },
     "Last logged %@" : {
 
     },
@@ -599,6 +913,9 @@
 
     },
     "Latest" : {
+
+    },
+    "Level" : {
 
     },
     "License URL" : {
@@ -628,6 +945,9 @@
     "Lock set" : {
 
     },
+    "Log at least a duration or distance." : {
+
+    },
     "Log one more weighted session for this lift to unlock the chart." : {
 
     },
@@ -638,6 +958,15 @@
 
     },
     "Logged Sets" : {
+
+    },
+    "Machine distance" : {
+
+    },
+    "Main" : {
+
+    },
+    "Main Cardio" : {
 
     },
     "Make dropset" : {
@@ -676,7 +1005,16 @@
     "Max" : {
 
     },
+    "Meters" : {
+
+    },
     "Metric" : {
+
+    },
+    "Miles" : {
+
+    },
+    "min" : {
 
     },
     "Min" : {
@@ -686,6 +1024,9 @@
 
     },
     "Minutes" : {
+
+    },
+    "More Cardio" : {
 
     },
     "Most trained" : {
@@ -736,6 +1077,9 @@
     "Name" : {
 
     },
+    "Name the activity and choose how you want to track it." : {
+
+    },
     "New Folder" : {
 
     },
@@ -754,10 +1098,28 @@
     "No files found." : {
 
     },
+    "No finisher activity" : {
+
+    },
+    "No main cardio activity" : {
+
+    },
+    "No measured result." : {
+
+    },
     "No other folders" : {
 
     },
     "No sets yet." : {
+
+    },
+    "No target" : {
+
+    },
+    "No Target" : {
+
+    },
+    "No target. Track the activity freely when you work out." : {
 
     },
     "No template needed. Log freeform or build the session as you go." : {
@@ -767,6 +1129,15 @@
 
     },
     "No unfiled templates yet" : {
+
+    },
+    "No warm-up activity" : {
+
+    },
+    "Not finished" : {
+
+    },
+    "Notes" : {
 
     },
     "notification.rest.body" : {
@@ -795,6 +1166,9 @@
     "OK" : {
 
     },
+    "Only one cardio timer can run at a time." : {
+
+    },
     "Open GitHub Issues" : {
 
     },
@@ -807,16 +1181,77 @@
     "Open Terms Website" : {
 
     },
+    "Optional" : {
+
+    },
     "Options: %@" : {
+
+    },
+    "Order %lld -> %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Order %1$lld -> %2$lld"
+          }
+        }
+      }
+    },
+    "Ordered activities saved with this template." : {
+
+    },
+    "Outdoor" : {
+
+    },
+    "Outdoor Run" : {
+
+    },
+    "Outdoor Walk" : {
+
+    },
+    "Outdoor walk or run" : {
 
     },
     "Override" : {
 
     },
+    "Pace" : {
+
+    },
     "Paired with %@" : {
 
     },
+    "Pause" : {
+
+    },
+    "Pause %@" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Percent" : {
+
+    },
+    "Pick an activity now, or open the full Cardio catalog." : {
+
+    },
+    "Plan %@" : {
+
+    },
     "Position %lld" : {
+
+    },
+    "Post Cardio" : {
+
+    },
+    "Post-workout Cardio" : {
+
+    },
+    "Pre Cardio" : {
+
+    },
+    "Pre-workout Cardio" : {
 
     },
     "Preparing dashboard" : {
@@ -828,6 +1263,12 @@
     "Preview unavailable" : {
       "comment" : "A title for a view that indicates that a preview is unavailable.",
       "isCommentAutoGenerated" : true
+    },
+    "Primary cardio for cardio-only or cardio-focused workouts." : {
+
+    },
+    "Primary cardio for this workout." : {
+
     },
     "Privacy" : {
 
@@ -847,7 +1288,19 @@
     "Push / Pull / Legs" : {
 
     },
+    "Quick choices" : {
+
+    },
     "Quick Start" : {
+
+    },
+    "Ready" : {
+
+    },
+    "Recorded cardio data will be cleared." : {
+
+    },
+    "Recorded cardio data will be cleared. This cannot be undone." : {
 
     },
     "Refresh" : {
@@ -859,10 +1312,16 @@
     "Remove" : {
 
     },
+    "Remove %@?" : {
+
+    },
     "Remove Avatar" : {
 
     },
     "Remove dropset" : {
+
+    },
+    "Removed Cardio" : {
 
     },
     "Rename Folder" : {
@@ -886,6 +1345,12 @@
     "Reset local stores on next launch?" : {
 
     },
+    "Resistance" : {
+
+    },
+    "Resistance or level cannot be negative." : {
+
+    },
     "Rest Timer" : {
 
     },
@@ -904,6 +1369,12 @@
     "Restore Workout" : {
 
     },
+    "Resume" : {
+
+    },
+    "Resume %@" : {
+
+    },
     "Resume Current Workout" : {
 
     },
@@ -916,10 +1387,25 @@
     "Reviewing your recent sessions…" : {
 
     },
+    "Role" : {
+
+    },
+    "Role updated" : {
+
+    },
     "Round Rest" : {
 
     },
     "Round rest %@" : {
+
+    },
+    "Row Machine" : {
+
+    },
+    "Rower" : {
+
+    },
+    "Running" : {
 
     },
     "Save" : {
@@ -934,16 +1420,25 @@
     "Save Profile" : {
 
     },
+    "Save Result" : {
+
+    },
     "Save Weekly Goal" : {
 
     },
     "Saved" : {
 
     },
+    "Saved results grouped by workout role." : {
+
+    },
     "Saving Changes" : {
 
     },
     "Saving the session and preparing your summary." : {
+
+    },
+    "Saving…" : {
 
     },
     "Schedule Reset" : {
@@ -997,7 +1492,16 @@
     "Source: %@" : {
 
     },
+    "Stair climber" : {
+
+    },
+    "Stair Climber" : {
+
+    },
     "Start" : {
+
+    },
+    "Start %@" : {
 
     },
     "Start a workout now and this exercise will be added." : {
@@ -1067,6 +1571,12 @@
       "comment" : "A description of the error that occurs when the in-memory preview store cannot be created.",
       "isCommentAutoGenerated" : true
     },
+    "This activity contains saved progress or a result. Removing it cannot be undone." : {
+
+    },
+    "This activity was not completed before the workout ended." : {
+
+    },
     "This cannot be undone. WGJ will delete the CloudKit backup first, then clear this device, and return to setup after you dismiss the success message." : {
 
     },
@@ -1082,6 +1592,15 @@
     "This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup." : {
 
     },
+    "This workout was finished before this activity was completed." : {
+
+    },
+    "Time" : {
+
+    },
+    "Time only" : {
+
+    },
     "Time-sensitive alerts are off in iOS Settings; rest alerts will arrive as standard." : {
 
     },
@@ -1091,10 +1610,28 @@
     "Track this week's workout target." : {
 
     },
+    "Tracking" : {
+
+    },
+    "Tracking profile updated" : {
+
+    },
     "Train a few days and your calendar will start to fill in." : {
 
     },
+    "Treadmill" : {
+
+    },
+    "Treadmill Run" : {
+
+    },
+    "Treadmill Walk" : {
+
+    },
     "Unfiled" : {
+
+    },
+    "Unit" : {
 
     },
     "Unlock set" : {
@@ -1109,6 +1646,9 @@
     "Update the template with these changes, or keep it as-is and save only this workout." : {
 
     },
+    "Updates from your duration and distance." : {
+
+    },
     "Used for new weighted sets and new template set plans. Existing entries keep their saved units." : {
 
     },
@@ -1119,6 +1659,9 @@
 
     },
     "W" : {
+
+    },
+    "Warm-up" : {
 
     },
     "We Go Jim" : {
@@ -1204,6 +1747,9 @@
 
     },
     "Your profile is ready. Widgets will appear in a moment." : {
+
+    },
+    "Your saved results grouped by workout role." : {
 
     }
   },

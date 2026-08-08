@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import SwiftData
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
@@ -255,12 +256,12 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         let originalProjection = ActiveWorkoutRenderProjectionBuilder.build(
             session: session,
             setDraftsByExerciseID: [exerciseID: [firstSet]],
-            pendingCardioCompletionsByPhase: [:]
+            pendingCardioCompletionsByID: [:]
         )
         let updatedProjection = ActiveWorkoutRenderProjectionBuilder.build(
             session: session,
             setDraftsByExerciseID: [exerciseID: [firstSet, addedSet]],
-            pendingCardioCompletionsByPhase: [:]
+            pendingCardioCompletionsByID: [:]
         )
 
         XCTAssertNotEqual(originalProjection.exerciseHydrationStamp, updatedProjection.exerciseHydrationStamp)
@@ -270,6 +271,133 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
             ),
             [exerciseID]
         )
+    }
+
+    func testRuntimeSortAllowsMultipleActivitiesInSameRole() {
+        let laterDate = Date(timeIntervalSince1970: 200)
+        let earlierDate = Date(timeIntervalSince1970: 100)
+        let warmUp = ActiveWorkoutRuntimeCardioBlock.fixture(
+            role: .warmUp,
+            sortOrder: 0,
+            createdAt: laterDate
+        )
+        let firstMain = ActiveWorkoutRuntimeCardioBlock.fixture(
+            role: .main,
+            sortOrder: 0,
+            createdAt: laterDate
+        )
+        let secondMain = ActiveWorkoutRuntimeCardioBlock.fixture(
+            role: .main,
+            sortOrder: 1,
+            createdAt: earlierDate
+        )
+        let earlierTie = ActiveWorkoutRuntimeCardioBlock.fixture(
+            role: .finisher,
+            sortOrder: 0,
+            createdAt: earlierDate
+        )
+        let laterTie = ActiveWorkoutRuntimeCardioBlock.fixture(
+            role: .finisher,
+            sortOrder: 0,
+            createdAt: laterDate
+        )
+
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Cardio",
+            cardioBlocks: [laterTie, secondMain, warmUp, firstMain, earlierTie]
+        )
+
+        XCTAssertEqual(
+            session.cardioBlocks.map(\.id),
+            [warmUp.id, firstMain.id, secondMain.id, earlierTie.id, laterTie.id]
+        )
+    }
+
+    func testProjectionGroupsSameRoleActivitiesAndAppliesCompletionByID() {
+        let first = ActiveWorkoutRuntimeCardioBlock.fixture(role: .main, sortOrder: 0)
+        let second = ActiveWorkoutRuntimeCardioBlock.fixture(role: .main, sortOrder: 1)
+        let session = ActiveWorkoutRuntimeSession(name: "Cardio", cardioBlocks: [second, first])
+
+        let projection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [:],
+            pendingCardioCompletionsByID: [second.id: true]
+        )
+
+        XCTAssertEqual(projection.cardioByRole[.main]?.map(\.id), [first.id, second.id])
+        XCTAssertEqual(projection.cardioByRole[.main]?.map(\.isCompleted), [false, true])
+    }
+
+    func testPersistenceSnapshotAppliesCompletionToExactActivityID() {
+        let first = ActiveWorkoutRuntimeCardioBlock.fixture(role: .main, sortOrder: 0)
+        let second = ActiveWorkoutRuntimeCardioBlock.fixture(role: .main, sortOrder: 1)
+        let session = ActiveWorkoutRuntimeSession(name: "Cardio", cardioBlocks: [first, second])
+
+        let snapshot = session.snapshotForActiveWorkoutPersistence(
+            sessionNameDraft: session.name,
+            notesDraft: session.notes,
+            pendingCardioCompletionsByID: [second.id: true],
+            setDraftsByExerciseID: [:],
+            restByExerciseID: [:],
+            notesByExerciseID: [:],
+            date: Date(timeIntervalSince1970: 500)
+        )
+
+        XCTAssertEqual(snapshot.cardioBlocks.map(\.isCompleted), [false, true])
+    }
+
+    @MainActor
+    func testSessionFactoryCopiesFlexibleTemplateCardioPlanWithSourceIDs() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: "ActiveWorkoutRuntimeFactoryTests")
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Cardio", notes: "")
+        let drafts = [
+            TemplateCardioBlockDraft(
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 0,
+                catalogExerciseUUID: "seed-treadmill-walk",
+                exerciseNameSnapshot: "Treadmill Walk",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .treadmill,
+                goalKind: .distance,
+                targetDurationSeconds: 0,
+                targetDistanceMeters: 5_000,
+                preferredDistanceUnit: .kilometers
+            ),
+            TemplateCardioBlockDraft(
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 1,
+                catalogExerciseUUID: "seed-bike",
+                exerciseNameSnapshot: "Bike",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .machineDistance,
+                goalKind: .time,
+                targetDurationSeconds: 1_200,
+                targetDistanceMeters: 8_000,
+                preferredDistanceUnit: .kilometers
+            ),
+        ]
+        try repository.setCardioActivities(templateID: template.id, drafts: drafts)
+
+        let runtime = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: template.id)
+
+        XCTAssertEqual(runtime.cardioBlocks.map(\.sourceTemplateCardioID), drafts.map(\.id))
+        XCTAssertTrue(Set(runtime.cardioBlocks.map(\.id)).isDisjoint(with: Set(drafts.map(\.id))))
+        XCTAssertEqual(runtime.cardioBlocks.map(\.exerciseNameSnapshot), ["Treadmill Walk", "Bike"])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.role), [.main, .main])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.trackingProfile), [.treadmill, .machineDistance])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.goalKind), [.distance, .time])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.targetDurationSeconds), [0, 1_200])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.targetDistanceMeters), [5_000, 8_000])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.preferredDistanceUnit), [.kilometers, .kilometers])
     }
 
     func testTemplateExerciseReplacementPreservesSetIdentityAndPreviousTargets() {
@@ -741,5 +869,28 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         return directory
+    }
+}
+
+private extension ActiveWorkoutRuntimeCardioBlock {
+    static func fixture(
+        id: UUID = UUID(),
+        role: WorkoutCardioRole = .warmUp,
+        sortOrder: Int = 0,
+        createdAt: Date = Date(timeIntervalSince1970: 100)
+    ) -> Self {
+        ActiveWorkoutRuntimeCardioBlock(
+            id: id,
+            phase: role == .finisher ? .postWorkout : .preWorkout,
+            role: role,
+            sortOrder: sortOrder,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            targetDurationSeconds: 1_200,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
     }
 }

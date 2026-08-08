@@ -619,19 +619,24 @@ nonisolated final class TemplateRepository {
 
         let cardioDrafts = try workoutSessionCardioBlocks(sessionID: sessionID).map { cardioBlock in
             TemplateCardioBlockDraft(
-                id: cardioBlock.id,
                 phase: cardioBlock.phase,
+                role: cardioBlock.role,
+                sortOrder: cardioBlock.sortOrder,
                 catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
                 exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
                 categorySnapshot: cardioBlock.categorySnapshot,
                 muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
-                targetDurationSeconds: cardioBlock.targetDurationSeconds
+                trackingProfile: cardioBlock.trackingProfile,
+                goalKind: cardioBlock.goalKind,
+                targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                targetDistanceMeters: cardioBlock.targetDistanceMeters,
+                preferredDistanceUnit: cardioBlock.preferredDistanceUnit
             )
         }
 
         do {
             try deferredRepository.setExercises(templateID: template.id, drafts: drafts)
-            try deferredRepository.setCardioBlocks(templateID: template.id, drafts: cardioDrafts)
+            try deferredRepository.setCardioActivities(templateID: template.id, drafts: cardioDrafts)
             try deferredRepository.finalizeDeferredUserDataChangesIfNeeded()
             return template
         } catch {
@@ -663,7 +668,7 @@ nonisolated final class TemplateRepository {
 
         do {
             try deferredRepository.setExercises(templateID: copy.id, drafts: exerciseDrafts)
-            try deferredRepository.setCardioBlocks(templateID: copy.id, drafts: cardioDrafts)
+            try deferredRepository.setCardioActivities(templateID: copy.id, drafts: cardioDrafts)
             try deferredRepository.finalizeDeferredUserDataChangesIfNeeded()
             return copy
         } catch {
@@ -705,7 +710,8 @@ nonisolated final class TemplateRepository {
             templateName: cleaned,
             templateNotes: normalizedNotes,
             exercises: exerciseDrafts.map { templateSyncExerciseMutation(from: $0) },
-            cardioBlocks: cardioDrafts.map { templateSyncCardioMutation(from: $0) }
+            cardioBlocks: cardioDrafts.map { templateSyncCardioMutation(from: $0) },
+            cardioDrafts: cardioDrafts
         )
     }
 
@@ -850,7 +856,7 @@ nonisolated final class TemplateRepository {
             recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
         }
 
-        for cardioBlock in try cardioBlocks(templateID: template.id) {
+        for cardioBlock in try cardioActivities(templateID: template.id) {
             modelContext.delete(cardioBlock)
         }
 
@@ -949,41 +955,46 @@ nonisolated final class TemplateRepository {
         return exercises
     }
 
-    func cardioBlocks(templateID: UUID) throws -> [TemplateCardioBlock] {
+    func cardioActivities(templateID: UUID) throws -> [TemplateCardioBlock] {
         let descriptor = FetchDescriptor<TemplateCardioBlock>(
             predicate: #Predicate { item in
                 item.templateID == templateID
             }
         )
         return try modelContext.fetch(descriptor)
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted(by: cardioActivityOrder)
     }
 
-    func cardioBlock(templateID: UUID, phase: WorkoutCardioPhase) throws -> TemplateCardioBlock? {
-        let phaseRaw = phase.rawValue
+    private func cardioActivity(templateID: UUID, activityID: UUID) throws -> TemplateCardioBlock? {
         let descriptor = FetchDescriptor<TemplateCardioBlock>(
             predicate: #Predicate { item in
-                item.templateID == templateID && item.phaseRaw == phaseRaw
+                item.templateID == templateID && item.id == activityID
             }
         )
         return try modelContext.fetch(descriptor).first
     }
 
-    func upsertCardioBlock(templateID: UUID, draft: TemplateCardioBlockDraft) throws {
+    func upsertCardioActivity(templateID: UUID, draft: TemplateCardioBlockDraft) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        let cardioBlock = try cardioBlock(templateID: templateID, phase: draft.phase)
+        let cardioBlock = try cardioActivity(templateID: templateID, activityID: draft.id)
             ?? TemplateCardioBlock(
                 id: draft.id,
                 templateID: templateID,
                 phase: draft.phase,
+                role: draft.role,
+                sortOrder: draft.sortOrder,
                 catalogExerciseUUID: draft.catalogExerciseUUID,
                 exerciseNameSnapshot: draft.exerciseNameSnapshot,
                 categorySnapshot: draft.categorySnapshot,
                 muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                trackingProfile: draft.trackingProfile,
+                goalKind: draft.goalKind,
                 targetDurationSeconds: draft.targetDurationSeconds,
+                targetDistanceMeters: draft.targetDistanceMeters,
+                preferredDistanceUnit: draft.preferredDistanceUnit,
                 template: template
             )
 
@@ -993,42 +1004,44 @@ nonisolated final class TemplateRepository {
 
         cardioBlock.templateID = templateID
         cardioBlock.template = template
-        cardioBlock.phase = draft.phase
-        cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
-        cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
-        cardioBlock.categorySnapshot = draft.categorySnapshot
-        cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
-        cardioBlock.targetDurationSeconds = sanitizedCardioDurationSeconds(draft.targetDurationSeconds)
-        cardioBlock.updatedAt = .now
+        apply(draft, to: cardioBlock, template: template)
 
-        syncTemplateCardioCollection(for: template)
+        normalizeTemplateCardioCollection(for: template, adding: cardioBlock)
         template.updatedAt = .now
         try saveUserDataChanges()
     }
 
-    func removeCardioBlock(templateID: UUID, phase: WorkoutCardioPhase) throws {
+    func removeCardioActivity(templateID: UUID, activityID: UUID) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        guard let cardioBlock = try cardioBlock(templateID: templateID, phase: phase) else {
+        guard let cardioBlock = try cardioActivity(templateID: templateID, activityID: activityID) else {
             return
         }
 
         modelContext.delete(cardioBlock)
-        syncTemplateCardioCollection(for: template)
+        normalizeTemplateCardioCollection(for: template)
         template.updatedAt = .now
         try saveUserDataChanges()
     }
 
-    func setCardioBlocks(templateID: UUID, drafts: [TemplateCardioBlockDraft]) throws {
+    func setCardioActivities(templateID: UUID, drafts: [TemplateCardioBlockDraft]) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        syncCardioStructure(
+        let normalizedDrafts = normalizedTemplateCardioDrafts(drafts)
+        let existingSignature = try cardioActivities(templateID: templateID)
+            .map(persistenceSignature(for:))
+        let incomingSignature = normalizedDrafts.map(persistenceSignature(for:))
+        guard existingSignature != incomingSignature else {
+            return
+        }
+
+        try syncCardioStructure(
             for: template,
-            desiredDrafts: drafts
+            desiredDrafts: normalizedDrafts
         )
         template.updatedAt = .now
         try saveUserDataChanges()
@@ -1349,10 +1362,53 @@ nonisolated final class TemplateRepository {
         templateName: String?,
         templateNotes: String,
         exercises mutations: [WorkoutTemplateSyncExerciseMutation],
-        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation]
+        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation],
+        cardioDrafts: [TemplateCardioBlockDraft]? = nil
     ) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
+        }
+
+        let desiredCardioDrafts: [TemplateCardioBlockDraft]
+        if let cardioDrafts {
+            desiredCardioDrafts = cardioDrafts
+        } else {
+            let existingCardioActivities = orderedCardioBlocks(for: template)
+            let existingCardioIDs = Set(existingCardioActivities.map(\.id))
+            var claimedTemplateCardioIDs: Set<UUID> = []
+            desiredCardioDrafts = cardioMutations.map { mutation in
+                let matchedTemplateID: UUID?
+                if let sourceID = mutation.sourceTemplateCardioID {
+                    matchedTemplateID = existingCardioIDs.contains(sourceID)
+                        && claimedTemplateCardioIDs.insert(sourceID).inserted
+                        ? sourceID
+                        : nil
+                } else {
+                    matchedTemplateID = existingCardioActivities.first(where: {
+                        claimedTemplateCardioIDs.contains($0.id) == false
+                            && $0.role == mutation.role
+                            && $0.sortOrder == mutation.sortOrder
+                    })?.id
+                    if let matchedTemplateID {
+                        claimedTemplateCardioIDs.insert(matchedTemplateID)
+                    }
+                }
+                return TemplateCardioBlockDraft(
+                    id: matchedTemplateID ?? UUID(),
+                    phase: mutation.phase,
+                    role: mutation.role,
+                    sortOrder: mutation.sortOrder,
+                    catalogExerciseUUID: mutation.catalogExerciseUUID,
+                    exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                    categorySnapshot: mutation.categorySnapshot,
+                    muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                    trackingProfile: mutation.trackingProfile,
+                    goalKind: mutation.goalKind,
+                    targetDurationSeconds: mutation.targetDurationSeconds,
+                    targetDistanceMeters: mutation.targetDistanceMeters,
+                    preferredDistanceUnit: mutation.preferredDistanceUnit
+                )
+            }
         }
 
         try validateUniqueComponentCatalogUUIDs(
@@ -1392,7 +1448,7 @@ nonisolated final class TemplateRepository {
             templateName: resolvedTemplateName,
             templateNotes: templateNotes,
             exercises: mutations,
-            cardioBlocks: cardioMutations,
+            cardioDrafts: desiredCardioDrafts,
             existingByCatalogUUID: existingByCatalogUUID
         )
 
@@ -1480,18 +1536,9 @@ nonisolated final class TemplateRepository {
                 uniquingKeysWith: { first, _ in first }
             )
         )
-        syncCardioStructure(
+        try syncCardioStructure(
             for: template,
-            desiredDrafts: cardioMutations.map { mutation in
-                TemplateCardioBlockDraft(
-                    phase: mutation.phase,
-                    catalogExerciseUUID: mutation.catalogExerciseUUID,
-                    exerciseNameSnapshot: mutation.exerciseNameSnapshot,
-                    categorySnapshot: mutation.categorySnapshot,
-                    muscleSummarySnapshot: mutation.muscleSummarySnapshot,
-                    targetDurationSeconds: mutation.targetDurationSeconds
-                )
-            }
+            desiredDrafts: desiredCardioDrafts
         )
         template.updatedAt = .now
         try saveUserDataChanges()
@@ -1838,7 +1885,15 @@ nonisolated final class TemplateRepository {
             }
         )
         return try modelContext.fetch(descriptor)
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
     }
 
     private func reorder(template: WorkoutTemplate) {
@@ -2051,32 +2106,38 @@ nonisolated final class TemplateRepository {
     private func syncCardioStructure(
         for template: WorkoutTemplate,
         desiredDrafts: [TemplateCardioBlockDraft]
-    ) {
-        let orderedExisting = orderedCardioBlocks(for: template)
-        let existingByPhase = Dictionary(
-            orderedExisting.map { ($0.phase, $0) },
+    ) throws {
+        let orderedExisting = try cardioActivities(templateID: template.id)
+        let existingByID = Dictionary(
+            orderedExisting.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let desiredPhases = Set(desiredDrafts.map(\.phase))
+        let desiredIDs = Set(desiredDrafts.map(\.id))
 
-        for cardioBlock in orderedExisting where !desiredPhases.contains(cardioBlock.phase) {
+        for cardioBlock in orderedExisting where !desiredIDs.contains(cardioBlock.id) {
             modelContext.delete(cardioBlock)
         }
 
         var updatedBlocks: [TemplateCardioBlock] = []
         updatedBlocks.reserveCapacity(desiredDrafts.count)
 
-        for draft in desiredDrafts.sorted(by: { $0.phase.sortOrder < $1.phase.sortOrder }) {
-            let cardioBlock = existingByPhase[draft.phase]
+        for draft in normalizedTemplateCardioDrafts(desiredDrafts) {
+            let cardioBlock = existingByID[draft.id]
                 ?? TemplateCardioBlock(
                     id: draft.id,
                     templateID: template.id,
                     phase: draft.phase,
+                    role: draft.role,
+                    sortOrder: draft.sortOrder,
                     catalogExerciseUUID: draft.catalogExerciseUUID,
                     exerciseNameSnapshot: draft.exerciseNameSnapshot,
                     categorySnapshot: draft.categorySnapshot,
                     muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                    trackingProfile: draft.trackingProfile,
+                    goalKind: draft.goalKind,
                     targetDurationSeconds: draft.targetDurationSeconds,
+                    targetDistanceMeters: draft.targetDistanceMeters,
+                    preferredDistanceUnit: draft.preferredDistanceUnit,
                     template: template
                 )
 
@@ -2084,29 +2145,94 @@ nonisolated final class TemplateRepository {
                 modelContext.insert(cardioBlock)
             }
 
-            cardioBlock.templateID = template.id
-            cardioBlock.template = template
-            cardioBlock.phase = draft.phase
-            cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
-            cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
-            cardioBlock.categorySnapshot = draft.categorySnapshot
-            cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
-            cardioBlock.targetDurationSeconds = sanitizedCardioDurationSeconds(draft.targetDurationSeconds)
-            cardioBlock.updatedAt = .now
+            apply(draft, to: cardioBlock, template: template)
             updatedBlocks.append(cardioBlock)
         }
 
         template.cardioBlocks = updatedBlocks
     }
 
-    private func syncTemplateCardioCollection(for template: WorkoutTemplate) {
-        template.cardioBlocks = orderedCardioBlocks(for: template)
+    private func apply(
+        _ draft: TemplateCardioBlockDraft,
+        to cardioBlock: TemplateCardioBlock,
+        template: WorkoutTemplate
+    ) {
+        cardioBlock.templateID = template.id
+        cardioBlock.template = template
+        cardioBlock.phase = draft.phase
+        cardioBlock.role = draft.role
+        cardioBlock.sortOrder = draft.sortOrder
+        cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
+        cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
+        cardioBlock.categorySnapshot = draft.categorySnapshot
+        cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
+        cardioBlock.trackingProfile = draft.trackingProfile
+        cardioBlock.goalKind = draft.goalKind
+        cardioBlock.targetDurationSeconds = sanitizedCardioDurationSeconds(draft.targetDurationSeconds)
+        cardioBlock.targetDistanceMeters = draft.targetDistanceMeters
+        cardioBlock.preferredDistanceUnit = draft.preferredDistanceUnit
+        cardioBlock.updatedAt = .now
+    }
+
+    private func normalizeTemplateCardioCollection(
+        for template: WorkoutTemplate,
+        adding cardioBlock: TemplateCardioBlock? = nil
+    ) {
+        var activities = (template.cardioBlocks ?? []).filter { $0.modelContext != nil }
+        if let cardioBlock, activities.contains(where: { $0.id == cardioBlock.id }) == false {
+            activities.append(cardioBlock)
+        }
+        activities.sort(by: cardioActivityOrder)
+        var nextOrderByRole: [String: Int] = [:]
+        for activity in activities {
+            let roleKey = activity.role.rawValue
+            let nextOrder = nextOrderByRole[roleKey, default: 0]
+            activity.sortOrder = nextOrder
+            nextOrderByRole[roleKey] = nextOrder + 1
+        }
+        template.cardioBlocks = activities
     }
 
     private func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
         (template.cardioBlocks ?? [])
             .filter { $0.modelContext != nil }
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted(by: cardioActivityOrder)
+    }
+
+    private func cardioActivityOrder(_ lhs: TemplateCardioBlock, _ rhs: TemplateCardioBlock) -> Bool {
+        if lhs.role.sortOrder != rhs.role.sortOrder {
+            return lhs.role.sortOrder < rhs.role.sortOrder
+        }
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func normalizedTemplateCardioDrafts(
+        _ drafts: [TemplateCardioBlockDraft]
+    ) -> [TemplateCardioBlockDraft] {
+        let ordered = drafts.enumerated().sorted { lhs, rhs in
+            if lhs.element.role.sortOrder != rhs.element.role.sortOrder {
+                return lhs.element.role.sortOrder < rhs.element.role.sortOrder
+            }
+            if lhs.element.sortOrder != rhs.element.sortOrder {
+                return lhs.element.sortOrder < rhs.element.sortOrder
+            }
+            return lhs.offset < rhs.offset
+        }
+        var nextOrderByRole: [String: Int] = [:]
+        return ordered.map { _, draft in
+            var normalized = draft
+            let roleKey = draft.role.rawValue
+            let nextOrder = nextOrderByRole[roleKey, default: 0]
+            normalized.sortOrder = nextOrder
+            nextOrderByRole[roleKey] = nextOrder + 1
+            return normalized
+        }
     }
 
     private func syncSetStructure(
@@ -2419,12 +2545,20 @@ nonisolated final class TemplateRepository {
         from draft: TemplateCardioBlockDraft
     ) -> WorkoutTemplateSyncCardioMutation {
         WorkoutTemplateSyncCardioMutation(
+            activityID: draft.id,
+            sourceTemplateCardioID: draft.id,
             phase: draft.phase,
+            role: draft.role,
+            sortOrder: draft.sortOrder,
             catalogExerciseUUID: draft.catalogExerciseUUID,
             exerciseNameSnapshot: draft.exerciseNameSnapshot,
             categorySnapshot: draft.categorySnapshot,
             muscleSummarySnapshot: draft.muscleSummarySnapshot,
-            targetDurationSeconds: draft.targetDurationSeconds
+            trackingProfile: draft.trackingProfile,
+            goalKind: draft.goalKind,
+            targetDurationSeconds: draft.targetDurationSeconds,
+            targetDistanceMeters: draft.targetDistanceMeters,
+            preferredDistanceUnit: draft.preferredDistanceUnit
         )
     }
 
@@ -2513,11 +2647,17 @@ nonisolated final class TemplateRepository {
         TemplateCardioBlockDraft(
             id: UUID(),
             phase: cardioBlock.phase,
+            role: cardioBlock.role,
+            sortOrder: cardioBlock.sortOrder,
             catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
             exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
             categorySnapshot: cardioBlock.categorySnapshot,
             muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
-            targetDurationSeconds: cardioBlock.targetDurationSeconds
+            trackingProfile: cardioBlock.trackingProfile,
+            goalKind: cardioBlock.goalKind,
+            targetDurationSeconds: cardioBlock.targetDurationSeconds,
+            targetDistanceMeters: cardioBlock.targetDistanceMeters,
+            preferredDistanceUnit: cardioBlock.preferredDistanceUnit
         )
     }
 
@@ -2537,7 +2677,7 @@ nonisolated final class TemplateRepository {
                 persistenceSignature(for: exercise, at: index)
             }
         let cardioBlocks = (template.cardioBlocks ?? [])
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted(by: cardioActivityOrder)
             .map(persistenceSignature(for:))
 
         return TemplateContentsPersistenceSignature(
@@ -2552,7 +2692,7 @@ nonisolated final class TemplateRepository {
         templateName: String,
         templateNotes: String,
         exercises mutations: [WorkoutTemplateSyncExerciseMutation],
-        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation],
+        cardioDrafts: [TemplateCardioBlockDraft],
         existingByCatalogUUID: [String: TemplateExercise]
     ) -> TemplateContentsPersistenceSignature {
         let exercises = mutations.enumerated().map { index, mutation in
@@ -2562,9 +2702,8 @@ nonisolated final class TemplateRepository {
                 existingByCatalogUUID: existingByCatalogUUID
             )
         }
-        let cardioBlocks = cardioMutations
+        let cardioBlocks = normalizedTemplateCardioDrafts(cardioDrafts)
             .map(persistenceSignature(for:))
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
 
         return TemplateContentsPersistenceSignature(
             name: templateName,
@@ -2667,25 +2806,39 @@ nonisolated final class TemplateRepository {
         for cardioBlock: TemplateCardioBlock
     ) -> TemplateCardioPersistenceSignature {
         TemplateCardioPersistenceSignature(
+            id: cardioBlock.id,
             phase: cardioBlock.phase,
+            role: cardioBlock.role,
+            sortOrder: cardioBlock.sortOrder,
             catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
             exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
             categorySnapshot: cardioBlock.categorySnapshot,
             muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
-            targetDurationSeconds: sanitizedCardioDurationSeconds(cardioBlock.targetDurationSeconds)
+            trackingProfile: cardioBlock.trackingProfile,
+            goalKind: cardioBlock.goalKind,
+            targetDurationSeconds: sanitizedCardioDurationSeconds(cardioBlock.targetDurationSeconds),
+            targetDistanceMeters: cardioBlock.targetDistanceMeters,
+            preferredDistanceUnit: cardioBlock.preferredDistanceUnit
         )
     }
 
     private func persistenceSignature(
-        for mutation: WorkoutTemplateSyncCardioMutation
+        for draft: TemplateCardioBlockDraft
     ) -> TemplateCardioPersistenceSignature {
         TemplateCardioPersistenceSignature(
-            phase: mutation.phase,
-            catalogExerciseUUID: mutation.catalogExerciseUUID,
-            exerciseNameSnapshot: mutation.exerciseNameSnapshot,
-            categorySnapshot: mutation.categorySnapshot,
-            muscleSummarySnapshot: mutation.muscleSummarySnapshot,
-            targetDurationSeconds: sanitizedCardioDurationSeconds(mutation.targetDurationSeconds)
+            id: draft.id,
+            phase: draft.phase,
+            role: draft.role,
+            sortOrder: draft.sortOrder,
+            catalogExerciseUUID: draft.catalogExerciseUUID,
+            exerciseNameSnapshot: draft.exerciseNameSnapshot,
+            categorySnapshot: draft.categorySnapshot,
+            muscleSummarySnapshot: draft.muscleSummarySnapshot,
+            trackingProfile: draft.trackingProfile,
+            goalKind: draft.goalKind,
+            targetDurationSeconds: sanitizedCardioDurationSeconds(draft.targetDurationSeconds),
+            targetDistanceMeters: draft.targetDistanceMeters,
+            preferredDistanceUnit: draft.preferredDistanceUnit
         )
     }
 
@@ -2849,12 +3002,19 @@ nonisolated private struct TemplateExerciseSupersetPersistenceSignature: Equatab
 }
 
 nonisolated private struct TemplateCardioPersistenceSignature: Equatable {
+    let id: UUID
     let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
+    let sortOrder: Int
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let trackingProfile: WorkoutCardioTrackingProfile?
+    let goalKind: WorkoutCardioGoalKind
     let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit?
 }
 
 nonisolated private struct TemplateExerciseSetPersistenceSignature: Equatable {

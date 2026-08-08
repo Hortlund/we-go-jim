@@ -7,6 +7,24 @@ nonisolated struct WorkoutMetricAccessibilityDescriptor: Equatable, Sendable {
 }
 
 nonisolated enum WorkoutMetricAccessibilityPolicy {
+    enum CardioAction: Equatable, Sendable {
+        case start
+        case pause
+        case resume
+        case finish
+        case logResult
+        case editResult
+    }
+
+    enum CardioMetricSemantic: Equatable, Sendable {
+        case plain
+        case distance(WorkoutDistanceUnit)
+        case speed(WorkoutDistanceUnit)
+        case pace(WorkoutDistanceUnit)
+        case rowingPace
+        case incline
+    }
+
     static func field(
         exerciseName: String,
         setNumber: Int,
@@ -59,6 +77,52 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
         )
     }
 
+    static func cardioAction(_ action: CardioAction, activityName: String) -> String {
+        CardioLocalizedCopy.actionAccessibilityLabel(action.localizedCopyAction, activityName: activityName)
+    }
+
+    /// Formats semantic cardio units for unambiguous, localized VoiceOver speech.
+    static func cardioMetricValue(
+        _ value: String,
+        semantic: CardioMetricSemantic
+    ) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch semantic {
+        case .plain:
+            return trimmed
+        case .distance(.kilometers):
+            return String(localized: "\(trimmed) kilometers")
+        case .distance(.miles):
+            return String(localized: "\(trimmed) miles")
+        case .distance(.meters):
+            return String(localized: "\(trimmed) meters")
+        case .speed(.kilometers):
+            return String(localized: "\(trimmed) kilometers per hour")
+        case .speed(.miles):
+            return String(localized: "\(trimmed) miles per hour")
+        case .speed(.meters):
+            return String(localized: "\(trimmed) meters per hour")
+        case .pace(.kilometers):
+            return String(localized: "\(trimmed) per kilometer")
+        case .pace(.miles):
+            return String(localized: "\(trimmed) per mile")
+        case .pace(.meters):
+            return String(localized: "\(trimmed) per meter")
+        case .rowingPace:
+            return String(localized: "\(trimmed) per 500 meters")
+        case .incline:
+            return String(localized: "\(trimmed) percent incline")
+        }
+    }
+
+    static func cardioMetric(
+        label: String,
+        value: String,
+        semantic: CardioMetricSemantic
+    ) -> String {
+        String(localized: "\(label), \(cardioMetricValue(value, semantic: semantic))")
+    }
+
     private static func spokenWeightUnit(_ unit: String?) -> String? {
         switch unit?.lowercased() {
         case "kg", "kilogram", "kilograms":
@@ -69,6 +133,19 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
             return "bodyweight"
         default:
             return unit
+        }
+    }
+}
+
+private extension WorkoutMetricAccessibilityPolicy.CardioAction {
+    nonisolated var localizedCopyAction: CardioLocalizedCopy.Action {
+        switch self {
+        case .start: return .start
+        case .pause: return .pause
+        case .resume: return .resume
+        case .finish: return .finish
+        case .logResult: return .logResult
+        case .editResult: return .editResult
         }
     }
 }

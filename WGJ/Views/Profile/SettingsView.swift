@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var keepsScreenAwake = false
     @State private var automaticallyClosesCompletedExercises = true
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
+    @State private var preferredDistanceUnit = WorkoutDistanceUnit.regionalDefault(locale: .current)
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var notificationPermissions: NotificationPermissionSnapshot?
     @State private var submittedSettingsDraft = UserSettingsDraft.default
@@ -136,6 +137,18 @@ struct SettingsView: View {
                         Text("Used for new weighted sets and new template set plans. Existing entries keep their saved units.")
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Distance unit")
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Picker("Distance unit", selection: $preferredDistanceUnit) {
+                            Text("Kilometers").tag(WorkoutDistanceUnit.kilometers)
+                            Text("Miles").tag(WorkoutDistanceUnit.miles)
+                            Text("Meters").tag(WorkoutDistanceUnit.meters)
+                        }
+                        .pickerStyle(.segmented)
                     }
                 }
                 .padding(14)
@@ -310,6 +323,10 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             savePreferredWeightUnitPreference(newValue)
         }
+        .onChange(of: preferredDistanceUnit) { _, newValue in
+            guard hasLoadedProfile else { return }
+            savePreferredDistanceUnitPreference(newValue)
+        }
         .onChange(of: workoutNotificationStyle) { _, newValue in
             guard hasLoadedProfile else { return }
             saveWorkoutNotificationStylePreference(newValue)
@@ -416,12 +433,14 @@ struct SettingsView: View {
         keepsScreenAwake = snapshot.keepsScreenAwake
         automaticallyClosesCompletedExercises = snapshot.automaticallyClosesCompletedExercises
         preferredWeightUnit = snapshot.preferredWeightUnit
+        preferredDistanceUnit = snapshot.preferredDistanceUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
         submittedSettingsDraft = UserSettingsDraft(
             weeklyWorkoutGoal: snapshot.weeklyGoal,
             isTrainingGuidanceEnabled: snapshot.isTrainingGuidanceEnabled,
             keepsScreenAwake: snapshot.keepsScreenAwake,
             preferredWeightUnit: snapshot.preferredWeightUnit,
+            preferredDistanceUnit: snapshot.preferredDistanceUnit,
             workoutNotificationStyle: snapshot.workoutNotificationStyle,
             automaticallyClosesCompletedExercises: snapshot.automaticallyClosesCompletedExercises
         )
@@ -498,6 +517,14 @@ struct SettingsView: View {
         )
     }
 
+    private func savePreferredDistanceUnitPreference(_ unit: WorkoutDistanceUnit) {
+        guard unit != submittedSettingsDraft.preferredDistanceUnit else { return }
+        submittedSettingsDraft.preferredDistanceUnit = unit
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(preferredDistanceUnit: unit)
+        )
+    }
+
     private func saveWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
         guard style != submittedSettingsDraft.workoutNotificationStyle else { return }
         submittedSettingsDraft.workoutNotificationStyle = style
@@ -546,6 +573,7 @@ private struct SettingsProfileSnapshot: Sendable {
     let keepsScreenAwake: Bool
     let automaticallyClosesCompletedExercises: Bool
     let preferredWeightUnit: PreferredWeightUnit
+    let preferredDistanceUnit: WorkoutDistanceUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
 
     nonisolated init(profile: UserProfile) {
@@ -554,6 +582,7 @@ private struct SettingsProfileSnapshot: Sendable {
         keepsScreenAwake = profile.keepsScreenAwake
         automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
+        preferredDistanceUnit = profile.preferredDistanceUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }
 
@@ -563,6 +592,7 @@ private struct SettingsProfileSnapshot: Sendable {
         keepsScreenAwake = profile.keepsScreenAwake
         automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
+        preferredDistanceUnit = profile.preferredDistanceUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }
 }

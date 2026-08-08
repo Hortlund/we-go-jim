@@ -46,24 +46,70 @@ enum HistoryDetailSnapshotBuilder {
     nonisolated struct CardioBlockSnapshot: Identifiable, Equatable, Sendable {
         let id: UUID
         let phase: WorkoutCardioPhase
+        let role: WorkoutCardioRole
+        let sortOrder: Int
         let catalogExerciseUUID: String
         let exerciseNameSnapshot: String
         let categorySnapshot: String
         let muscleSummarySnapshot: String
+        let trackingProfile: WorkoutCardioTrackingProfile
         let targetDurationSeconds: Int
+        let actualDurationSeconds: Int?
+        let actualDistanceMeters: Double?
+        let preferredDistanceUnit: WorkoutDistanceUnit
+        let inclinePercent: Double?
+        let resistanceLevel: Double?
+        let notes: String
         let isCompleted: Bool
         let updatedAt: Date
 
         nonisolated init(model: WorkoutSessionCardioBlock) {
             id = model.id
             phase = model.phase
+            role = model.role
+            sortOrder = model.sortOrder
             catalogExerciseUUID = model.catalogExerciseUUID
             exerciseNameSnapshot = model.exerciseNameSnapshot
             categorySnapshot = model.categorySnapshot
             muscleSummarySnapshot = model.muscleSummarySnapshot
+            trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+                storedProfile: model.trackingProfile,
+                identity: "\(model.catalogExerciseUUID) \(model.exerciseNameSnapshot)",
+                hasDistance: model.actualDistanceMeters != nil || model.targetDistanceMeters != nil
+            )
             targetDurationSeconds = model.targetDurationSeconds
+            actualDurationSeconds = model.actualDurationSeconds
+            actualDistanceMeters = model.actualDistanceMeters
+            preferredDistanceUnit = model.preferredDistanceUnit ?? .kilometers
+            inclinePercent = model.inclinePercent
+            resistanceLevel = model.resistanceLevel
+            notes = model.cardioNotes
             isCompleted = model.isCompleted
             updatedAt = model.updatedAt
+        }
+
+        var resultDraft: WorkoutCardioResultDraft {
+            WorkoutCardioResultDraft(
+                actualDurationSeconds: actualDurationSeconds,
+                actualDistanceMeters: actualDistanceMeters,
+                distanceUnit: preferredDistanceUnit,
+                inclinePercent: inclinePercent,
+                resistanceLevel: resistanceLevel,
+                notes: notes,
+                trackingProfile: trackingProfile
+            )
+        }
+
+        var resultSummary: WorkoutCardioResultSummary {
+            WorkoutCardioResultSummaryFormatter.summary(
+                durationSeconds: actualDurationSeconds,
+                distanceMeters: actualDistanceMeters,
+                displayUnit: preferredDistanceUnit,
+                profile: trackingProfile,
+                inclinePercent: inclinePercent,
+                resistanceLevel: resistanceLevel,
+                notes: notes
+            )
         }
     }
 
@@ -380,5 +426,55 @@ enum HistoryDetailSnapshotBuilder {
         }
 
         return resolved
+    }
+}
+
+nonisolated struct HistoryDetailPreservedExerciseEditState: Equatable, Sendable {
+    let baseline: HistoryDetailSnapshotBuilder.LocalState
+    let drafts: WorkoutExerciseDraftStateSnapshot
+}
+
+nonisolated enum HistoryDetailCardioRefreshPolicy {
+    static func preserveExerciseEdits(
+        baseline: HistoryDetailSnapshotBuilder.LocalState,
+        drafts: WorkoutExerciseDraftStateSnapshot,
+        keeping exerciseIDs: Set<UUID>
+    ) -> HistoryDetailPreservedExerciseEditState {
+        HistoryDetailPreservedExerciseEditState(
+            baseline: HistoryDetailSnapshotBuilder.LocalState(
+                setDraftsByExerciseID: baseline.setDraftsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                restByExerciseID: baseline.restByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                notesByExerciseID: baseline.notesByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                }
+            ),
+            drafts: WorkoutExerciseDraftStateSnapshot(
+                draftsByExerciseID: drafts.draftsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                restsByExerciseID: drafts.restsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                notesByExerciseID: drafts.notesByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                }
+            )
+        )
+    }
+
+    static func isDirty(
+        exerciseID: UUID,
+        state: HistoryDetailPreservedExerciseEditState
+    ) -> Bool {
+        state.drafts.draftsByExerciseID[exerciseID]
+            != state.baseline.setDraftsByExerciseID[exerciseID]
+            || state.drafts.restsByExerciseID[exerciseID]
+                != state.baseline.restByExerciseID[exerciseID]
+            || state.drafts.notesByExerciseID[exerciseID]
+                != state.baseline.notesByExerciseID[exerciseID]
     }
 }

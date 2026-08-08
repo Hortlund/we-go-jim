@@ -627,10 +627,101 @@ struct WorkoutCompletionPresentation: Identifiable, Equatable {
 
 nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
     case header
-    case preWorkoutCardio
+    case cardio(role: WorkoutCardioRole, activityID: UUID?)
     case exercise(UUID)
-    case postWorkoutCardio
     case cancelSection
+
+    private enum CodingKeys: String, CodingKey {
+        case header
+        case cardio
+        case exercise
+        case cancelSection
+        case preWorkoutCardio
+        case postWorkoutCardio
+    }
+
+    private enum AssociatedValueCodingKeys: String, CodingKey {
+        case value = "_0"
+        case role
+        case activityID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if container.contains(.header) {
+            self = .header
+            return
+        }
+        if container.contains(.cancelSection) {
+            self = .cancelSection
+            return
+        }
+        if container.contains(.preWorkoutCardio) {
+            self = .cardio(role: .warmUp, activityID: nil)
+            return
+        }
+        if container.contains(.postWorkoutCardio) {
+            self = .cardio(role: .finisher, activityID: nil)
+            return
+        }
+        if container.contains(.exercise) {
+            let values = try container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .exercise
+            )
+            self = .exercise(try values.decode(UUID.self, forKey: .value))
+            return
+        }
+        if container.contains(.cardio) {
+            let values = try container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .cardio
+            )
+            self = .cardio(
+                role: try values.decode(WorkoutCardioRole.self, forKey: .role),
+                activityID: try values.decodeIfPresent(UUID.self, forKey: .activityID)
+            )
+            return
+        }
+
+        throw DecodingError.dataCorrupted(
+            DecodingError.Context(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unknown active-workout scroll target."
+            )
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .header:
+            _ = container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .header
+            )
+        case .cardio(let role, let activityID):
+            var values = container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .cardio
+            )
+            try values.encode(role, forKey: .role)
+            try values.encodeIfPresent(activityID, forKey: .activityID)
+        case .exercise(let exerciseID):
+            var values = container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .exercise
+            )
+            try values.encode(exerciseID, forKey: .value)
+        case .cancelSection:
+            _ = container.nestedContainer(
+                keyedBy: AssociatedValueCodingKeys.self,
+                forKey: .cancelSection
+            )
+        }
+    }
 }
 
 @MainActor

@@ -6,6 +6,11 @@ enum ExercisesCatalogMode {
     case pick(actionTitle: String, onSelect: (ExerciseCatalogSelection) -> Void)
 }
 
+enum ExercisesCatalogCustomCreationMode: Equatable {
+    case standard
+    case cardio
+}
+
 private struct ExerciseRuntimeAppendInput: Sendable {
     let remoteUUID: String
     let displayName: String
@@ -42,6 +47,7 @@ struct ExercisesCatalogView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
 
     private let mode: ExercisesCatalogMode
+    private let customCreationMode: ExercisesCatalogCustomCreationMode
 
     @State private var searchState = ExercisesCatalogSearchState()
     @State private var controller = ExercisesCatalogController()
@@ -76,8 +82,14 @@ struct ExercisesCatalogView: View {
         case failed
     }
 
-    init(mode: ExercisesCatalogMode = .browse) {
+    init(
+        mode: ExercisesCatalogMode = .browse,
+        initialFilters: ExerciseFilters = .default,
+        customCreationMode: ExercisesCatalogCustomCreationMode = .standard
+    ) {
         self.mode = mode
+        self.customCreationMode = customCreationMode
+        self._searchState = State(initialValue: ExercisesCatalogSearchState(filters: initialFilters))
     }
 
     private var isPickerMode: Bool {
@@ -306,6 +318,7 @@ struct ExercisesCatalogView: View {
                     draft: $customExerciseDraft,
                     availableMuscles: controller.snapshot.muscleGroups,
                     suggestedCategories: controller.snapshot.availableCategories,
+                    creationMode: customCreationMode,
                     onCancel: {
                         showingCustomExerciseSheet = false
                     },
@@ -474,11 +487,13 @@ struct ExercisesCatalogView: View {
 
     private var createExerciseButton: some View {
         Button {
-            customExerciseDraft = .empty
+            customExerciseDraft = customCreationMode == .cardio ? .emptyCardio : .empty
             showingCustomExerciseSheet = true
         } label: {
             Label(
-                isPickerMode ? "Create Custom Exercise" : "Create Exercise",
+                customCreationMode == .cardio
+                    ? "Create Custom Cardio"
+                    : (isPickerMode ? "Create Custom Exercise" : "Create Exercise"),
                 systemImage: "square.and.pencil"
             )
             .frame(maxWidth: .infinity)
@@ -834,8 +849,7 @@ struct ExercisesCatalogView: View {
         headerPresentation.reset()
         controller.applyFilters(
             query: searchState.debouncedQuery,
-            selectedPrimaryMuscleID: searchState.selectedPrimaryMuscleID,
-            selectedCategory: searchState.selectedCategory,
+            filters: searchState.exerciseFilters,
             sortDescending: searchState.sortDescending
         )
     }
@@ -1133,14 +1147,38 @@ struct ExercisesCatalogSearchState: Equatable {
     private(set) var debouncedQuery = ""
     private(set) var resetToken = 0
     var selectedPrimaryMuscleID: Int?
+    var selectedSecondaryMuscleID: Int?
+    var selectedEquipmentToken: String?
     var selectedCategory: String?
+    var includeUncurated: Bool
     var sortDescending = false
+
+    init(filters: ExerciseFilters = .default) {
+        selectedPrimaryMuscleID = filters.primaryMuscleID
+        selectedSecondaryMuscleID = filters.secondaryMuscleID
+        selectedEquipmentToken = filters.equipmentToken
+        selectedCategory = filters.categoryName
+        includeUncurated = filters.includeUncurated
+    }
 
     var hasActiveFilters: Bool {
         !debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || selectedPrimaryMuscleID != nil
+            || selectedSecondaryMuscleID != nil
+            || selectedEquipmentToken != nil
             || selectedCategory != nil
+            || includeUncurated
             || sortDescending
+    }
+
+    var exerciseFilters: ExerciseFilters {
+        ExerciseFilters(
+            primaryMuscleID: selectedPrimaryMuscleID,
+            secondaryMuscleID: selectedSecondaryMuscleID,
+            equipmentToken: selectedEquipmentToken,
+            categoryName: selectedCategory,
+            includeUncurated: includeUncurated
+        )
     }
 
     mutating func updateDebouncedQuery(_ query: String) {
@@ -1150,7 +1188,10 @@ struct ExercisesCatalogSearchState: Equatable {
     mutating func clearSearchAndFilters() {
         debouncedQuery = ""
         selectedPrimaryMuscleID = nil
+        selectedSecondaryMuscleID = nil
+        selectedEquipmentToken = nil
         selectedCategory = nil
+        includeUncurated = false
         sortDescending = false
         resetToken += 1
     }
@@ -1191,14 +1232,12 @@ final class ExercisesCatalogController {
 
     func applyFilters(
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) {
         snapshot.applyFilters(
             query: query,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
+            filters: filters,
             sortDescending: sortDescending
         )
     }
@@ -1244,11 +1283,13 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let categoryName: String
     let equipmentSummary: String
     let primaryMuscleNames: String
+    let cardioTrackingProfileRaw: String?
     let secondaryMuscleNames: String
     let primaryMuscleIDs: Set<Int>
     let secondaryMuscleIDs: Set<Int>
     let instructionSteps: [String]
     let isHidden: Bool
+    let isCurated: Bool
     let isCustomExercise: Bool
     let searchBlob: String
     let image: ExerciseCatalogImageSnapshot?
@@ -1259,7 +1300,8 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
             displayName: displayName,
             categoryName: categoryName,
             equipmentSummary: equipmentSummary,
-            primaryMuscleNames: primaryMuscleNames
+            primaryMuscleNames: primaryMuscleNames,
+            cardioTrackingProfileRaw: cardioTrackingProfileRaw
         )
     }
 
@@ -1270,11 +1312,13 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         categoryName = exercise.categoryName
         equipmentSummary = exercise.equipmentSummary
         primaryMuscleNames = exercise.primaryMuscleNames
+        cardioTrackingProfileRaw = exercise.cardioTrackingProfile?.rawValue
         secondaryMuscleNames = exercise.secondaryMuscleNames
         primaryMuscleIDs = Set(exercise.primaryMuscles.map(\.remoteID))
         secondaryMuscleIDs = Set(exercise.secondaryMuscles.map(\.remoteID))
         instructionSteps = exercise.instructionSteps
         isHidden = exercise.isHidden
+        isCurated = exercise.isCurated
         isCustomExercise = exercise.isCustomExercise
         searchBlob = exercise.searchableTerms
             .joined(separator: " ")
@@ -1344,6 +1388,13 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
                     categoryName: exercise.categoryName,
                     searchBlob: exercise.searchBlob,
                     primaryMuscleIDs: exercise.primaryMuscleIDs,
+                    secondaryMuscleIDs: exercise.secondaryMuscleIDs,
+                    equipmentTokens: Set(exercise.equipmentSummary
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .filter { !$0.isEmpty }),
+                    isCurated: exercise.isCurated,
+                    isCustomExercise: exercise.isCustomExercise,
                     indexKey: indexKey
                 )
             )
@@ -1360,23 +1411,20 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
         sections = Self.sections(
             from: rows,
             query: "",
-            selectedPrimaryMuscleID: nil,
-            selectedCategory: nil,
+            filters: .default,
             sortDescending: false
         )
     }
 
     mutating func applyFilters(
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) {
         sections = Self.sections(
             from: allRows,
             query: query,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
+            filters: filters,
             sortDescending: sortDescending
         )
     }
@@ -1389,8 +1437,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
     private static func sections(
         from rows: [ExerciseCatalogRowSnapshot],
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) -> [ExercisesSectionSnapshot] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1400,11 +1447,28 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
 
-        if let selectedPrimaryMuscleID {
+        if !filters.includeUncurated {
+            filtered = filtered.filter { $0.isCustomExercise || $0.isCurated }
+        }
+        if let selectedPrimaryMuscleID = filters.primaryMuscleID {
             filtered = filtered.filter { $0.primaryMuscleIDs.contains(selectedPrimaryMuscleID) }
         }
-        if let selectedCategory {
-            filtered = filtered.filter { $0.categoryName == selectedCategory }
+        if let selectedSecondaryMuscleID = filters.secondaryMuscleID {
+            filtered = filtered.filter { $0.secondaryMuscleIDs.contains(selectedSecondaryMuscleID) }
+        }
+        if let selectedEquipmentToken = filters.equipmentToken {
+            let normalizedEquipment = selectedEquipmentToken
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            filtered = filtered.filter { $0.equipmentTokens.contains(normalizedEquipment) }
+        }
+        if let selectedCategory = filters.categoryName {
+            let normalizedCategory = selectedCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+            filtered = filtered.filter { row in
+                row.categoryName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(normalizedCategory) == .orderedSame
+            }
         }
         if !queryTokens.isEmpty {
             filtered = filtered.filter { row in
@@ -1436,6 +1500,10 @@ nonisolated struct ExerciseCatalogRowSnapshot: Identifiable, Equatable, Sendable
     let categoryName: String
     let searchBlob: String
     let primaryMuscleIDs: Set<Int>
+    let secondaryMuscleIDs: Set<Int>
+    let equipmentTokens: Set<String>
+    let isCurated: Bool
+    let isCustomExercise: Bool
     let indexKey: String
 }
 
@@ -1834,11 +1902,65 @@ private enum ExerciseDetailMutationError: LocalizedError {
     }
 }
 
+struct CardioCustomExerciseCreationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
+
+    let onSelect: (ExerciseCatalogSelection) -> Void
+
+    @State private var draft = CustomExerciseDraft.emptyCardio
+    @State private var errorMessage = ""
+    @State private var showingError = false
+
+    var body: some View {
+        CustomExerciseEditorView(
+            draft: $draft,
+            availableMuscles: [],
+            suggestedCategories: ["Cardio"],
+            creationMode: .cardio,
+            title: String(localized: "Create Cardio"),
+            subtitle: String(localized: "Name the activity and choose how you want to track it."),
+            onCancel: {
+                dismiss()
+            },
+            onSave: save
+        )
+        .alert("Cardio Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private var backgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
+    private func save() {
+        let draft = draft
+        Task { @MainActor in
+            do {
+                let created = try await backgroundStore.performWrite("exercises.custom.cardio.create") { backgroundContext in
+                    let exercise = try ExerciseCatalogRepository(modelContext: backgroundContext)
+                        .createCustomExercise(draft: draft)
+                    return ExerciseCatalogItemSnapshot(exercise: exercise)
+                }
+                onSelect(created.selection)
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
+        }
+    }
+}
+
 private struct CustomExerciseEditorView: View {
     @Binding var draft: CustomExerciseDraft
 
     let availableMuscles: [ExerciseMuscleSnapshot]
     let suggestedCategories: [String]
+    let creationMode: ExercisesCatalogCustomCreationMode
     let title: String
     let subtitle: String
     let saveButtonTitle: String
@@ -1849,6 +1971,7 @@ private struct CustomExerciseEditorView: View {
         draft: Binding<CustomExerciseDraft>,
         availableMuscles: [ExerciseMuscleSnapshot],
         suggestedCategories: [String],
+        creationMode: ExercisesCatalogCustomCreationMode = .standard,
         title: String = "New Exercise",
         subtitle: String = "Save a custom exercise for future workouts.",
         saveButtonTitle: String = "Save",
@@ -1858,6 +1981,7 @@ private struct CustomExerciseEditorView: View {
         self._draft = draft
         self.availableMuscles = availableMuscles
         self.suggestedCategories = suggestedCategories
+        self.creationMode = creationMode
         self.title = title
         self.subtitle = subtitle
         self.saveButtonTitle = saveButtonTitle
@@ -1869,7 +1993,9 @@ private struct CustomExerciseEditorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 formCard
-                categorySuggestions
+                if creationMode == .standard {
+                    categorySuggestions
+                }
             }
             .padding(16)
         }
@@ -1902,43 +2028,62 @@ private struct CustomExerciseEditorView: View {
                 .textInputAutocapitalization(.words)
                 .wgjPillField()
 
-            TextField("Category", text: $draft.categoryName)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
+            if creationMode == .standard {
+                TextField("Category", text: $draft.categoryName)
+                    .textInputAutocapitalization(.words)
+                    .wgjPillField()
+            }
 
             TextField("Equipment (optional)", text: $draft.equipmentSummary)
                 .textInputAutocapitalization(.words)
                 .wgjPillField()
 
-            TextField("Aliases (comma separated)", text: aliasesBinding)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
-
-            muscleSelector(
-                title: "Primary muscles",
-                summary: selectionSummary(for: draft.primaryMuscleIDs, emptyTitle: "Required"),
-                selectedIDs: draft.primaryMuscleIDs
-            ) { muscleID in
-                togglePrimaryMuscle(muscleID)
+            if creationMode == .standard {
+                TextField("Aliases (comma separated)", text: aliasesBinding)
+                    .textInputAutocapitalization(.words)
+                    .wgjPillField()
             }
 
-            muscleSelector(
-                title: "Secondary muscles",
-                summary: selectionSummary(for: draft.secondaryMuscleIDs, emptyTitle: "Optional"),
-                selectedIDs: draft.secondaryMuscleIDs,
-                availableIDs: availableMuscles.map(\.remoteID).filter { !draft.primaryMuscleIDs.contains($0) }
-            ) { muscleID in
-                toggleSecondaryMuscle(muscleID)
+            if creationMode == .standard {
+                muscleSelector(
+                    title: "Primary muscles",
+                    summary: selectionSummary(for: draft.primaryMuscleIDs, emptyTitle: "Required"),
+                    selectedIDs: draft.primaryMuscleIDs
+                ) { muscleID in
+                    togglePrimaryMuscle(muscleID)
+                }
+
+                muscleSelector(
+                    title: "Secondary muscles",
+                    summary: selectionSummary(for: draft.secondaryMuscleIDs, emptyTitle: "Optional"),
+                    selectedIDs: draft.secondaryMuscleIDs,
+                    availableIDs: availableMuscles.map(\.remoteID).filter { !draft.primaryMuscleIDs.contains($0) }
+                ) { muscleID in
+                    toggleSecondaryMuscle(muscleID)
+                }
             }
 
-            TextField("How to perform (optional)", text: $draft.instructionText, axis: .vertical)
-                .lineLimit(4...8)
-                .textInputAutocapitalization(.sentences)
-                .wgjPillField()
+            if isCardioCategory {
+                Picker("Tracking", selection: cardioTrackingProfileBinding) {
+                    ForEach(WorkoutCardioTrackingProfile.allCases) { profile in
+                        Text(cardioTrackingProfileTitle(profile)).tag(profile)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(WGJTheme.accentBlue)
+                .accessibilityIdentifier("custom-cardio-tracking-profile")
+            }
 
-            Text("Commas and line breaks will appear as separate steps.")
-                .font(.footnote)
-                .foregroundStyle(WGJTheme.textSecondary)
+            if creationMode == .standard {
+                TextField("How to perform (optional)", text: $draft.instructionText, axis: .vertical)
+                    .lineLimit(4...8)
+                    .textInputAutocapitalization(.sentences)
+                    .wgjPillField()
+
+                Text("Commas and line breaks will appear as separate steps.")
+                    .font(.footnote)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
         }
         .padding(14)
         .wgjCardContainer(strong: true)
@@ -2023,7 +2168,23 @@ private struct CustomExerciseEditorView: View {
     private var canSave: Bool {
         !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !draft.categoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !draft.primaryMuscleIDs.isEmpty
+            && (isCardioCategory || !draft.primaryMuscleIDs.isEmpty)
+    }
+
+    private var isCardioCategory: Bool {
+        draft.categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare("Cardio") == .orderedSame
+    }
+
+    private var cardioTrackingProfileBinding: Binding<WorkoutCardioTrackingProfile> {
+        Binding(
+            get: { draft.cardioTrackingProfile ?? .machineDistance },
+            set: { draft.cardioTrackingProfile = $0 }
+        )
+    }
+
+    private func cardioTrackingProfileTitle(_ profile: WorkoutCardioTrackingProfile) -> String {
+        CardioLocalizedCopy.trackingProfileTitle(profile)
     }
 
     private func selectionSummary(for muscleIDs: [Int], emptyTitle: String) -> String {

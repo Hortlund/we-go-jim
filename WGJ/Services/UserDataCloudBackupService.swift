@@ -920,6 +920,7 @@ private struct Profile: Codable, BackupModel {
     var athleteTypeRaw: String?
     var avatarImageData: Data?
     var preferredWeightUnitRaw: String
+    var preferredDistanceUnitRaw: String?
     var workoutNotificationStyleRaw: String
     var weeklyWorkoutGoal: Int
     var isTrainingGuidanceEnabled: Bool
@@ -935,6 +936,7 @@ private struct Profile: Codable, BackupModel {
         athleteTypeRaw = model.athleteTypeRaw
         avatarImageData = model.avatarImageData
         preferredWeightUnitRaw = model.preferredWeightUnitRaw
+        preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
         workoutNotificationStyleRaw = model.workoutNotificationStyleRaw
         weeklyWorkoutGoal = model.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = model.isTrainingGuidanceEnabled
@@ -952,6 +954,7 @@ private struct Profile: Codable, BackupModel {
             athleteType: athleteTypeRaw.flatMap(ProfileAthleteType.init(rawValue:)),
             avatarImageData: avatarImageData,
             preferredWeightUnit: PreferredWeightUnit(rawValue: preferredWeightUnitRaw) ?? .kg,
+            preferredDistanceUnit: preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)),
             workoutNotificationStyle: WorkoutNotificationStyle(rawValue: workoutNotificationStyleRaw) ?? .timeSensitive,
             weeklyWorkoutGoal: weeklyWorkoutGoal,
             isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
@@ -968,6 +971,7 @@ private struct Profile: Codable, BackupModel {
         model.athleteTypeRaw = athleteTypeRaw
         model.avatarImageData = avatarImageData
         model.preferredWeightUnitRaw = preferredWeightUnitRaw
+        model.preferredDistanceUnitRaw = preferredDistanceUnitRaw
         model.workoutNotificationStyleRaw = workoutNotificationStyleRaw
         model.weeklyWorkoutGoal = weeklyWorkoutGoal
         model.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
@@ -1035,6 +1039,7 @@ private struct CustomExercise: Codable, BackupModel {
     var categoryName: String
     var equipmentSummary: String
     var instructionText: String?
+    var cardioTrackingProfileRaw: String?
     var isHidden: Bool
     var lastUpdateGlobal: Date?
     var updatedAt: Date
@@ -1046,6 +1051,7 @@ private struct CustomExercise: Codable, BackupModel {
         categoryName = model.categoryName
         equipmentSummary = model.equipmentSummary
         instructionText = model.instructionText
+        cardioTrackingProfileRaw = model.cardioTrackingProfileRaw
         isHidden = model.isHidden
         lastUpdateGlobal = model.lastUpdateGlobal
         updatedAt = model.updatedAt
@@ -1059,6 +1065,7 @@ private struct CustomExercise: Codable, BackupModel {
             categoryName: categoryName,
             equipmentSummary: equipmentSummary,
             instructionText: instructionText,
+            cardioTrackingProfileRaw: cardioTrackingProfileRaw,
             isCurated: false,
             isHidden: isHidden,
             sourceName: "custom",
@@ -1073,6 +1080,7 @@ private struct CustomExercise: Codable, BackupModel {
         model.categoryName = categoryName
         model.equipmentSummary = equipmentSummary
         model.instructionText = instructionText
+        model.cardioTrackingProfileRaw = cardioTrackingProfileRaw
         model.isHidden = isHidden
         model.lastUpdateGlobal = lastUpdateGlobal
         model.updatedAt = updatedAt
@@ -1143,11 +1151,17 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
     var id: UUID
     var templateID: UUID
     var phaseRaw: String
+    var roleRaw: String?
+    var sortOrder: Int?
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int
+    var targetDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -1155,11 +1169,17 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
         id = model.id
         templateID = model.templateID
         phaseRaw = model.phaseRaw
+        roleRaw = model.roleRaw
+        sortOrder = model.sortOrder
         catalogExerciseUUID = model.catalogExerciseUUID
         exerciseNameSnapshot = model.exerciseNameSnapshot
         categorySnapshot = model.categorySnapshot
         muscleSummarySnapshot = model.muscleSummarySnapshot
+        trackingProfileRaw = model.trackingProfileRaw
+        goalKindRaw = model.goalKindRaw
         targetDurationSeconds = model.targetDurationSeconds
+        targetDistanceMeters = model.targetDistanceMeters
+        preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
         createdAt = model.createdAt
         updatedAt = model.updatedAt
     }
@@ -1169,11 +1189,17 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
             id: id,
             templateID: templateID,
             phase: WorkoutCardioPhase(rawValue: phaseRaw) ?? .preWorkout,
+            role: roleRaw.flatMap(WorkoutCardioRole.init(rawValue:)),
+            sortOrder: sortOrder ?? 0,
             catalogExerciseUUID: catalogExerciseUUID,
             exerciseNameSnapshot: exerciseNameSnapshot,
             categorySnapshot: categorySnapshot,
             muscleSummarySnapshot: muscleSummarySnapshot,
+            trackingProfile: trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)),
+            goalKind: goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:)),
             targetDurationSeconds: targetDurationSeconds,
+            targetDistanceMeters: targetDistanceMeters,
+            preferredDistanceUnit: preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)),
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -1182,11 +1208,17 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
     nonisolated func apply(to model: TemplateCardioBlock) {
         model.templateID = templateID
         model.phaseRaw = phaseRaw
+        model.roleRaw = roleRaw
+        model.sortOrder = sortOrder ?? 0
         model.catalogExerciseUUID = catalogExerciseUUID
         model.exerciseNameSnapshot = exerciseNameSnapshot
         model.categorySnapshot = categorySnapshot
         model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.trackingProfileRaw = trackingProfileRaw
+        model.goalKindRaw = goalKindRaw
         model.targetDurationSeconds = targetDurationSeconds
+        model.targetDistanceMeters = targetDistanceMeters
+        model.preferredDistanceUnitRaw = preferredDistanceUnitRaw
         model.createdAt = createdAt
         model.updatedAt = updatedAt
     }
@@ -1566,12 +1598,24 @@ private struct WorkoutSupersetGroupBackup: Codable, BackupModel {
 private struct WorkoutCardioBlockBackup: Codable, BackupModel {
     var id: UUID
     var sessionID: UUID
+    var sourceTemplateCardioID: UUID?
     var phaseRaw: String
+    var roleRaw: String?
+    var sortOrder: Int?
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int
+    var targetDistanceMeters: Double?
+    var actualDurationSeconds: Int?
+    var actualDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+    var inclinePercent: Double?
+    var resistanceLevel: Double?
+    var cardioNotes: String?
     var isCompleted: Bool
     var createdAt: Date
     var updatedAt: Date
@@ -1579,12 +1623,24 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
     nonisolated init(_ model: WorkoutSessionCardioBlock) {
         id = model.id
         sessionID = model.sessionID
+        sourceTemplateCardioID = model.sourceTemplateCardioID
         phaseRaw = model.phaseRaw
+        roleRaw = model.roleRaw
+        sortOrder = model.sortOrder
         catalogExerciseUUID = model.catalogExerciseUUID
         exerciseNameSnapshot = model.exerciseNameSnapshot
         categorySnapshot = model.categorySnapshot
         muscleSummarySnapshot = model.muscleSummarySnapshot
+        trackingProfileRaw = model.trackingProfileRaw
+        goalKindRaw = model.goalKindRaw
         targetDurationSeconds = model.targetDurationSeconds
+        targetDistanceMeters = model.targetDistanceMeters
+        actualDurationSeconds = model.actualDurationSeconds
+        actualDistanceMeters = model.actualDistanceMeters
+        preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
+        inclinePercent = model.inclinePercent
+        resistanceLevel = model.resistanceLevel
+        cardioNotes = model.cardioNotes
         isCompleted = model.isCompleted
         createdAt = model.createdAt
         updatedAt = model.updatedAt
@@ -1594,12 +1650,24 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
         WorkoutSessionCardioBlock(
             id: id,
             sessionID: sessionID,
+            sourceTemplateCardioID: sourceTemplateCardioID,
             phase: WorkoutCardioPhase(rawValue: phaseRaw) ?? .preWorkout,
+            role: roleRaw.flatMap(WorkoutCardioRole.init(rawValue:)),
+            sortOrder: sortOrder ?? 0,
             catalogExerciseUUID: catalogExerciseUUID,
             exerciseNameSnapshot: exerciseNameSnapshot,
             categorySnapshot: categorySnapshot,
             muscleSummarySnapshot: muscleSummarySnapshot,
+            trackingProfile: trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)),
+            goalKind: goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:)),
             targetDurationSeconds: targetDurationSeconds,
+            targetDistanceMeters: targetDistanceMeters,
+            actualDurationSeconds: actualDurationSeconds,
+            actualDistanceMeters: actualDistanceMeters,
+            preferredDistanceUnit: preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)),
+            inclinePercent: inclinePercent,
+            resistanceLevel: resistanceLevel,
+            cardioNotes: cardioNotes ?? "",
             isCompleted: isCompleted,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -1608,12 +1676,24 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
 
     nonisolated func apply(to model: WorkoutSessionCardioBlock) {
         model.sessionID = sessionID
+        model.sourceTemplateCardioID = sourceTemplateCardioID
         model.phaseRaw = phaseRaw
+        model.roleRaw = roleRaw
+        model.sortOrder = sortOrder ?? 0
         model.catalogExerciseUUID = catalogExerciseUUID
         model.exerciseNameSnapshot = exerciseNameSnapshot
         model.categorySnapshot = categorySnapshot
         model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.trackingProfileRaw = trackingProfileRaw
+        model.goalKindRaw = goalKindRaw
         model.targetDurationSeconds = targetDurationSeconds
+        model.targetDistanceMeters = targetDistanceMeters
+        model.actualDurationSeconds = actualDurationSeconds
+        model.actualDistanceMeters = actualDistanceMeters
+        model.preferredDistanceUnitRaw = preferredDistanceUnitRaw
+        model.inclinePercent = inclinePercent
+        model.resistanceLevel = resistanceLevel
+        model.cardioNotes = cardioNotes ?? ""
         model.isCompleted = isCompleted
         model.createdAt = createdAt
         model.updatedAt = updatedAt

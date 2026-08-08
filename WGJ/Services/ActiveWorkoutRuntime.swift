@@ -28,10 +28,37 @@ nonisolated struct ActiveWorkoutRuntimeSession: Identifiable, Equatable, Codable
         self.name = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
         self.startedAt = startedAt
         self.notes = notes
-        self.cardioBlocks = cardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+        self.cardioBlocks = cardioBlocks.sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
         self.exercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case templateID
+        case name
+        case startedAt
+        case notes
+        case cardioBlocks
+        case exercises
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        templateID = try container.decodeIfPresent(UUID.self, forKey: .templateID)
+        name = try container.decode(String.self, forKey: .name)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        notes = try container.decode(String.self, forKey: .notes)
+        cardioBlocks = try container.decode([ActiveWorkoutRuntimeCardioBlock].self, forKey: .cardioBlocks)
+            .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
+        exercises = try container.decode([ActiveWorkoutRuntimeExercise].self, forKey: .exercises)
+            .sorted { $0.sortOrder < $1.sortOrder }
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
 
@@ -138,7 +165,7 @@ nonisolated extension ActiveWorkoutRuntimeSession {
     func snapshotForActiveWorkoutPersistence(
         sessionNameDraft: String,
         notesDraft: String,
-        pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool],
+        pendingCardioCompletionsByID: [UUID: Bool],
         setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
         restByExerciseID: [UUID: Int],
         notesByExerciseID: [UUID: String],
@@ -152,12 +179,13 @@ nonisolated extension ActiveWorkoutRuntimeSession {
         snapshot.notes = notesDraft
         snapshot.cardioBlocks = snapshot.cardioBlocks.map { cardioBlock in
             var updated = cardioBlock
-            if let completion = pendingCardioCompletionsByPhase[cardioBlock.phase] {
+            if let completion = pendingCardioCompletionsByID[cardioBlock.id] {
                 updated.isCompleted = completion
                 updated.updatedAt = date
             }
             return updated
         }
+        .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
         snapshot.exercises = snapshot.exercises.map { exercise in
             var updated = exercise
             updated.setDrafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
@@ -175,35 +203,111 @@ nonisolated extension ActiveWorkoutRuntimeSession {
 
 nonisolated struct ActiveWorkoutRuntimeCardioBlock: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
+    var sourceTemplateCardioID: UUID?
     var phase: WorkoutCardioPhase
+    var roleRaw: String?
+    var sortOrder: Int
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int
+    var targetDistanceMeters: Double?
+    var actualDurationSeconds: Int?
+    var actualDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+    var inclinePercent: Double?
+    var resistanceLevel: Double?
+    var cardioNotes: String
+    var timerStateRaw: String?
+    var timerSegmentStartedAt: Date?
+    var timerAccumulatedSeconds: Int
     var isCompleted: Bool
     var createdAt: Date
     var updatedAt: Date
 
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
+
+    var timerState: WorkoutCardioTimerState {
+        get { timerStateRaw.flatMap(WorkoutCardioTimerState.init(rawValue:)) ?? .idle }
+        set { timerStateRaw = newValue.rawValue }
+    }
+
     init(
         id: UUID = UUID(),
+        sourceTemplateCardioID: UUID? = nil,
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
         targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        actualDurationSeconds: Int? = nil,
+        actualDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
+        inclinePercent: Double? = nil,
+        resistanceLevel: Double? = nil,
+        cardioNotes: String = "",
+        timerState: WorkoutCardioTimerState = .idle,
+        timerSegmentStartedAt: Date? = nil,
+        timerAccumulatedSeconds: Int = 0,
         isCompleted: Bool = false,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
         self.id = id
+        self.sourceTemplateCardioID = sourceTemplateCardioID
         self.phase = phase
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
         self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.actualDurationSeconds = actualDurationSeconds
+        self.actualDistanceMeters = actualDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
+        self.inclinePercent = inclinePercent
+        self.resistanceLevel = resistanceLevel
+        self.cardioNotes = cardioNotes
+        self.timerStateRaw = timerState.rawValue
+        self.timerSegmentStartedAt = timerSegmentStartedAt
+        self.timerAccumulatedSeconds = max(0, timerAccumulatedSeconds)
         self.isCompleted = isCompleted
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -212,16 +316,108 @@ nonisolated struct ActiveWorkoutRuntimeCardioBlock: Identifiable, Equatable, Cod
     init(model: ActiveWorkoutDraftCardioBlock) {
         self.init(
             id: model.id,
+            sourceTemplateCardioID: model.sourceTemplateCardioID,
             phase: model.phase,
+            sortOrder: model.sortOrder,
             catalogExerciseUUID: model.catalogExerciseUUID,
             exerciseNameSnapshot: model.exerciseNameSnapshot,
             categorySnapshot: model.categorySnapshot,
             muscleSummarySnapshot: model.muscleSummarySnapshot,
             targetDurationSeconds: model.targetDurationSeconds,
+            targetDistanceMeters: model.targetDistanceMeters,
+            actualDurationSeconds: model.actualDurationSeconds,
+            actualDistanceMeters: model.actualDistanceMeters,
+            inclinePercent: model.inclinePercent,
+            resistanceLevel: model.resistanceLevel,
+            cardioNotes: model.cardioNotes,
+            timerState: model.timerState,
+            timerSegmentStartedAt: model.timerSegmentStartedAt,
+            timerAccumulatedSeconds: model.timerAccumulatedSeconds,
             isCompleted: model.isCompleted,
             createdAt: model.createdAt,
             updatedAt: model.updatedAt
         )
+        roleRaw = model.roleRaw
+        trackingProfileRaw = model.trackingProfileRaw
+        goalKindRaw = model.goalKindRaw
+        preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
+        timerStateRaw = model.timerStateRaw
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sourceTemplateCardioID
+        case phase
+        case roleRaw
+        case sortOrder
+        case catalogExerciseUUID
+        case exerciseNameSnapshot
+        case categorySnapshot
+        case muscleSummarySnapshot
+        case trackingProfileRaw
+        case goalKindRaw
+        case targetDurationSeconds
+        case targetDistanceMeters
+        case actualDurationSeconds
+        case actualDistanceMeters
+        case preferredDistanceUnitRaw
+        case inclinePercent
+        case resistanceLevel
+        case cardioNotes
+        case timerStateRaw
+        case timerSegmentStartedAt
+        case timerAccumulatedSeconds
+        case isCompleted
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        sourceTemplateCardioID = try container.decodeIfPresent(UUID.self, forKey: .sourceTemplateCardioID)
+        phase = try container.decode(WorkoutCardioPhase.self, forKey: .phase)
+        roleRaw = try container.decodeIfPresent(String.self, forKey: .roleRaw)
+        sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+        catalogExerciseUUID = try container.decode(String.self, forKey: .catalogExerciseUUID)
+        exerciseNameSnapshot = try container.decode(String.self, forKey: .exerciseNameSnapshot)
+        categorySnapshot = try container.decode(String.self, forKey: .categorySnapshot)
+        muscleSummarySnapshot = try container.decode(String.self, forKey: .muscleSummarySnapshot)
+        trackingProfileRaw = try container.decodeIfPresent(String.self, forKey: .trackingProfileRaw)
+        goalKindRaw = try container.decodeIfPresent(String.self, forKey: .goalKindRaw)
+        targetDurationSeconds = min(
+            24 * 60 * 60,
+            max(0, try container.decode(Int.self, forKey: .targetDurationSeconds))
+        )
+        targetDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .targetDistanceMeters)
+        actualDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .actualDurationSeconds)
+        actualDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .actualDistanceMeters)
+        preferredDistanceUnitRaw = try container.decodeIfPresent(String.self, forKey: .preferredDistanceUnitRaw)
+        inclinePercent = try container.decodeIfPresent(Double.self, forKey: .inclinePercent)
+        resistanceLevel = try container.decodeIfPresent(Double.self, forKey: .resistanceLevel)
+        cardioNotes = try container.decodeIfPresent(String.self, forKey: .cardioNotes) ?? ""
+        timerStateRaw = try container.decodeIfPresent(String.self, forKey: .timerStateRaw)
+        timerSegmentStartedAt = try container.decodeIfPresent(Date.self, forKey: .timerSegmentStartedAt)
+        timerAccumulatedSeconds = max(
+            0,
+            try container.decodeIfPresent(Int.self, forKey: .timerAccumulatedSeconds) ?? 0
+        )
+        isCompleted = try container.decode(Bool.self, forKey: .isCompleted)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    static func areInIncreasingOrder(
+        _ lhs: ActiveWorkoutRuntimeCardioBlock,
+        _ rhs: ActiveWorkoutRuntimeCardioBlock
+    ) -> Bool {
+        if lhs.role.sortOrder != rhs.role.sortOrder {
+            return lhs.role.sortOrder < rhs.role.sortOrder
+        }
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        return lhs.createdAt < rhs.createdAt
     }
 }
 
@@ -788,17 +984,25 @@ nonisolated final class ActiveWorkoutSessionFactory {
         session.cardioBlocks = try templateCardioBlocks(templateID: template.id)
             .map { templateCardioBlock in
                 ActiveWorkoutRuntimeCardioBlock(
+                    sourceTemplateCardioID: templateCardioBlock.id,
                     phase: templateCardioBlock.phase,
+                    role: templateCardioBlock.role,
+                    sortOrder: templateCardioBlock.sortOrder,
                     catalogExerciseUUID: templateCardioBlock.catalogExerciseUUID,
                     exerciseNameSnapshot: templateCardioBlock.exerciseNameSnapshot,
                     categorySnapshot: templateCardioBlock.categorySnapshot,
                     muscleSummarySnapshot: templateCardioBlock.muscleSummarySnapshot,
+                    trackingProfile: templateCardioBlock.trackingProfile,
+                    goalKind: templateCardioBlock.goalKind,
                     targetDurationSeconds: templateCardioBlock.targetDurationSeconds,
+                    targetDistanceMeters: templateCardioBlock.targetDistanceMeters,
+                    preferredDistanceUnit: templateCardioBlock.preferredDistanceUnit,
                     isCompleted: false,
                     createdAt: now,
                     updatedAt: now
                 )
             }
+            .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
 
         let componentResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
         session.exercises = try templateExercises(templateID: template.id)
@@ -943,7 +1147,15 @@ nonisolated final class ActiveWorkoutSessionFactory {
             sortBy: [SortDescriptor(\.phaseRaw, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
     }
 
     private func templateExercises(templateID: UUID) throws -> [TemplateExercise] {
