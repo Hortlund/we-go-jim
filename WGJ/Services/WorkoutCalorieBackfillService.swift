@@ -6,13 +6,26 @@ nonisolated struct WorkoutCalorieBackfillResult: Equatable, Sendable {
     let estimatedCount: Int
 }
 
+nonisolated struct WorkoutCalorieBackfillDependencies {
+    let saveBatch: (ModelContext) throws -> Void
+
+    init(saveBatch: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
+        self.saveBatch = saveBatch
+    }
+}
+
 nonisolated final class WorkoutCalorieBackfillService {
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
+    private let dependencies: WorkoutCalorieBackfillDependencies
 
-    init(modelContext: ModelContext) {
+    init(
+        modelContext: ModelContext,
+        dependencies: WorkoutCalorieBackfillDependencies = WorkoutCalorieBackfillDependencies()
+    ) {
         self.modelContext = modelContext
         self.sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        self.dependencies = dependencies
     }
 
     func backfillMissingEstimates(
@@ -32,9 +45,6 @@ nonisolated final class WorkoutCalorieBackfillService {
             return zeroResult
         }
 
-        let sessions = try eligibleSessions()
-        guard !sessions.isEmpty else { return zeroResult }
-
         let boundedBatchSize = max(1, batchSize)
         var committedEvaluatedCount = 0
         var committedEstimatedCount = 0
@@ -45,66 +55,78 @@ nonisolated final class WorkoutCalorieBackfillService {
             }
         }
 
-        for batchStart in stride(from: 0, to: sessions.count, by: boundedBatchSize) {
-            let batchEnd = min(batchStart + boundedBatchSize, sessions.count)
+        while true {
+            let sessions = try eligibleSessions(limit: boundedBatchSize)
+            guard !sessions.isEmpty else {
+                return WorkoutCalorieBackfillResult(
+                    evaluatedCount: committedEvaluatedCount,
+                    estimatedCount: committedEstimatedCount
+                )
+            }
+
             var batchEvaluatedCount = 0
             var batchEstimatedCount = 0
 
-            for session in sessions[batchStart..<batchEnd] {
-                guard session.calorieEstimateVersion == nil else { continue }
+            do {
+                for session in sessions {
+                    guard session.calorieEstimateVersion == nil else { continue }
 
-                let result = WorkoutCalorieEstimator.estimate(
-                    profile: profileSnapshot,
-                    facts: try persistedFacts(for: session),
-                    referenceDate: referenceDate,
-                    calendar: calendar
-                )
+                    let result = WorkoutCalorieEstimator.estimate(
+                        profile: profileSnapshot,
+                        facts: try persistedFacts(for: session),
+                        referenceDate: referenceDate,
+                        calendar: calendar
+                    )
 
-                switch result {
-                case let .estimated(activeCalories, version):
-                    session.estimatedActiveCalories = activeCalories
-                    session.calorieEstimateVersion = version
-                    session.updatedAt = referenceDate
-                    batchEvaluatedCount += 1
-                    batchEstimatedCount += 1
-                case let .evaluatedWithoutEstimate(version):
-                    session.estimatedActiveCalories = nil
-                    session.calorieEstimateVersion = version
-                    session.updatedAt = referenceDate
-                    batchEvaluatedCount += 1
-                case .disabled, .unavailable:
-                    continue
+                    switch result {
+                    case let .estimated(activeCalories, version):
+                        session.estimatedActiveCalories = activeCalories
+                        session.calorieEstimateVersion = version
+                        session.updatedAt = referenceDate
+                        batchEvaluatedCount += 1
+                        batchEstimatedCount += 1
+                    case let .evaluatedWithoutEstimate(version):
+                        session.estimatedActiveCalories = nil
+                        session.calorieEstimateVersion = version
+                        session.updatedAt = referenceDate
+                        batchEvaluatedCount += 1
+                    case .disabled, .unavailable:
+                        continue
+                    }
                 }
+
+                guard batchEvaluatedCount == sessions.count else {
+                    modelContext.rollback()
+                    return WorkoutCalorieBackfillResult(
+                        evaluatedCount: committedEvaluatedCount,
+                        estimatedCount: committedEstimatedCount
+                    )
+                }
+                try dependencies.saveBatch(modelContext)
+            } catch {
+                modelContext.rollback()
+                throw error
             }
 
-            guard batchEvaluatedCount > 0 else { continue }
-            try modelContext.save()
             committedEvaluatedCount += batchEvaluatedCount
             committedEstimatedCount += batchEstimatedCount
         }
-
-        return WorkoutCalorieBackfillResult(
-            evaluatedCount: committedEvaluatedCount,
-            estimatedCount: committedEstimatedCount
-        )
     }
 
-    private func eligibleSessions() throws -> [WorkoutSession] {
+    private func eligibleSessions(limit: Int) throws -> [WorkoutSession] {
         let completedStatus = WorkoutSessionStatus.completed.rawValue
-        let descriptor = FetchDescriptor<WorkoutSession>(
+        var descriptor = FetchDescriptor<WorkoutSession>(
             predicate: #Predicate { session in
                 session.statusRaw == completedStatus && session.calorieEstimateVersion == nil
-            }
+            },
+            sortBy: [
+                SortDescriptor(\WorkoutSession.endedAt, order: .forward),
+                SortDescriptor(\WorkoutSession.startedAt, order: .forward),
+                SortDescriptor(\WorkoutSession.id, order: .forward),
+            ]
         )
-
-        return try modelContext.fetch(descriptor).sorted { lhs, rhs in
-            let lhsCompletedAt = lhs.endedAt ?? lhs.startedAt
-            let rhsCompletedAt = rhs.endedAt ?? rhs.startedAt
-            if lhsCompletedAt != rhsCompletedAt {
-                return lhsCompletedAt < rhsCompletedAt
-            }
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
+        descriptor.fetchLimit = limit
+        return try modelContext.fetch(descriptor)
     }
 
     private func persistedFacts(for session: WorkoutSession) throws -> WorkoutCalorieFacts {

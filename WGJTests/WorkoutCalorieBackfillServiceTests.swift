@@ -4,6 +4,10 @@ import XCTest
 
 @MainActor
 final class WorkoutCalorieBackfillServiceTests: XCTestCase {
+    private enum BackfillTestError: Error, Equatable {
+        case batchSave
+    }
+
     private let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
 
     func testBackfillProcessesEveryEligibleSessionInBoundedBatchesAndIsIdempotent() throws {
@@ -153,6 +157,130 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
         XCTAssertEqual(restored.calorieEstimateVersion, 1)
     }
 
+    func testBackfillFetchesOnlyOneBoundedBatchBeforeFirstSave() throws {
+        let container = try AppSchema.makeInMemoryContainer(
+            name: "WorkoutCalorieBackfillServiceTests-\(UUID().uuidString)"
+        )
+        let seedContext = ModelContext(container)
+        seedContext.autosaveEnabled = false
+        seedContext.insert(validProfile())
+        let sessions = (0..<3).map { index in
+            WorkoutSession(
+                name: "Bounded \(index)",
+                status: .completed,
+                startedAt: Date(timeIntervalSince1970: Double(1_600_000_000 + index)),
+                endedAt: Date(timeIntervalSince1970: Double(1_600_003_600 + index)),
+                durationSeconds: 3_600
+            )
+        }
+        sessions.forEach(seedContext.insert)
+        try seedContext.save()
+        let lastSessionID = sessions[2].persistentModelID
+
+        let backfillContext = ModelContext(container)
+        backfillContext.autosaveEnabled = false
+        var saveCount = 0
+        let dependencies = WorkoutCalorieBackfillDependencies { context in
+            if saveCount == 0 {
+                let registeredLastSession: WorkoutSession? = context.registeredModel(
+                    for: lastSessionID
+                )
+                XCTAssertNil(
+                    registeredLastSession,
+                    "The next batch must not be fetched before the current batch saves"
+                )
+            }
+            try context.save()
+            saveCount += 1
+        }
+
+        let result = try WorkoutCalorieBackfillService(
+            modelContext: backfillContext,
+            dependencies: dependencies
+        ).backfillMissingEstimates(referenceDate: referenceDate, batchSize: 2)
+
+        XCTAssertEqual(
+            result,
+            WorkoutCalorieBackfillResult(evaluatedCount: 3, estimatedCount: 0)
+        )
+        XCTAssertEqual(saveCount, 2)
+    }
+
+    func testFailedBatchRollsBackSpeculativeMutationsBeforeLaterSave() throws {
+        let container = try AppSchema.makeInMemoryContainer(
+            name: "WorkoutCalorieBackfillServiceTests-\(UUID().uuidString)"
+        )
+        let seedContext = ModelContext(container)
+        seedContext.autosaveEnabled = false
+        seedContext.insert(validProfile())
+        let committedSession = WorkoutSession(
+            name: "First Batch",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_600_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_600_003_600),
+            durationSeconds: 3_600
+        )
+        let failedSession = WorkoutSession(
+            name: "Failed Batch",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_600_000_001),
+            endedAt: Date(timeIntervalSince1970: 1_600_003_601),
+            durationSeconds: 3_600,
+            updatedAt: Date(timeIntervalSince1970: 1_600_003_602)
+        )
+        seedContext.insert(committedSession)
+        seedContext.insert(failedSession)
+        try seedContext.save()
+        let committedSessionID = committedSession.id
+        let failedSessionID = failedSession.id
+        let failedSessionOriginalUpdatedAt = failedSession.updatedAt
+
+        let backfillContext = ModelContext(container)
+        backfillContext.autosaveEnabled = false
+        var saveAttempt = 0
+        let dependencies = WorkoutCalorieBackfillDependencies { context in
+            saveAttempt += 1
+            if saveAttempt == 2 {
+                throw BackfillTestError.batchSave
+            }
+            try context.save()
+        }
+        let service = WorkoutCalorieBackfillService(
+            modelContext: backfillContext,
+            dependencies: dependencies
+        )
+
+        XCTAssertThrowsError(
+            try service.backfillMissingEstimates(referenceDate: referenceDate, batchSize: 1)
+        ) { error in
+            XCTAssertEqual(error as? BackfillTestError, .batchSave)
+        }
+        XCTAssertFalse(backfillContext.hasChanges)
+
+        let failedAfterRollback = try fetchSession(id: failedSessionID, in: backfillContext)
+        XCTAssertNil(failedAfterRollback.estimatedActiveCalories)
+        XCTAssertNil(failedAfterRollback.calorieEstimateVersion)
+        XCTAssertEqual(failedAfterRollback.updatedAt, failedSessionOriginalUpdatedAt)
+
+        let profile = try XCTUnwrap(
+            ProfileRepository(modelContext: backfillContext).currentProfile()
+        )
+        profile.displayName = "Unrelated Later Save"
+        try backfillContext.save()
+
+        let observerContext = ModelContext(container)
+        let committedAfterLaterSave = try fetchSession(id: committedSessionID, in: observerContext)
+        let failedAfterLaterSave = try fetchSession(id: failedSessionID, in: observerContext)
+        XCTAssertEqual(committedAfterLaterSave.calorieEstimateVersion, 1)
+        XCTAssertNil(failedAfterLaterSave.estimatedActiveCalories)
+        XCTAssertNil(failedAfterLaterSave.calorieEstimateVersion)
+        XCTAssertEqual(failedAfterLaterSave.updatedAt, failedSessionOriginalUpdatedAt)
+        XCTAssertEqual(
+            try XCTUnwrap(ProfileRepository(modelContext: observerContext).currentProfile()).displayName,
+            "Unrelated Later Save"
+        )
+    }
+
     func testBackfillDoesNoWorkWhenPreferenceIsDisabled() throws {
         let (context, session) = try makeSingleSessionContext(
             profile: validProfile(showsCalorieEstimates: false)
@@ -239,6 +367,15 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
         context.insert(session)
         try context.save()
         return (context, session)
+    }
+
+    private func fetchSession(id: UUID, in context: ModelContext) throws -> WorkoutSession {
+        let descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.id == id
+            }
+        )
+        return try XCTUnwrap(context.fetch(descriptor).first)
     }
 
     private func validProfile(showsCalorieEstimates: Bool = true) -> UserProfile {
