@@ -22,13 +22,24 @@ nonisolated enum ActiveWorkoutRestorePolicy {
 
 nonisolated enum WorkoutCaloriePersistedFactsAdapter {
     static func facts(from session: WorkoutSession) -> WorkoutCalorieFacts {
-        let completedWorkingSetCount = (session.exercises ?? [])
-            .flatMap { $0.sets ?? [] }
+        facts(
+            durationSeconds: session.durationSeconds,
+            sets: (session.exercises ?? []).flatMap { $0.sets ?? [] },
+            cardioBlocks: session.cardioBlocks ?? []
+        )
+    }
+
+    static func facts(
+        durationSeconds: Int,
+        sets: [WorkoutSessionSet],
+        cardioBlocks: [WorkoutSessionCardioBlock]
+    ) -> WorkoutCalorieFacts {
+        let completedWorkingSetCount = sets
             .filter { set in
                 !set.isWarmup && WorkoutSessionSetDraft(model: set).isCycleCompleted
             }
             .count
-        let completedCardioDurationsSeconds: [Int] = (session.cardioBlocks ?? []).compactMap { block in
+        let completedCardioDurationsSeconds: [Int] = cardioBlocks.compactMap { block in
             guard block.isCompleted,
                   let durationSeconds = block.actualDurationSeconds,
                   durationSeconds > 0
@@ -39,7 +50,7 @@ nonisolated enum WorkoutCaloriePersistedFactsAdapter {
         }
 
         return WorkoutCalorieFacts(
-            durationSeconds: session.durationSeconds,
+            durationSeconds: durationSeconds,
             completedWorkingSetCount: completedWorkingSetCount,
             completedCardioDurationsSeconds: completedCardioDurationsSeconds
         )
