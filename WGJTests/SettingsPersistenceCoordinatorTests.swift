@@ -61,7 +61,7 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
         XCTAssertEqual(draft.weeklyWorkoutGoal, weeklyWorkoutGoal)
     }
 
-    func testNewerRevisionPersistsAfterDelayedOlderWriteAndOwnsSideEffects() async throws {
+    func testNewerCaloriePreferencePersistsAfterDelayedOlderWriteAndOwnsSideEffects() async throws {
         let store = SettingsTestStore(
             draft: UserSettingsDraft(
                 weeklyWorkoutGoal: 4,
@@ -83,19 +83,21 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
 
         await writer.submit(RevisionedSettingsWrite(
             revision: 1,
-            patch: UserSettingsPatch(keepsScreenAwake: false)
+            patch: UserSettingsPatch(showsCalorieEstimates: false)
         ))
         await writer.submit(RevisionedSettingsWrite(
             revision: 2,
-            patch: UserSettingsPatch(keepsScreenAwake: true)
+            patch: UserSettingsPatch(showsCalorieEstimates: true)
         ))
         await store.releaseDelayedWrite()
         await writer.flush()
 
         let persisted = await store.currentDraft()
         let committedRevisions = await commits.revisions()
-        XCTAssertEqual(persisted.keepsScreenAwake, true)
+        let committedCaloriePreferences = await commits.caloriePreferences()
+        XCTAssertEqual(persisted.showsCalorieEstimates, true)
         XCTAssertEqual(committedRevisions, [2])
+        XCTAssertEqual(committedCaloriePreferences, [true])
     }
 
     func testRapidFalseTrueFalseEndsFalse() async throws {
@@ -176,18 +178,25 @@ private actor SettingsTestStore {
 
 private actor SettingsCommitRecorder {
     private var committedRevisions: [UInt64] = []
+    private var committedCaloriePreferences: [Bool] = []
 
     func record(
         revision: UInt64,
         write: RevisionedSettingsWrite,
         draft: UserSettingsDraft
     ) {
-        _ = write
         _ = draft
         committedRevisions.append(revision)
+        if let showsCalorieEstimates = write.patch.showsCalorieEstimates {
+            committedCaloriePreferences.append(showsCalorieEstimates)
+        }
     }
 
     func revisions() -> [UInt64] {
         committedRevisions
+    }
+
+    func caloriePreferences() -> [Bool] {
+        committedCaloriePreferences
     }
 }
