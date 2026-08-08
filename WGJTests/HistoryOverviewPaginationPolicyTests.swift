@@ -21,17 +21,60 @@ final class HistoryOverviewPaginationPolicyTests: XCTestCase {
         ))
     }
 
-    func testHistoryBroadcastMarksDirtyAndReloadsOnlyWhenTabIsActive() {
-        let inactive = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
-            isTabActive: false
+    func testInactiveBroadcastInvalidatesActiveReloadAndKeepsSnapshotDirty() throws {
+        var state = HistorySnapshotRefreshState()
+        let initialRequest = try XCTUnwrap(state.beginReload(
+            isTabActive: true,
+            requiresActiveTab: true
+        ))
+        XCTAssertTrue(state.finishReload(initialRequest, isTabActive: true))
+        XCTAssertFalse(state.needsExplicitRefresh)
+
+        let staleRequest = try XCTUnwrap(state.beginReload(
+            isTabActive: true,
+            requiresActiveTab: true
+        ))
+        let scheduledTrigger = state.workoutHistoryDidChange(isTabActive: false)
+
+        XCTAssertNil(scheduledTrigger)
+        XCTAssertFalse(state.finishReload(staleRequest, isTabActive: true))
+        XCTAssertTrue(state.needsExplicitRefresh)
+    }
+
+    func testScheduledBroadcastReloadCannotBeginAfterTabBecomesInactive() throws {
+        var state = HistorySnapshotRefreshState()
+        let initialRequest = try XCTUnwrap(state.beginReload(
+            isTabActive: true,
+            requiresActiveTab: true
+        ))
+        XCTAssertTrue(state.finishReload(initialRequest, isTabActive: true))
+        XCTAssertFalse(state.needsExplicitRefresh)
+
+        let scheduledTrigger = try XCTUnwrap(
+            state.workoutHistoryDidChange(isTabActive: true)
         )
-        let active = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
-            isTabActive: true
+        let requestAfterLeavingTab = state.beginReload(
+            triggeredBy: scheduledTrigger,
+            isTabActive: false,
+            requiresActiveTab: true
         )
 
-        XCTAssertTrue(inactive.needsExplicitRefresh)
-        XCTAssertFalse(inactive.shouldReload)
-        XCTAssertTrue(active.needsExplicitRefresh)
-        XCTAssertTrue(active.shouldReload)
+        XCTAssertNil(requestAfterLeavingTab)
+        XCTAssertTrue(state.needsExplicitRefresh)
+    }
+
+    func testBroadcastReloadThatStartsActiveCannotFinishAfterLeavingTab() throws {
+        var state = HistorySnapshotRefreshState()
+        let scheduledTrigger = try XCTUnwrap(
+            state.workoutHistoryDidChange(isTabActive: true)
+        )
+        let activeRequest = try XCTUnwrap(state.beginReload(
+            triggeredBy: scheduledTrigger,
+            isTabActive: true,
+            requiresActiveTab: true
+        ))
+
+        XCTAssertFalse(state.finishReload(activeRequest, isTabActive: false))
+        XCTAssertTrue(state.needsExplicitRefresh)
     }
 }

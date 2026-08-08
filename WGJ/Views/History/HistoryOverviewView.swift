@@ -9,19 +9,66 @@ nonisolated enum HistoryPaginationRequestPolicy {
     }
 }
 
-nonisolated struct HistoryRefreshRequestDisposition: Equatable, Sendable {
-    let needsExplicitRefresh: Bool
-    let shouldReload: Bool
+nonisolated struct HistorySnapshotRefreshTrigger: Equatable, Sendable {
+    fileprivate let generation: Int
 }
 
-nonisolated enum HistoryRefreshRequestPolicy {
-    static func workoutHistoryDidChange(
+nonisolated struct HistorySnapshotReloadRequest: Equatable, Sendable {
+    fileprivate let generation: Int
+    fileprivate let requiresActiveTab: Bool
+}
+
+nonisolated struct HistorySnapshotRefreshState: Equatable, Sendable {
+    private(set) var needsExplicitRefresh = true
+    private var generation = 0
+
+    mutating func markNeedsExplicitRefresh() {
+        needsExplicitRefresh = true
+    }
+
+    mutating func workoutHistoryDidChange(
         isTabActive: Bool
-    ) -> HistoryRefreshRequestDisposition {
-        HistoryRefreshRequestDisposition(
-            needsExplicitRefresh: true,
-            shouldReload: isTabActive
+    ) -> HistorySnapshotRefreshTrigger? {
+        generation += 1
+        needsExplicitRefresh = true
+        guard isTabActive else { return nil }
+        return HistorySnapshotRefreshTrigger(generation: generation)
+    }
+
+    mutating func beginReload(
+        triggeredBy trigger: HistorySnapshotRefreshTrigger? = nil,
+        isTabActive: Bool,
+        requiresActiveTab: Bool
+    ) -> HistorySnapshotReloadRequest? {
+        if let trigger, trigger.generation != generation {
+            return nil
+        }
+        guard !requiresActiveTab || isTabActive else { return nil }
+
+        generation += 1
+        return HistorySnapshotReloadRequest(
+            generation: generation,
+            requiresActiveTab: requiresActiveTab
         )
+    }
+
+    func canContinueReload(
+        _ request: HistorySnapshotReloadRequest,
+        isTabActive: Bool
+    ) -> Bool {
+        generation == request.generation
+            && (!request.requiresActiveTab || isTabActive)
+    }
+
+    mutating func finishReload(
+        _ request: HistorySnapshotReloadRequest,
+        isTabActive: Bool
+    ) -> Bool {
+        guard canContinueReload(request, isTabActive: isTabActive) else {
+            return false
+        }
+        needsExplicitRefresh = false
+        return true
     }
 }
 
@@ -40,8 +87,7 @@ struct HistoryOverviewView: View {
     ) ?? Date()
     @State private var controller = HistoryOverviewController()
     @State private var hasLoadedSnapshot = false
-    @State private var needsExplicitRefresh = true
-    @State private var snapshotLoadGeneration = AsyncLoadGenerationTracker()
+    @State private var snapshotRefreshState = HistorySnapshotRefreshState()
     @State private var pageLoadGeneration = AsyncLoadGenerationTracker()
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
@@ -120,7 +166,7 @@ struct HistoryOverviewView: View {
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadSnapshotIfNeeded(force: false)
+            await reloadSnapshotIfNeeded(force: false, requiresActiveTab: true)
         }
         .onReceive(
             NotificationCenter.default
@@ -256,18 +302,21 @@ struct HistoryOverviewView: View {
 
     @MainActor
     private func markNeedsExplicitRefresh() {
-        needsExplicitRefresh = true
+        snapshotRefreshState.markNeedsExplicitRefresh()
     }
 
     private func handleWorkoutHistoryDidChange() {
-        let disposition = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
+        guard let trigger = snapshotRefreshState.workoutHistoryDidChange(
             isTabActive: isTabActive
-        )
-        needsExplicitRefresh = disposition.needsExplicitRefresh
-        guard disposition.shouldReload else { return }
+        ) else { return }
 
         Task {
-            await reloadSnapshotIfNeeded(force: true)
+            guard isTabActive else { return }
+            await reloadSnapshotIfNeeded(
+                force: true,
+                triggeredBy: trigger,
+                requiresActiveTab: true
+            )
         }
     }
 
@@ -278,14 +327,33 @@ struct HistoryOverviewView: View {
     }
 
     @MainActor
-    private func reloadSnapshotIfNeeded(force: Bool) async {
+    private func reloadSnapshotIfNeeded(
+        force: Bool,
+        triggeredBy trigger: HistorySnapshotRefreshTrigger? = nil,
+        requiresActiveTab: Bool = false
+    ) async {
+        guard let reloadRequest = snapshotRefreshState.beginReload(
+            triggeredBy: trigger,
+            isTabActive: isTabActive,
+            requiresActiveTab: requiresActiveTab
+        ) else { return }
+
         await Task.yield()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              snapshotRefreshState.canContinueReload(
+                reloadRequest,
+                isTabActive: isTabActive
+              )
+        else { return }
 
         let currentContentUpdatedAt = await currentHistoryContentUpdatedAt()
+        guard snapshotRefreshState.canContinueReload(
+            reloadRequest,
+            isTabActive: isTabActive
+        ) else { return }
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
-            needsExplicitRefresh: needsExplicitRefresh,
+            needsExplicitRefresh: snapshotRefreshState.needsExplicitRefresh,
             currentContentUpdatedAt: currentContentUpdatedAt,
             lastLoadedContentUpdatedAt: lastLoadedContentUpdatedAt,
             lastRefreshAt: lastRefreshAt
@@ -293,12 +361,17 @@ struct HistoryOverviewView: View {
             return
         }
 
-        await reloadSnapshot(contentUpdatedAt: currentContentUpdatedAt)
+        await reloadSnapshot(
+            contentUpdatedAt: currentContentUpdatedAt,
+            reloadRequest: reloadRequest
+        )
     }
 
     @MainActor
-    private func reloadSnapshot(contentUpdatedAt: Date?) async {
-        let loadGeneration = snapshotLoadGeneration.next()
+    private func reloadSnapshot(
+        contentUpdatedAt: Date?,
+        reloadRequest: HistorySnapshotReloadRequest
+    ) async {
         pageLoadGeneration.invalidate()
         isLoadingMoreHistory = false
         do {
@@ -312,14 +385,19 @@ struct HistoryOverviewView: View {
                     pageSize: Self.historyPageSize
                 )
             }
-            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
+            guard snapshotRefreshState.finishReload(
+                reloadRequest,
+                isTabActive: isTabActive
+            ) else { return }
             controller.apply(loaded)
             hasLoadedSnapshot = true
-            needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
         } catch {
-            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
+            guard snapshotRefreshState.canContinueReload(
+                reloadRequest,
+                isTabActive: isTabActive
+            ) else { return }
             errorMessage = String(describing: error)
             showingError = true
         }
