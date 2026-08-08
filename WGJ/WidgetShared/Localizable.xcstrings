@@ -342,6 +342,9 @@
     "Calculated" : {
 
     },
+    "Calorie Estimate Details" : {
+
+    },
     "Calendar" : {
 
     },
@@ -466,6 +469,9 @@
 
     },
     "Complete A1, move straight into A2, then rest %@." : {
+
+    },
+    "Complete Profile" : {
 
     },
     "Complete set" : {
@@ -710,6 +716,12 @@
 
     },
     "Equipment (optional)" : {
+
+    },
+    "Est. active calories" : {
+
+    },
+    "Estimated Active Calories" : {
 
     },
     "Exercise" : {
@@ -1465,6 +1477,9 @@
     "Setup Tips" : {
 
     },
+    "Sex used for estimate" : {
+
+    },
     "Share Diagnostics" : {
 
     },
@@ -1478,6 +1493,9 @@
 
     },
     "Show backup contents" : {
+
+    },
+    "Show calorie estimates" : {
 
     },
     "Shows the coach tip details." : {
@@ -1578,6 +1596,9 @@
 
     },
     "This cannot be undone. WGJ will delete the CloudKit backup first, then clear this device, and return to setup after you dismiss the success message." : {
+
+    },
+    "This is a conservative guesstimate based on your profile and logged workout—not a medical measurement or a substitute for wearable data." : {
 
     },
     "This permanently removes the workout from history." : {
