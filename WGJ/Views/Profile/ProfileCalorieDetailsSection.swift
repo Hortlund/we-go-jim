@@ -192,6 +192,10 @@ nonisolated struct ProfileCalorieDetailsDraft: Equatable, Sendable {
                 throw NumericInputError.invalid
             }
 
+            if let boundary = canonicalHeightBoundary(feet: feet, inches: inches) {
+                return boundary
+            }
+
             return Measurement(value: feet * 12 + inches, unit: UnitLength.inches)
                 .converted(to: .centimeters)
                 .value
@@ -208,6 +212,9 @@ nonisolated struct ProfileCalorieDetailsDraft: Equatable, Sendable {
         case .kg:
             return displayWeight
         case .lb:
+            if let boundary = canonicalBodyWeightBoundary(pounds: displayWeight) {
+                return boundary
+            }
             return Measurement(value: displayWeight, unit: UnitMass.pounds)
                 .converted(to: .kilograms)
                 .value
@@ -221,30 +228,40 @@ nonisolated struct ProfileCalorieDetailsDraft: Equatable, Sendable {
     }
 
     private func requiredNumber(from text: String) throws -> Double {
-        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.removeAll(where: \.isWhitespace)
-        guard !normalized.isEmpty else { throw NumericInputError.invalid }
-
         let locale = Locale(identifier: localeIdentifier)
-        let decimalSeparator = locale.decimalSeparator ?? "."
-        let groupingSeparator = locale.groupingSeparator ?? ","
-        if decimalSeparator == "." {
-            if groupingSeparator != "." {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-        } else if normalized.contains(decimalSeparator) {
-            if groupingSeparator != decimalSeparator {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-            normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
-        } else if groupingSeparator != "." {
-            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-        }
-
-        guard let value = Double(normalized), value.isFinite else {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Self.localizedNumber(from: trimmed, locale: locale), value.isFinite else {
             throw NumericInputError.invalid
         }
         return value
+    }
+
+    private func canonicalHeightBoundary(feet: Double, inches: Double) -> Double? {
+        for boundary in [120.0, 230.0] {
+            let displayed = Self.feetAndInches(fromCentimeters: boundary)
+            if feet == Double(displayed.feet),
+               Self.nearlyEqual(inches, displayed.inches) {
+                return boundary
+            }
+        }
+        return nil
+    }
+
+    private func canonicalBodyWeightBoundary(pounds: Double) -> Double? {
+        let locale = Locale(identifier: localeIdentifier)
+        for boundary in [35.0, 300.0] {
+            let converted = Measurement(value: boundary, unit: UnitMass.kilograms)
+                .converted(to: .pounds)
+                .value
+            let displayText = Self.displayText(converted, locale: locale)
+            guard let displayed = Self.localizedNumber(from: displayText, locale: locale) else {
+                continue
+            }
+            if Self.nearlyEqual(pounds, displayed) {
+                return boundary
+            }
+        }
+        return nil
     }
 
     private static func feetAndInches(fromCentimeters centimeters: Double) -> (feet: Int, inches: Double) {
@@ -268,6 +285,20 @@ nonisolated struct ProfileCalorieDetailsDraft: Equatable, Sendable {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    private static func localizedNumber(from text: String, locale: Locale) -> Double? {
+        guard !text.isEmpty else { return nil }
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.isLenient = false
+        formatter.generatesDecimalNumbers = true
+        return formatter.number(from: text)?.doubleValue
+    }
+
+    private static func nearlyEqual(_ lhs: Double, _ rhs: Double) -> Bool {
+        abs(lhs - rhs) <= 0.000_000_001
     }
 
     private enum NumericInputError: Error {

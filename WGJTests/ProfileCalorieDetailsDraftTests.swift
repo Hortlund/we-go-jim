@@ -141,6 +141,67 @@ final class ProfileCalorieDetailsDraftTests: XCTestCase {
         XCTAssertTrue(canonicalError(from: draft).contains(.height))
     }
 
+    func testUSHeightDisplayBoundariesSnapToCanonicalLimits() throws {
+        for (feet, inches, expectedCentimeters) in [
+            ("3", "11.24", 120.0),
+            ("7", "6.55", 230.0),
+        ] {
+            var draft = ProfileCalorieDetailsDraft(
+                heightDisplayUnit: .feetAndInches,
+                preferredWeightUnit: .kg,
+                locale: Locale(identifier: "en_US")
+            )
+            draft.heightFeetText = feet
+            draft.heightInchesText = inches
+
+            let canonical = try canonicalSnapshot(from: draft)
+
+            XCTAssertEqual(canonical.heightCentimeters, expectedCentimeters)
+        }
+    }
+
+    func testUSHeightValuesOutsideDisplayedBoundariesRemainInvalid() {
+        for (feet, inches) in [("3", "11.23"), ("7", "6.56")] {
+            var draft = ProfileCalorieDetailsDraft(
+                heightDisplayUnit: .feetAndInches,
+                preferredWeightUnit: .kg,
+                locale: Locale(identifier: "en_US")
+            )
+            draft.heightFeetText = feet
+            draft.heightInchesText = inches
+
+            XCTAssertTrue(canonicalError(from: draft).contains(.height))
+        }
+    }
+
+    func testPoundDisplayBoundariesSnapToCanonicalLimits() throws {
+        for (pounds, expectedKilograms) in [("77.16", 35.0), ("661.39", 300.0)] {
+            var draft = ProfileCalorieDetailsDraft(
+                heightDisplayUnit: .centimeters,
+                preferredWeightUnit: .lb,
+                locale: Locale(identifier: "en_US")
+            )
+            draft.bodyWeightText = pounds
+
+            let canonical = try canonicalSnapshot(from: draft)
+
+            XCTAssertEqual(canonical.bodyWeightKilograms, expectedKilograms)
+        }
+    }
+
+    func testPoundValuesOutsideDisplayedBoundariesRemainInvalid() {
+        for pounds in ["77.15", "661.40"] {
+            var draft = ProfileCalorieDetailsDraft(
+                heightDisplayUnit: .centimeters,
+                preferredWeightUnit: .lb,
+                locale: Locale(identifier: "en_US")
+            )
+            draft.bodyWeightText = pounds
+
+            XCTAssertTrue(canonicalError(from: draft).contains(.bodyWeight))
+        }
+    }
+
     func testHeightValidationIncludesOneHundredTwentyAndTwoHundredThirtyCentimeters() throws {
         for value in [120.0, 230.0] {
             var draft = metricDraft()
@@ -231,6 +292,51 @@ final class ProfileCalorieDetailsDraftTests: XCTestCase {
 
         XCTAssertEqual(try XCTUnwrap(canonical.heightCentimeters), 180.5, accuracy: 0.000_001)
         XCTAssertEqual(try XCTUnwrap(canonical.bodyWeightKilograms), 80.25, accuracy: 0.000_001)
+    }
+
+    func testLocaleNativeArabicDigitsAndDecimalSeparatorParse() throws {
+        var draft = ProfileCalorieDetailsDraft(
+            heightDisplayUnit: .centimeters,
+            preferredWeightUnit: .kg,
+            locale: Locale(identifier: "ar_EG")
+        )
+        draft.heightCentimetersText = "١٨٠٫٥"
+        draft.bodyWeightText = "٨٠٫٢٥"
+
+        let canonical = try canonicalSnapshot(from: draft)
+
+        XCTAssertEqual(canonical.heightCentimeters, 180.5)
+        XCTAssertEqual(canonical.bodyWeightKilograms, 80.25)
+    }
+
+    func testValidLocalizedDecimalAndGroupingParseAsWholeStrings() throws {
+        var draft = ProfileCalorieDetailsDraft(
+            heightDisplayUnit: .centimeters,
+            preferredWeightUnit: .kg,
+            locale: Locale(identifier: "en_US")
+        )
+        draft.heightCentimetersText = "0,180.5"
+        draft.bodyWeightText = "0,080.25"
+
+        let canonical = try canonicalSnapshot(from: draft)
+
+        XCTAssertEqual(canonical.heightCentimeters, 180.5)
+        XCTAssertEqual(canonical.bodyWeightKilograms, 80.25)
+    }
+
+    func testMalformedUSGroupingIsRejectedRatherThanReinterpreted() {
+        var draft = ProfileCalorieDetailsDraft(
+            heightDisplayUnit: .centimeters,
+            preferredWeightUnit: .kg,
+            locale: Locale(identifier: "en_US")
+        )
+        draft.heightCentimetersText = "1,80"
+        draft.bodyWeightText = "8,0"
+
+        let error = canonicalError(from: draft)
+
+        XCTAssertTrue(error.contains(.height))
+        XCTAssertTrue(error.contains(.bodyWeight))
     }
 
     private var calendar: Calendar {
