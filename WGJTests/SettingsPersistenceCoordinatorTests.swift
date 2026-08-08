@@ -187,6 +187,130 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
         XCTAssertEqual(effectCounts.backfillSchedules, 1)
     }
 
+    func testOlderFailedCalorieWriteMergesIntoNewerSuccessfulUnrelatedWrite() async throws {
+        let store = SettingsTestStore(
+            draft: UserSettingsDraft(
+                weeklyWorkoutGoal: 4,
+                isTrainingGuidanceEnabled: true,
+                keepsScreenAwake: true,
+                preferredWeightUnit: .kg,
+                workoutNotificationStyle: .timeSensitive,
+                showsCalorieEstimates: true
+            ),
+            delayedRevision: 1,
+            failingRevisions: [1]
+        )
+        let events = SettingsCommitRecorder()
+        let writer = OrderedSettingsWriter(
+            persist: { try await store.persist($0) },
+            onCommit: { revision, write, draft in
+                await events.record(revision: revision, write: write, draft: draft)
+            },
+            onFailure: { write, _ in
+                await events.recordFailure(revision: write.revision)
+            }
+        )
+
+        await writer.submit(.init(
+            revision: 1,
+            patch: .init(showsCalorieEstimates: false)
+        ))
+        await store.waitUntilDelayedWriteStarts()
+        await writer.submit(.init(
+            revision: 2,
+            patch: .init(keepsScreenAwake: false)
+        ))
+        await store.releaseDelayedWrite()
+        await writer.flush()
+
+        let persisted = await store.currentDraft()
+        let committedRevisions = await events.revisions()
+        let failedRevisions = await events.failureRevisions()
+        let caloriePreferences = await events.caloriePreferences()
+        XCTAssertFalse(persisted.showsCalorieEstimates)
+        XCTAssertFalse(persisted.keepsScreenAwake)
+        XCTAssertEqual(committedRevisions, [2])
+        XCTAssertEqual(failedRevisions, [])
+        XCTAssertEqual(caloriePreferences, [false])
+    }
+
+    func testOlderSuccessfulCalorieWriteDeliversEffectsBeforeNewerUnrelatedFailure() async throws {
+        let store = SettingsTestStore(
+            draft: UserSettingsDraft(
+                weeklyWorkoutGoal: 4,
+                isTrainingGuidanceEnabled: true,
+                keepsScreenAwake: false,
+                preferredWeightUnit: .kg,
+                workoutNotificationStyle: .timeSensitive,
+                showsCalorieEstimates: false
+            ),
+            delayedRevision: 1,
+            failingRevisions: [2]
+        )
+        let events = SettingsCommitRecorder()
+        let writer = OrderedSettingsWriter(
+            persist: { try await store.persist($0) },
+            onCommit: { revision, write, draft in
+                await events.record(revision: revision, write: write, draft: draft)
+            },
+            onFailure: { write, _ in
+                await events.recordFailure(revision: write.revision)
+            }
+        )
+
+        await writer.submit(.init(
+            revision: 1,
+            patch: .init(showsCalorieEstimates: true)
+        ))
+        await store.waitUntilDelayedWriteStarts()
+        await writer.submit(.init(
+            revision: 2,
+            patch: .init(keepsScreenAwake: true)
+        ))
+        await store.releaseDelayedWrite()
+        await writer.flush()
+
+        let persisted = await store.currentDraft()
+        let effectCounts = await events.calorieEffectCounts()
+        let committedRevisions = await events.revisions()
+        let failedRevisions = await events.failureRevisions()
+        let deliveryOrder = await events.deliveryOrder()
+        XCTAssertTrue(persisted.showsCalorieEstimates)
+        XCTAssertFalse(persisted.keepsScreenAwake)
+        XCTAssertEqual(committedRevisions, [2])
+        XCTAssertEqual(failedRevisions, [2])
+        XCTAssertEqual(deliveryOrder, ["commit-2", "failure-2"])
+        XCTAssertEqual(effectCounts.historyBroadcasts, 1)
+        XCTAssertEqual(effectCounts.backfillSchedules, 1)
+    }
+
+    @MainActor
+    func testLoneCalorieWriteFailurePublishesPersistedDraftForViewReconciliation() async {
+        let persistedDraft = UserSettingsDraft(
+            weeklyWorkoutGoal: 4,
+            isTrainingGuidanceEnabled: true,
+            keepsScreenAwake: false,
+            preferredWeightUnit: .kg,
+            workoutNotificationStyle: .timeSensitive,
+            showsCalorieEstimates: false
+        )
+        let store = SettingsTestStore(
+            draft: persistedDraft,
+            failingRevisions: [1]
+        )
+        let coordinator = SettingsDraftCoordinator()
+        coordinator.configure { try await store.persist($0) }
+        coordinator.synchronizePersistedDraft(persistedDraft)
+
+        coordinator.submit(.init(showsCalorieEstimates: true))
+        await coordinator.flush()
+
+        let storeDraft = await store.currentDraft()
+        XCTAssertNotNil(coordinator.errorDescription)
+        XCTAssertEqual(coordinator.reconciliationDraft, persistedDraft)
+        XCTAssertEqual(storeDraft, persistedDraft)
+    }
+
     func testRapidFalseTrueFalseEndsFalse() async throws {
         let store = SettingsTestStore(draft: .default)
         let writer = OrderedSettingsWriter(
@@ -231,17 +355,27 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
     }
 }
 
+private enum SettingsTestError: Error {
+    case persistence
+}
+
 private actor SettingsTestStore {
     private var draft: UserSettingsDraft
     private let delayedRevision: UInt64?
+    private let failingRevisions: Set<UInt64>
     private var delayedContinuation: CheckedContinuation<Void, Never>?
     private var delayedStartContinuations: [CheckedContinuation<Void, Never>] = []
     private var delayedWriteDidStart = false
     private var delayWasReleased = false
 
-    init(draft: UserSettingsDraft, delayedRevision: UInt64? = nil) {
+    init(
+        draft: UserSettingsDraft,
+        delayedRevision: UInt64? = nil,
+        failingRevisions: Set<UInt64> = []
+    ) {
         self.draft = draft
         self.delayedRevision = delayedRevision
+        self.failingRevisions = failingRevisions
     }
 
     func persist(_ write: RevisionedSettingsWrite) async throws -> UserSettingsDraft {
@@ -252,6 +386,9 @@ private actor SettingsTestStore {
             await withCheckedContinuation { continuation in
                 delayedContinuation = continuation
             }
+        }
+        if failingRevisions.contains(write.revision) {
+            throw SettingsTestError.persistence
         }
         draft.apply(write.patch)
         return draft
@@ -280,6 +417,8 @@ private actor SettingsCommitRecorder {
     private var committedCaloriePreferences: [Bool] = []
     private var historyBroadcastCount = 0
     private var backfillScheduleCount = 0
+    private var failedRevisions: [UInt64] = []
+    private var orderedDeliveries: [String] = []
 
     func record(
         revision: UInt64,
@@ -288,6 +427,7 @@ private actor SettingsCommitRecorder {
     ) {
         _ = draft
         committedRevisions.append(revision)
+        orderedDeliveries.append("commit-\(revision)")
         if let showsCalorieEstimates = write.patch.showsCalorieEstimates {
             committedCaloriePreferences.append(showsCalorieEstimates)
             historyBroadcastCount += 1
@@ -295,6 +435,11 @@ private actor SettingsCommitRecorder {
                 backfillScheduleCount += 1
             }
         }
+    }
+
+    func recordFailure(revision: UInt64) {
+        failedRevisions.append(revision)
+        orderedDeliveries.append("failure-\(revision)")
     }
 
     func revisions() -> [UInt64] {
@@ -307,5 +452,13 @@ private actor SettingsCommitRecorder {
 
     func calorieEffectCounts() -> (historyBroadcasts: Int, backfillSchedules: Int) {
         (historyBroadcastCount, backfillScheduleCount)
+    }
+
+    func failureRevisions() -> [UInt64] {
+        failedRevisions
+    }
+
+    func deliveryOrder() -> [String] {
+        orderedDeliveries
     }
 }

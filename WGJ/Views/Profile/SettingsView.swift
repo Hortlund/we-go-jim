@@ -402,6 +402,9 @@ struct SettingsView: View {
         }
         .onChange(of: settingsPersistenceCoordinator.errorDescription) { _, description in
             guard let description else { return }
+            if let persistedDraft = settingsPersistenceCoordinator.reconciliationDraft {
+                reconcileSettingsView(with: persistedDraft)
+            }
             errorMessage = description
             showingError = true
         }
@@ -575,7 +578,7 @@ struct SettingsView: View {
         preferredDistanceUnit = snapshot.preferredDistanceUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
         calorieSettingsPresentation = snapshot.calorieSettingsPresentation
-        submittedSettingsDraft = UserSettingsDraft(
+        let persistedDraft = UserSettingsDraft(
             weeklyWorkoutGoal: snapshot.weeklyGoal,
             isTrainingGuidanceEnabled: snapshot.isTrainingGuidanceEnabled,
             keepsScreenAwake: snapshot.keepsScreenAwake,
@@ -585,6 +588,25 @@ struct SettingsView: View {
             automaticallyClosesCompletedExercises: snapshot.automaticallyClosesCompletedExercises,
             showsCalorieEstimates: snapshot.calorieSettingsPresentation.storedPreference
         )
+        submittedSettingsDraft = persistedDraft
+        settingsPersistenceCoordinator.synchronizePersistedDraft(persistedDraft)
+    }
+
+    @MainActor
+    private func reconcileSettingsView(with persistedDraft: UserSettingsDraft) {
+        submittedSettingsDraft = persistedDraft
+        weeklyGoal = persistedDraft.weeklyWorkoutGoal
+        savedWeeklyGoal = persistedDraft.weeklyWorkoutGoal
+        isTrainingGuidanceEnabled = persistedDraft.isTrainingGuidanceEnabled
+        keepsScreenAwake = persistedDraft.keepsScreenAwake
+        automaticallyClosesCompletedExercises = persistedDraft.automaticallyClosesCompletedExercises
+        preferredWeightUnit = persistedDraft.preferredWeightUnit
+        preferredDistanceUnit = persistedDraft.preferredDistanceUnit
+        workoutNotificationStyle = persistedDraft.workoutNotificationStyle
+        calorieSettingsPresentation = calorieSettingsPresentation?.updatingStoredPreference(
+            persistedDraft.showsCalorieEstimates
+        )
+        clearWeeklyGoalSaveFeedback()
     }
 
     private func saveWeeklyGoal() {

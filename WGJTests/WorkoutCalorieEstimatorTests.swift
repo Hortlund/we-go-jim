@@ -156,6 +156,20 @@ final class WorkoutCalorieEstimatorTests: XCTestCase {
         )
     }
 
+    func testCappedAwayCardioTimeCannotBecomeStrengthTime() {
+        XCTAssertEqual(
+            estimate(sex: .male, kg: 80, cm: 180, duration: 14_400, sets: 10, cardio: [14_400]),
+            .estimated(activeCalories: 445, version: 1)
+        )
+    }
+
+    func testCompletedCardioCanExceedSessionDuration() {
+        XCTAssertEqual(
+            estimate(sex: .male, kg: 80, cm: 180, duration: 3_600, sets: 0, cardio: [7_200]),
+            .estimated(activeCalories: 295, version: 1)
+        )
+    }
+
     func testNoActivityStoresAnEvaluationWithoutEstimate() {
         XCTAssertEqual(
             estimate(sex: .male, kg: 80, cm: 180, duration: 3_600, sets: 0, cardio: []),

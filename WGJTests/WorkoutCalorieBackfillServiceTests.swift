@@ -281,6 +281,39 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
         )
     }
 
+    func testBackfillPreservesPartialEstimateWithoutVersion() throws {
+        let container = try AppSchema.makeInMemoryContainer(
+            name: "WorkoutCalorieBackfillServiceTests-\(UUID().uuidString)"
+        )
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        context.insert(validProfile())
+        let originalUpdatedAt = referenceDate.addingTimeInterval(-60)
+        let partialSession = WorkoutSession(
+            name: "Partially Restored Estimate",
+            status: .completed,
+            startedAt: referenceDate.addingTimeInterval(-3_600),
+            endedAt: referenceDate,
+            durationSeconds: 3_600,
+            estimatedActiveCalories: 125,
+            calorieEstimateVersion: nil,
+            updatedAt: originalUpdatedAt
+        )
+        context.insert(partialSession)
+        try context.save()
+
+        let result = try WorkoutCalorieBackfillService(modelContext: context)
+            .backfillMissingEstimates(referenceDate: referenceDate)
+
+        XCTAssertEqual(
+            result,
+            WorkoutCalorieBackfillResult(evaluatedCount: 0, estimatedCount: 0)
+        )
+        XCTAssertEqual(partialSession.estimatedActiveCalories, 125)
+        XCTAssertNil(partialSession.calorieEstimateVersion)
+        XCTAssertEqual(partialSession.updatedAt, originalUpdatedAt)
+    }
+
     func testBackfillDoesNoWorkWhenPreferenceIsDisabled() throws {
         let (context, session) = try makeSingleSessionContext(
             profile: validProfile(showsCalorieEstimates: false)

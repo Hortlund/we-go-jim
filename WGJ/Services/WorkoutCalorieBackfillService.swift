@@ -69,7 +69,10 @@ nonisolated final class WorkoutCalorieBackfillService {
 
             do {
                 for session in sessions {
-                    guard session.calorieEstimateVersion == nil else { continue }
+                    guard session.estimatedActiveCalories == nil,
+                          session.calorieEstimateVersion == nil else {
+                        continue
+                    }
 
                     let result = WorkoutCalorieEstimator.estimate(
                         profile: profileSnapshot,
@@ -117,7 +120,9 @@ nonisolated final class WorkoutCalorieBackfillService {
         let completedStatus = WorkoutSessionStatus.completed.rawValue
         var descriptor = FetchDescriptor<WorkoutSession>(
             predicate: #Predicate { session in
-                session.statusRaw == completedStatus && session.calorieEstimateVersion == nil
+                session.statusRaw == completedStatus
+                    && session.estimatedActiveCalories == nil
+                    && session.calorieEstimateVersion == nil
             },
             sortBy: [
                 SortDescriptor(\WorkoutSession.endedAt, order: .forward),

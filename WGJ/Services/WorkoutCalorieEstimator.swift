@@ -24,13 +24,11 @@ nonisolated enum WorkoutCalorieEstimator {
         }
 
         let durationSeconds = max(0, facts.durationSeconds)
-        let cardioSeconds = cappedCardioSeconds(
-            facts.completedCardioDurationsSeconds,
-            durationSeconds: durationSeconds
-        )
+        let completedCardioSeconds = positiveCardioSeconds(facts.completedCardioDurationsSeconds)
+        let cardioSeconds = cappedCardioSeconds(facts.completedCardioDurationsSeconds)
         let strengthSeconds = cappedStrengthSeconds(
             durationSeconds: durationSeconds,
-            cardioSeconds: cardioSeconds,
+            cardioSeconds: completedCardioSeconds,
             completedWorkingSetCount: facts.completedWorkingSetCount
         )
         let rmrPerMinute = restingMetabolicRate(profile: validatedProfile) / 1_440
@@ -53,7 +51,14 @@ nonisolated enum WorkoutCalorieEstimator {
             + sexAdjustment
     }
 
-    private static func cappedCardioSeconds(_ durations: [Int], durationSeconds: Int) -> Int {
+    private static func positiveCardioSeconds(_ durations: [Int]) -> Int {
+        durations.reduce(into: 0) { total, duration in
+            let (sum, overflow) = total.addingReportingOverflow(max(0, duration))
+            total = overflow ? .max : sum
+        }
+    }
+
+    private static func cappedCardioSeconds(_ durations: [Int]) -> Int {
         var total = 0
 
         for duration in durations {
@@ -61,7 +66,7 @@ nonisolated enum WorkoutCalorieEstimator {
             total = min(maximumCardioSeconds, total + cappedBlock)
         }
 
-        return min(total, durationSeconds)
+        return total
     }
 
     private static func cappedStrengthSeconds(
