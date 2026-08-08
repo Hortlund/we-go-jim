@@ -20,4 +20,18 @@ final class HistoryOverviewPaginationPolicyTests: XCTestCase {
             hasMore: false
         ))
     }
+
+    func testHistoryBroadcastMarksDirtyAndReloadsOnlyWhenTabIsActive() {
+        let inactive = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
+            isTabActive: false
+        )
+        let active = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
+            isTabActive: true
+        )
+
+        XCTAssertTrue(inactive.needsExplicitRefresh)
+        XCTAssertFalse(inactive.shouldReload)
+        XCTAssertTrue(active.needsExplicitRefresh)
+        XCTAssertTrue(active.shouldReload)
+    }
 }

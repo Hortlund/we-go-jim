@@ -496,6 +496,17 @@ struct WorkoutCompletionSummaryView: View {
                 systemImage: "scalemass.fill",
                 tint: WGJTheme.accentGold
             )
+            if let estimatedActiveCaloriesText = snapshot.estimatedActiveCaloriesText,
+               let accessibilityLabel = snapshot.estimatedActiveCaloriesAccessibilityLabel {
+                WorkoutCompletionStatCard(
+                    title: "Est. active calories",
+                    value: estimatedActiveCaloriesText,
+                    systemImage: "flame.fill",
+                    tint: WGJTheme.warning
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityLabel)
+            }
         }
     }
 
@@ -714,12 +725,46 @@ struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let exerciseCount: Int
     let completedSetCount: Int
     let totalVolumeText: String
+    let estimatedActiveCaloriesText: String?
+    let estimatedActiveCaloriesAccessibilityLabel: String?
     let prHeadline: String
     let prSupportText: String
     let personalRecords: [WorkoutCompletionPersonalRecord]
     let cardioRecap: [WorkoutCompletionCardioRecap]
     let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
+}
+
+nonisolated struct WorkoutCalorieMetricPresentation: Equatable, Sendable {
+    let text: String
+    let accessibilityLabel: String
+}
+
+nonisolated struct WorkoutCaloriePresentationPolicy: Equatable, Sendable {
+    private let isEffectivelyEligible: Bool
+
+    init(
+        profile: WorkoutCalorieProfileSnapshot?,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) {
+        isEffectivelyEligible = profile?.showsCalorieEstimates == true
+            && profile?.validated(referenceDate: referenceDate, calendar: calendar) != nil
+    }
+
+    func metric(estimatedActiveCalories: Int?) -> WorkoutCalorieMetricPresentation? {
+        guard isEffectivelyEligible,
+              let estimatedActiveCalories,
+              estimatedActiveCalories > 0
+        else {
+            return nil
+        }
+
+        return WorkoutCalorieMetricPresentation(
+            text: "\(estimatedActiveCalories) kcal",
+            accessibilityLabel: "\(estimatedActiveCalories) estimated active calories"
+        )
+    }
 }
 
 struct WorkoutCompletionPersonalRecord: Identifiable, Equatable, Sendable {
@@ -758,6 +803,12 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         guard let session = try repository.session(id: sessionID), session.status == .completed else {
             return nil
         }
+
+        let calorieProfile = try? ProfileRepository(modelContext: modelContext)
+            .currentProfile()?
+            .calorieProfileSnapshot
+        let calorieMetric = WorkoutCaloriePresentationPolicy(profile: calorieProfile)
+            .metric(estimatedActiveCalories: session.estimatedActiveCalories)
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
         let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
@@ -808,6 +859,8 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             exerciseCount: exercises.count,
             completedSetCount: completedSetCount,
             totalVolumeText: formattedVolume(session.totalVolume),
+            estimatedActiveCaloriesText: calorieMetric?.text,
+            estimatedActiveCaloriesAccessibilityLabel: calorieMetric?.accessibilityLabel,
             prHeadline: prHeadline,
             prSupportText: prSupportText,
             personalRecords: personalRecords,

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -5,6 +6,22 @@ import SwiftUI
 nonisolated enum HistoryPaginationRequestPolicy {
     static func shouldLoadMore(isLoading: Bool, hasMore: Bool) -> Bool {
         hasMore && !isLoading
+    }
+}
+
+nonisolated struct HistoryRefreshRequestDisposition: Equatable, Sendable {
+    let needsExplicitRefresh: Bool
+    let shouldReload: Bool
+}
+
+nonisolated enum HistoryRefreshRequestPolicy {
+    static func workoutHistoryDidChange(
+        isTabActive: Bool
+    ) -> HistoryRefreshRequestDisposition {
+        HistoryRefreshRequestDisposition(
+            needsExplicitRefresh: true,
+            shouldReload: isTabActive
+        )
     }
 }
 
@@ -104,6 +121,13 @@ struct HistoryOverviewView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadSnapshotIfNeeded(force: false)
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .wgjWorkoutHistoryDidChange)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            handleWorkoutHistoryDidChange()
         }
         .onChange(of: selectedDayFilter) { _, newDayFilter in
             Task {
@@ -233,6 +257,18 @@ struct HistoryOverviewView: View {
     @MainActor
     private func markNeedsExplicitRefresh() {
         needsExplicitRefresh = true
+    }
+
+    private func handleWorkoutHistoryDidChange() {
+        let disposition = HistoryRefreshRequestPolicy.workoutHistoryDidChange(
+            isTabActive: isTabActive
+        )
+        needsExplicitRefresh = disposition.needsExplicitRefresh
+        guard disposition.shouldReload else { return }
+
+        Task {
+            await reloadSnapshotIfNeeded(force: true)
+        }
     }
 
     @MainActor
@@ -375,6 +411,8 @@ nonisolated struct HistorySessionCardData: Identifiable, Equatable, Sendable {
     let durationText: String
     let volumeText: String
     let prsText: String
+    let estimatedActiveCaloriesText: String?
+    let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
 }
 
@@ -387,6 +425,8 @@ nonisolated struct HistoryOverviewSessionSnapshot: Identifiable, Equatable, Send
     let durationSeconds: Int
     let totalVolume: Double
     let prHitsCount: Int
+    let estimatedActiveCaloriesText: String?
+    let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
 
     var displayDate: Date {
@@ -492,19 +532,22 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
         let completedSessions: [HistoryOverviewSessionSnapshot]
         let hasMorePages: Bool
         if let selectedDayFilter {
             completedSessions = try snapshots(
                 from: repository.completedSessions(onDay: selectedDayFilter),
-                repository: repository
+                repository: repository,
+                caloriePresentationPolicy: caloriePresentationPolicy
             )
             hasMorePages = false
         } else {
             let page = try repository.completedSessions(before: nil, limit: pageSize + 1)
             completedSessions = try snapshots(
                 from: Array(page.prefix(pageSize)),
-                repository: repository
+                repository: repository,
+                caloriePresentationPolicy: caloriePresentationPolicy
             )
             hasMorePages = page.count > pageSize
         }
@@ -530,10 +573,12 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
         let page = try repository.completedSessions(before: date, limit: pageSize + 1)
         let completedSessions = try snapshots(
             from: Array(page.prefix(pageSize)),
-            repository: repository
+            repository: repository,
+            caloriePresentationPolicy: caloriePresentationPolicy
         )
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
             sessions: completedSessions
@@ -563,7 +608,8 @@ nonisolated enum HistoryOverviewSnapshotLoader {
 
     nonisolated private static func snapshots(
         from sessions: [WorkoutSession],
-        repository: WorkoutSessionRepository
+        repository: WorkoutSessionRepository,
+        caloriePresentationPolicy: WorkoutCaloriePresentationPolicy
     ) throws -> [HistoryOverviewSessionSnapshot] {
         try sessions.map { session in
             let exercises = try repository.sessionExercises(sessionID: session.id)
@@ -571,8 +617,23 @@ nonisolated enum HistoryOverviewSnapshotLoader {
                 for: exercises,
                 repository: repository
             )
-            return HistoryOverviewSessionSnapshot(session: session, summaryRows: rows)
+            return HistoryOverviewSessionSnapshot(
+                session: session,
+                summaryRows: rows,
+                calorieMetric: caloriePresentationPolicy.metric(
+                    estimatedActiveCalories: session.estimatedActiveCalories
+                )
+            )
         }
+    }
+
+    nonisolated private static func caloriePresentationPolicy(
+        modelContext: ModelContext
+    ) -> WorkoutCaloriePresentationPolicy {
+        let calorieProfile = try? ProfileRepository(modelContext: modelContext)
+            .currentProfile()?
+            .calorieProfileSnapshot
+        return WorkoutCaloriePresentationPolicy(profile: calorieProfile)
     }
 }
 
@@ -669,6 +730,8 @@ nonisolated enum HistoryOverviewSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
             prsText: "\(session.prHitsCount) PR\(session.prHitsCount == 1 ? "" : "s")",
+            estimatedActiveCaloriesText: session.estimatedActiveCaloriesText,
+            estimatedActiveCaloriesAccessibilityLabel: session.estimatedActiveCaloriesAccessibilityLabel,
             summaryRows: session.summaryRows
         )
     }
@@ -712,7 +775,11 @@ extension HistoryOverviewSessionSnapshot {
         )
     }
 
-    nonisolated init(session: WorkoutSession, summaryRows: [HistorySessionSummaryRow]) {
+    nonisolated init(
+        session: WorkoutSession,
+        summaryRows: [HistorySessionSummaryRow],
+        calorieMetric: WorkoutCalorieMetricPresentation? = nil
+    ) {
         self.init(
             id: session.id,
             updatedAt: session.updatedAt,
@@ -722,6 +789,8 @@ extension HistoryOverviewSessionSnapshot {
             durationSeconds: session.durationSeconds,
             totalVolume: session.totalVolume,
             prHitsCount: session.prHitsCount,
+            estimatedActiveCaloriesText: calorieMetric?.text,
+            estimatedActiveCaloriesAccessibilityLabel: calorieMetric?.accessibilityLabel,
             summaryRows: summaryRows
         )
     }
@@ -771,6 +840,7 @@ private struct HistorySessionCardView: View, Equatable {
                         WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
                         WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
                         WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        estimatedActiveCaloriesMetric
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -778,7 +848,10 @@ private struct HistorySessionCardView: View, Equatable {
                             WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
                             WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
                         }
-                        WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        HStack(spacing: 16) {
+                            WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                            estimatedActiveCaloriesMetric
+                        }
                     }
                 }
 
@@ -807,6 +880,19 @@ private struct HistorySessionCardView: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var estimatedActiveCaloriesMetric: some View {
+        if let text = card.estimatedActiveCaloriesText,
+           let accessibilityLabel = card.estimatedActiveCaloriesAccessibilityLabel {
+            WGJMetricPill(
+                systemImage: "flame.fill",
+                value: text,
+                tint: WGJTheme.warning
+            )
+            .accessibilityLabel(accessibilityLabel)
+        }
     }
 
     private var summaryExerciseHeader: some View {
