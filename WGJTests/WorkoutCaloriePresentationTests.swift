@@ -77,6 +77,27 @@ final class WorkoutCaloriePresentationTests: XCTestCase {
         }
     }
 
+    func testCompletionProjectionShowsBelowThresholdEvaluatedEstimate() throws {
+        let fixture = try makeFixture(
+            profile: eligibleProfile(),
+            estimatedActiveCalories: nil,
+            calorieEstimateVersion: 1
+        )
+
+        let snapshot = try XCTUnwrap(
+            WorkoutCompletionSnapshotBuilder.build(
+                sessionID: fixture.sessionID,
+                modelContext: fixture.context
+            )
+        )
+
+        XCTAssertEqual(snapshot.estimatedActiveCaloriesText, "<5 kcal")
+        XCTAssertEqual(
+            snapshot.estimatedActiveCaloriesAccessibilityLabel,
+            "Under 5 estimated active calories"
+        )
+    }
+
     func testHistoryProjectionIncludesStoredEstimateForEligibleProfile() throws {
         let fixture = try makeFixture(
             profile: eligibleProfile(),
@@ -130,6 +151,22 @@ final class WorkoutCaloriePresentationTests: XCTestCase {
         }
     }
 
+    func testHistoryProjectionShowsBelowThresholdEvaluatedEstimate() throws {
+        let fixture = try makeFixture(
+            profile: eligibleProfile(),
+            estimatedActiveCalories: nil,
+            calorieEstimateVersion: 1
+        )
+
+        let card = try loadOnlyHistoryCard(from: fixture.context)
+
+        XCTAssertEqual(card.estimatedActiveCaloriesText, "<5 kcal")
+        XCTAssertEqual(
+            card.estimatedActiveCaloriesAccessibilityLabel,
+            "Under 5 estimated active calories"
+        )
+    }
+
     func testHistoryCardEqualityAndUpdateStampObserveCalorieChanges() {
         let original = historyCardData(
             updatedAtStamp: 100,
@@ -154,6 +191,18 @@ final class WorkoutCaloriePresentationTests: XCTestCase {
         profile: UserProfile,
         estimatedActiveCalories: Int?
     ) throws -> (context: ModelContext, sessionID: UUID) {
+        try makeFixture(
+            profile: profile,
+            estimatedActiveCalories: estimatedActiveCalories,
+            calorieEstimateVersion: estimatedActiveCalories == nil ? nil : 1
+        )
+    }
+
+    private func makeFixture(
+        profile: UserProfile,
+        estimatedActiveCalories: Int?,
+        calorieEstimateVersion: Int?
+    ) throws -> (context: ModelContext, sessionID: UUID) {
         let container = try AppSchema.makeInMemoryContainer(
             name: "WorkoutCaloriePresentationTests-\(UUID().uuidString)"
         )
@@ -167,7 +216,7 @@ final class WorkoutCaloriePresentationTests: XCTestCase {
             endedAt: endedAt,
             durationSeconds: 3_600,
             estimatedActiveCalories: estimatedActiveCalories,
-            calorieEstimateVersion: estimatedActiveCalories == nil ? nil : 1,
+            calorieEstimateVersion: calorieEstimateVersion,
             updatedAt: endedAt
         )
         context.insert(profile)

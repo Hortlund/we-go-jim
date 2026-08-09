@@ -156,9 +156,9 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
     ) -> Int {
         switch intensity {
         case .completedWorkout:
-            return variant == .personalRecord ? 46 : 38
+            return variant == .personalRecord ? 54 : 46
         case .manualTap:
-            return 18
+            return 22
         }
     }
 
@@ -167,7 +167,7 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
         intensity: WorkoutCompletionConfettiIntensity,
         variant: WorkoutCompletionCelebrationVariant
     ) -> [WorkoutCompletionConfettiBurstDescriptor] {
-        [
+        var descriptors = [
             WorkoutCompletionConfettiBurstDescriptor(
                 origin: origin,
                 role: .centralThrow,
@@ -176,6 +176,20 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
                 variant: variant
             ),
         ]
+
+        if intensity == .completedWorkout, variant == .personalRecord {
+            descriptors.append(
+                WorkoutCompletionConfettiBurstDescriptor(
+                    origin: origin,
+                    role: .centralThrow,
+                    pieceCount: 24,
+                    delay: 0.18,
+                    variant: variant
+                )
+            )
+        }
+
+        return descriptors
     }
 
     static func colorRoles(
@@ -752,17 +766,28 @@ nonisolated struct WorkoutCaloriePresentationPolicy: Equatable, Sendable {
             && profile?.validated(referenceDate: referenceDate, calendar: calendar) != nil
     }
 
-    func metric(estimatedActiveCalories: Int?) -> WorkoutCalorieMetricPresentation? {
-        guard isEffectivelyEligible,
-              let estimatedActiveCalories,
-              estimatedActiveCalories > 0
-        else {
+    func metric(
+        estimatedActiveCalories: Int?,
+        calorieEstimateVersion: Int?
+    ) -> WorkoutCalorieMetricPresentation? {
+        guard isEffectivelyEligible else {
+            return nil
+        }
+
+        if let estimatedActiveCalories, estimatedActiveCalories > 0 {
+            return WorkoutCalorieMetricPresentation(
+                text: "\(estimatedActiveCalories) kcal",
+                accessibilityLabel: "\(estimatedActiveCalories) estimated active calories"
+            )
+        }
+
+        guard estimatedActiveCalories == nil, calorieEstimateVersion != nil else {
             return nil
         }
 
         return WorkoutCalorieMetricPresentation(
-            text: "\(estimatedActiveCalories) kcal",
-            accessibilityLabel: "\(estimatedActiveCalories) estimated active calories"
+            text: "<5 kcal",
+            accessibilityLabel: "Under 5 estimated active calories"
         )
     }
 }
@@ -808,7 +833,10 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             .currentProfile()?
             .calorieProfileSnapshot
         let calorieMetric = WorkoutCaloriePresentationPolicy(profile: calorieProfile)
-            .metric(estimatedActiveCalories: session.estimatedActiveCalories)
+            .metric(
+                estimatedActiveCalories: session.estimatedActiveCalories,
+                calorieEstimateVersion: session.calorieEstimateVersion
+            )
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
         let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
@@ -1276,7 +1304,7 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
                 originX: originX,
                 originY: generator.value(in: CGFloat(-0.75)...CGFloat(0.65)),
                 driftX: driftX,
-                launchHeight: generator.value(in: CGFloat(0.20)...CGFloat(0.36)),
+                launchHeight: generator.value(in: CGFloat(0.30)...CGFloat(0.50)),
                 fallDistance: generator.value(in: CGFloat(0.52)...CGFloat(0.88)),
                 startRotation: generator.value(in: -45...45),
                 rotationDelta: generator.value(in: 210...520) * (generator.nextBool() ? 1 : -1),
