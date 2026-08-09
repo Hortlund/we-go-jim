@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -5,6 +6,69 @@ import SwiftUI
 nonisolated enum HistoryPaginationRequestPolicy {
     static func shouldLoadMore(isLoading: Bool, hasMore: Bool) -> Bool {
         hasMore && !isLoading
+    }
+}
+
+nonisolated struct HistorySnapshotRefreshTrigger: Equatable, Sendable {
+    fileprivate let generation: Int
+}
+
+nonisolated struct HistorySnapshotReloadRequest: Equatable, Sendable {
+    fileprivate let generation: Int
+    fileprivate let requiresActiveTab: Bool
+}
+
+nonisolated struct HistorySnapshotRefreshState: Equatable, Sendable {
+    private(set) var needsExplicitRefresh = true
+    private var generation = 0
+
+    mutating func markNeedsExplicitRefresh() {
+        needsExplicitRefresh = true
+    }
+
+    mutating func workoutHistoryDidChange(
+        isTabActive: Bool
+    ) -> HistorySnapshotRefreshTrigger? {
+        generation += 1
+        needsExplicitRefresh = true
+        guard isTabActive else { return nil }
+        return HistorySnapshotRefreshTrigger(generation: generation)
+    }
+
+    mutating func beginReload(
+        triggeredBy trigger: HistorySnapshotRefreshTrigger? = nil,
+        isTabActive: Bool,
+        requiresActiveTab: Bool
+    ) -> HistorySnapshotReloadRequest? {
+        if let trigger, trigger.generation != generation {
+            return nil
+        }
+        guard !requiresActiveTab || isTabActive else { return nil }
+
+        generation += 1
+        return HistorySnapshotReloadRequest(
+            generation: generation,
+            requiresActiveTab: requiresActiveTab
+        )
+    }
+
+    func canContinueReload(
+        _ request: HistorySnapshotReloadRequest,
+        isTabActive: Bool
+    ) -> Bool {
+        generation == request.generation
+            && (!request.requiresActiveTab || isTabActive)
+    }
+
+    mutating func finishReload(
+        _ request: HistorySnapshotReloadRequest,
+        isTabActive: Bool
+    ) -> Bool {
+        guard canContinueReload(request, isTabActive: isTabActive) else {
+            return false
+        }
+        needsExplicitRefresh = false
+        return true
     }
 }
 
@@ -23,8 +87,7 @@ struct HistoryOverviewView: View {
     ) ?? Date()
     @State private var controller = HistoryOverviewController()
     @State private var hasLoadedSnapshot = false
-    @State private var needsExplicitRefresh = true
-    @State private var snapshotLoadGeneration = AsyncLoadGenerationTracker()
+    @State private var snapshotRefreshState = HistorySnapshotRefreshState()
     @State private var pageLoadGeneration = AsyncLoadGenerationTracker()
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
@@ -103,7 +166,14 @@ struct HistoryOverviewView: View {
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadSnapshotIfNeeded(force: false)
+            await reloadSnapshotIfNeeded(force: false, requiresActiveTab: true)
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .wgjWorkoutHistoryDidChange)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            handleWorkoutHistoryDidChange()
         }
         .onChange(of: selectedDayFilter) { _, newDayFilter in
             Task {
@@ -232,7 +302,22 @@ struct HistoryOverviewView: View {
 
     @MainActor
     private func markNeedsExplicitRefresh() {
-        needsExplicitRefresh = true
+        snapshotRefreshState.markNeedsExplicitRefresh()
+    }
+
+    private func handleWorkoutHistoryDidChange() {
+        guard let trigger = snapshotRefreshState.workoutHistoryDidChange(
+            isTabActive: isTabActive
+        ) else { return }
+
+        Task {
+            guard isTabActive else { return }
+            await reloadSnapshotIfNeeded(
+                force: true,
+                triggeredBy: trigger,
+                requiresActiveTab: true
+            )
+        }
     }
 
     @MainActor
@@ -242,14 +327,33 @@ struct HistoryOverviewView: View {
     }
 
     @MainActor
-    private func reloadSnapshotIfNeeded(force: Bool) async {
+    private func reloadSnapshotIfNeeded(
+        force: Bool,
+        triggeredBy trigger: HistorySnapshotRefreshTrigger? = nil,
+        requiresActiveTab: Bool = false
+    ) async {
+        guard let reloadRequest = snapshotRefreshState.beginReload(
+            triggeredBy: trigger,
+            isTabActive: isTabActive,
+            requiresActiveTab: requiresActiveTab
+        ) else { return }
+
         await Task.yield()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              snapshotRefreshState.canContinueReload(
+                reloadRequest,
+                isTabActive: isTabActive
+              )
+        else { return }
 
         let currentContentUpdatedAt = await currentHistoryContentUpdatedAt()
+        guard snapshotRefreshState.canContinueReload(
+            reloadRequest,
+            isTabActive: isTabActive
+        ) else { return }
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
-            needsExplicitRefresh: needsExplicitRefresh,
+            needsExplicitRefresh: snapshotRefreshState.needsExplicitRefresh,
             currentContentUpdatedAt: currentContentUpdatedAt,
             lastLoadedContentUpdatedAt: lastLoadedContentUpdatedAt,
             lastRefreshAt: lastRefreshAt
@@ -257,12 +361,17 @@ struct HistoryOverviewView: View {
             return
         }
 
-        await reloadSnapshot(contentUpdatedAt: currentContentUpdatedAt)
+        await reloadSnapshot(
+            contentUpdatedAt: currentContentUpdatedAt,
+            reloadRequest: reloadRequest
+        )
     }
 
     @MainActor
-    private func reloadSnapshot(contentUpdatedAt: Date?) async {
-        let loadGeneration = snapshotLoadGeneration.next()
+    private func reloadSnapshot(
+        contentUpdatedAt: Date?,
+        reloadRequest: HistorySnapshotReloadRequest
+    ) async {
         pageLoadGeneration.invalidate()
         isLoadingMoreHistory = false
         do {
@@ -276,14 +385,19 @@ struct HistoryOverviewView: View {
                     pageSize: Self.historyPageSize
                 )
             }
-            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
+            guard snapshotRefreshState.finishReload(
+                reloadRequest,
+                isTabActive: isTabActive
+            ) else { return }
             controller.apply(loaded)
             hasLoadedSnapshot = true
-            needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
         } catch {
-            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
+            guard snapshotRefreshState.canContinueReload(
+                reloadRequest,
+                isTabActive: isTabActive
+            ) else { return }
             errorMessage = String(describing: error)
             showingError = true
         }
@@ -375,6 +489,8 @@ nonisolated struct HistorySessionCardData: Identifiable, Equatable, Sendable {
     let durationText: String
     let volumeText: String
     let prsText: String
+    let estimatedActiveCaloriesText: String?
+    let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
 }
 
@@ -387,6 +503,8 @@ nonisolated struct HistoryOverviewSessionSnapshot: Identifiable, Equatable, Send
     let durationSeconds: Int
     let totalVolume: Double
     let prHitsCount: Int
+    let estimatedActiveCaloriesText: String?
+    let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
 
     var displayDate: Date {
@@ -492,19 +610,22 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
         let completedSessions: [HistoryOverviewSessionSnapshot]
         let hasMorePages: Bool
         if let selectedDayFilter {
             completedSessions = try snapshots(
                 from: repository.completedSessions(onDay: selectedDayFilter),
-                repository: repository
+                repository: repository,
+                caloriePresentationPolicy: caloriePresentationPolicy
             )
             hasMorePages = false
         } else {
             let page = try repository.completedSessions(before: nil, limit: pageSize + 1)
             completedSessions = try snapshots(
                 from: Array(page.prefix(pageSize)),
-                repository: repository
+                repository: repository,
+                caloriePresentationPolicy: caloriePresentationPolicy
             )
             hasMorePages = page.count > pageSize
         }
@@ -530,10 +651,12 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
         let page = try repository.completedSessions(before: date, limit: pageSize + 1)
         let completedSessions = try snapshots(
             from: Array(page.prefix(pageSize)),
-            repository: repository
+            repository: repository,
+            caloriePresentationPolicy: caloriePresentationPolicy
         )
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
             sessions: completedSessions
@@ -563,7 +686,8 @@ nonisolated enum HistoryOverviewSnapshotLoader {
 
     nonisolated private static func snapshots(
         from sessions: [WorkoutSession],
-        repository: WorkoutSessionRepository
+        repository: WorkoutSessionRepository,
+        caloriePresentationPolicy: WorkoutCaloriePresentationPolicy
     ) throws -> [HistoryOverviewSessionSnapshot] {
         try sessions.map { session in
             let exercises = try repository.sessionExercises(sessionID: session.id)
@@ -571,8 +695,23 @@ nonisolated enum HistoryOverviewSnapshotLoader {
                 for: exercises,
                 repository: repository
             )
-            return HistoryOverviewSessionSnapshot(session: session, summaryRows: rows)
+            return HistoryOverviewSessionSnapshot(
+                session: session,
+                summaryRows: rows,
+                calorieMetric: caloriePresentationPolicy.metric(
+                    estimatedActiveCalories: session.estimatedActiveCalories
+                )
+            )
         }
+    }
+
+    nonisolated private static func caloriePresentationPolicy(
+        modelContext: ModelContext
+    ) -> WorkoutCaloriePresentationPolicy {
+        let calorieProfile = try? ProfileRepository(modelContext: modelContext)
+            .currentProfile()?
+            .calorieProfileSnapshot
+        return WorkoutCaloriePresentationPolicy(profile: calorieProfile)
     }
 }
 
@@ -669,6 +808,8 @@ nonisolated enum HistoryOverviewSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
             prsText: "\(session.prHitsCount) PR\(session.prHitsCount == 1 ? "" : "s")",
+            estimatedActiveCaloriesText: session.estimatedActiveCaloriesText,
+            estimatedActiveCaloriesAccessibilityLabel: session.estimatedActiveCaloriesAccessibilityLabel,
             summaryRows: session.summaryRows
         )
     }
@@ -712,7 +853,11 @@ extension HistoryOverviewSessionSnapshot {
         )
     }
 
-    nonisolated init(session: WorkoutSession, summaryRows: [HistorySessionSummaryRow]) {
+    nonisolated init(
+        session: WorkoutSession,
+        summaryRows: [HistorySessionSummaryRow],
+        calorieMetric: WorkoutCalorieMetricPresentation? = nil
+    ) {
         self.init(
             id: session.id,
             updatedAt: session.updatedAt,
@@ -722,6 +867,8 @@ extension HistoryOverviewSessionSnapshot {
             durationSeconds: session.durationSeconds,
             totalVolume: session.totalVolume,
             prHitsCount: session.prHitsCount,
+            estimatedActiveCaloriesText: calorieMetric?.text,
+            estimatedActiveCaloriesAccessibilityLabel: calorieMetric?.accessibilityLabel,
             summaryRows: summaryRows
         )
     }
@@ -771,6 +918,7 @@ private struct HistorySessionCardView: View, Equatable {
                         WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
                         WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
                         WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        estimatedActiveCaloriesMetric
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -778,7 +926,10 @@ private struct HistorySessionCardView: View, Equatable {
                             WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
                             WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
                         }
-                        WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        HStack(spacing: 16) {
+                            WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                            estimatedActiveCaloriesMetric
+                        }
                     }
                 }
 
@@ -807,6 +958,19 @@ private struct HistorySessionCardView: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var estimatedActiveCaloriesMetric: some View {
+        if let text = card.estimatedActiveCaloriesText,
+           let accessibilityLabel = card.estimatedActiveCaloriesAccessibilityLabel {
+            WGJMetricPill(
+                systemImage: "flame.fill",
+                value: text,
+                tint: WGJTheme.warning
+            )
+            .accessibilityLabel(accessibilityLabel)
+        }
     }
 
     private var summaryExerciseHeader: some View {

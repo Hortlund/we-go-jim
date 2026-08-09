@@ -64,6 +64,8 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     case workoutCompletionTemplateSaved
     case workoutDeleted
     case templateSaved
+    case profileSaved
+    case settingsSaved
 
     var failureDescription: String {
         switch self {
@@ -75,6 +77,10 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
             return "workout delete"
         case .templateSaved:
             return "template save"
+        case .profileSaved:
+            return "profile save"
+        case .settingsSaved:
+            return "settings save"
         }
     }
 }
@@ -84,7 +90,7 @@ nonisolated enum BoundaryCloudBackupScheduler {
         switch reason {
         case .workoutCompleted, .workoutCompletionTemplateSaved:
             return WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        case .workoutDeleted, .templateSaved:
+        case .workoutDeleted, .templateSaved, .profileSaved, .settingsSaved:
             return .zero
         }
     }
@@ -919,6 +925,11 @@ private struct Profile: Codable, BackupModel {
     var displayName: String
     var athleteTypeRaw: String?
     var avatarImageData: Data?
+    var calorieEstimateSexRaw: String?
+    var dateOfBirth: Date?
+    var heightCentimeters: Double?
+    var bodyWeightKilograms: Double?
+    var showsCalorieEstimates: Bool?
     var preferredWeightUnitRaw: String
     var preferredDistanceUnitRaw: String?
     var workoutNotificationStyleRaw: String
@@ -935,6 +946,11 @@ private struct Profile: Codable, BackupModel {
         displayName = model.displayName
         athleteTypeRaw = model.athleteTypeRaw
         avatarImageData = model.avatarImageData
+        calorieEstimateSexRaw = model.calorieEstimateSexRaw
+        dateOfBirth = model.dateOfBirth
+        heightCentimeters = model.heightCentimeters
+        bodyWeightKilograms = model.bodyWeightKilograms
+        showsCalorieEstimates = model.showsCalorieEstimates
         preferredWeightUnitRaw = model.preferredWeightUnitRaw
         preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
         workoutNotificationStyleRaw = model.workoutNotificationStyleRaw
@@ -953,6 +969,11 @@ private struct Profile: Codable, BackupModel {
             displayName: displayName,
             athleteType: athleteTypeRaw.flatMap(ProfileAthleteType.init(rawValue:)),
             avatarImageData: avatarImageData,
+            calorieEstimateSex: calorieEstimateSexRaw.flatMap(CalorieEstimateSex.init(rawValue:)),
+            dateOfBirth: dateOfBirth,
+            heightCentimeters: heightCentimeters,
+            bodyWeightKilograms: bodyWeightKilograms,
+            showsCalorieEstimates: showsCalorieEstimates ?? true,
             preferredWeightUnit: PreferredWeightUnit(rawValue: preferredWeightUnitRaw) ?? .kg,
             preferredDistanceUnit: preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)),
             workoutNotificationStyle: WorkoutNotificationStyle(rawValue: workoutNotificationStyleRaw) ?? .timeSensitive,
@@ -970,6 +991,11 @@ private struct Profile: Codable, BackupModel {
         model.displayName = displayName
         model.athleteTypeRaw = athleteTypeRaw
         model.avatarImageData = avatarImageData
+        model.calorieEstimateSexRaw = calorieEstimateSexRaw
+        model.dateOfBirth = dateOfBirth
+        model.heightCentimeters = heightCentimeters
+        model.bodyWeightKilograms = bodyWeightKilograms
+        model.showsCalorieEstimates = showsCalorieEstimates ?? true
         model.preferredWeightUnitRaw = preferredWeightUnitRaw
         model.preferredDistanceUnitRaw = preferredDistanceUnitRaw
         model.workoutNotificationStyleRaw = workoutNotificationStyleRaw
@@ -1504,6 +1530,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
     var totalVolume: Double
     var prHitsCount: Int
     var summaryMetricsVersion: Int
+    var estimatedActiveCalories: Int?
+    var calorieEstimateVersion: Int?
     var notes: String
     var archivedAt: Date?
     var createdAt: Date
@@ -1520,6 +1548,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         totalVolume = model.totalVolume
         prHitsCount = model.prHitsCount
         summaryMetricsVersion = model.summaryMetricsVersion
+        estimatedActiveCalories = model.estimatedActiveCalories
+        calorieEstimateVersion = model.calorieEstimateVersion
         notes = model.notes
         archivedAt = model.archivedAt
         createdAt = model.createdAt
@@ -1538,6 +1568,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
             totalVolume: totalVolume,
             prHitsCount: prHitsCount,
             summaryMetricsVersion: summaryMetricsVersion,
+            estimatedActiveCalories: estimatedActiveCalories,
+            calorieEstimateVersion: calorieEstimateVersion,
             notes: notes,
             archivedAt: archivedAt,
             createdAt: createdAt,
@@ -1555,6 +1587,8 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         model.totalVolume = totalVolume
         model.prHitsCount = prHitsCount
         model.summaryMetricsVersion = summaryMetricsVersion
+        model.estimatedActiveCalories = estimatedActiveCalories
+        model.calorieEstimateVersion = calorieEstimateVersion
         model.notes = notes
         model.archivedAt = archivedAt
         model.createdAt = createdAt

@@ -153,6 +153,32 @@ nonisolated final class ProfileRepository {
         try saveUserDataChanges()
     }
 
+    func saveProfile(
+        name: String,
+        athleteType: ProfileAthleteType?,
+        avatarImageData: Data?,
+        calorieProfile: WorkoutCalorieProfileSnapshot
+    ) throws {
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .displayName)
+        let profile: UserProfile
+        if let existing = try currentProfile() {
+            profile = existing
+        } else {
+            profile = UserProfile(displayName: Self.localDefaultDisplayName)
+            modelContext.insert(profile)
+        }
+
+        profile.displayName = cleaned
+        profile.athleteType = athleteType
+        profile.avatarImageData = avatarImageData
+        profile.calorieEstimateSex = calorieProfile.sex
+        profile.dateOfBirth = calorieProfile.dateOfBirth
+        profile.heightCentimeters = calorieProfile.heightCentimeters
+        profile.bodyWeightKilograms = calorieProfile.bodyWeightKilograms
+        profile.updatedAt = .now
+        try saveUserDataChanges()
+    }
+
     func updateWeeklyWorkoutGoal(_ goal: Int) throws {
         let profile = try loadOrCreateProfile()
         profile.weeklyWorkoutGoal = max(1, min(14, goal))
@@ -219,6 +245,11 @@ nonisolated final class ProfileRepository {
         }
         if let value = patch.automaticallyClosesCompletedExercises {
             profile.automaticallyClosesCompletedExercises = value
+            changed = true
+        }
+        if let value = patch.showsCalorieEstimates,
+           value != profile.showsCalorieEstimates {
+            profile.showsCalorieEstimates = value
             changed = true
         }
 

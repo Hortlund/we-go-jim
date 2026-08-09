@@ -9,6 +9,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
     var preferredDistanceUnit: WorkoutDistanceUnit
     var workoutNotificationStyle: WorkoutNotificationStyle
     var automaticallyClosesCompletedExercises: Bool
+    var showsCalorieEstimates: Bool
 
     static let `default` = UserSettingsDraft(
         weeklyWorkoutGoal: 4,
@@ -17,7 +18,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         preferredWeightUnit: .kg,
         preferredDistanceUnit: .regionalDefault(locale: .current),
         workoutNotificationStyle: .timeSensitive,
-        automaticallyClosesCompletedExercises: true
+        automaticallyClosesCompletedExercises: true,
+        showsCalorieEstimates: true
     )
 
     init(
@@ -27,7 +29,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         preferredWeightUnit: PreferredWeightUnit,
         preferredDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current),
         workoutNotificationStyle: WorkoutNotificationStyle,
-        automaticallyClosesCompletedExercises: Bool = true
+        automaticallyClosesCompletedExercises: Bool = true,
+        showsCalorieEstimates: Bool = true
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
@@ -36,6 +39,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
+        self.showsCalorieEstimates = showsCalorieEstimates
     }
 
     init(profile: UserProfile) {
@@ -46,7 +50,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
             preferredWeightUnit: profile.preferredWeightUnit,
             preferredDistanceUnit: profile.preferredDistanceUnit,
             workoutNotificationStyle: profile.workoutNotificationStyle,
-            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
+            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises,
+            showsCalorieEstimates: profile.showsCalorieEstimates
         )
     }
 
@@ -72,6 +77,9 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         if let value = patch.automaticallyClosesCompletedExercises {
             automaticallyClosesCompletedExercises = value
         }
+        if let value = patch.showsCalorieEstimates {
+            showsCalorieEstimates = value
+        }
     }
 }
 
@@ -83,6 +91,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
     var preferredDistanceUnit: WorkoutDistanceUnit?
     var workoutNotificationStyle: WorkoutNotificationStyle?
     var automaticallyClosesCompletedExercises: Bool?
+    var showsCalorieEstimates: Bool?
 
     init(
         weeklyWorkoutGoal: Int? = nil,
@@ -91,7 +100,8 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         preferredWeightUnit: PreferredWeightUnit? = nil,
         preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         workoutNotificationStyle: WorkoutNotificationStyle? = nil,
-        automaticallyClosesCompletedExercises: Bool? = nil
+        automaticallyClosesCompletedExercises: Bool? = nil,
+        showsCalorieEstimates: Bool? = nil
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
@@ -100,6 +110,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
+        self.showsCalorieEstimates = showsCalorieEstimates
     }
 
     mutating func merge(_ newer: UserSettingsPatch) {
@@ -111,6 +122,9 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         if let value = newer.workoutNotificationStyle { workoutNotificationStyle = value }
         if let value = newer.automaticallyClosesCompletedExercises {
             automaticallyClosesCompletedExercises = value
+        }
+        if let value = newer.showsCalorieEstimates {
+            showsCalorieEstimates = value
         }
     }
 }
@@ -132,6 +146,8 @@ actor OrderedSettingsWriter {
     private var pendingWrite: RevisionedSettingsWrite?
     private var workerTask: Task<Void, Never>?
     private var lastFailedWrite: RevisionedSettingsWrite?
+    private var undeliveredPersistedPatch: UserSettingsPatch?
+    private var undeliveredPersistedDraft: UserSettingsDraft?
 
     init(
         persist: @escaping Persist,
@@ -184,11 +200,33 @@ actor OrderedSettingsWriter {
                 let draft = try await persist(write)
                 lastFailedWrite = nil
                 if write.revision == newestSubmittedRevision {
-                    await onCommit(write.revision, write, draft)
+                    var deliveredPatch = undeliveredPersistedPatch ?? UserSettingsPatch()
+                    deliveredPatch.merge(write.patch)
+                    undeliveredPersistedPatch = nil
+                    undeliveredPersistedDraft = nil
+                    await onCommit(
+                        write.revision,
+                        RevisionedSettingsWrite(
+                            revision: write.revision,
+                            patch: deliveredPatch
+                        ),
+                        draft
+                    )
+                } else if var undeliveredPersistedPatch {
+                    undeliveredPersistedPatch.merge(write.patch)
+                    self.undeliveredPersistedPatch = undeliveredPersistedPatch
+                    undeliveredPersistedDraft = draft
+                } else {
+                    undeliveredPersistedPatch = write.patch
+                    undeliveredPersistedDraft = draft
                 }
             } catch {
+                if mergeFailedWriteIntoPending(write) {
+                    continue
+                }
                 lastFailedWrite = write
                 if write.revision == newestSubmittedRevision {
+                    await deliverUndeliveredPersistedWrite(as: write.revision)
                     await onFailure(write, String(describing: error))
                 }
             }
@@ -197,6 +235,31 @@ actor OrderedSettingsWriter {
         if pendingWrite != nil {
             startWorkerIfNeeded()
         }
+    }
+
+    private func mergeFailedWriteIntoPending(_ failedWrite: RevisionedSettingsWrite) -> Bool {
+        guard let pendingWrite else { return false }
+        var mergedPatch = failedWrite.patch
+        mergedPatch.merge(pendingWrite.patch)
+        self.pendingWrite = RevisionedSettingsWrite(
+            revision: pendingWrite.revision,
+            patch: mergedPatch
+        )
+        return true
+    }
+
+    private func deliverUndeliveredPersistedWrite(as revision: UInt64) async {
+        guard let patch = undeliveredPersistedPatch,
+              let draft = undeliveredPersistedDraft else {
+            return
+        }
+        undeliveredPersistedPatch = nil
+        undeliveredPersistedDraft = nil
+        await onCommit(
+            revision,
+            RevisionedSettingsWrite(revision: revision, patch: patch),
+            draft
+        )
     }
 }
 
@@ -211,10 +274,12 @@ nonisolated struct RevisionedSettingsCommit: Equatable, Sendable {
 final class SettingsDraftCoordinator {
     private(set) var latestCommit: RevisionedSettingsCommit?
     private(set) var errorDescription: String?
+    private(set) var reconciliationDraft: UserSettingsDraft?
     private(set) var revision: UInt64 = 0
 
     @ObservationIgnored private var writer: OrderedSettingsWriter?
     @ObservationIgnored private var submissionTask: Task<Void, Never>?
+    @ObservationIgnored private var lastPersistedDraft: UserSettingsDraft?
 
     func configure(
         persist: @escaping OrderedSettingsWriter.Persist
@@ -231,6 +296,11 @@ final class SettingsDraftCoordinator {
         )
     }
 
+    func synchronizePersistedDraft(_ draft: UserSettingsDraft) {
+        lastPersistedDraft = draft
+        reconciliationDraft = nil
+    }
+
     @discardableResult
     func submit(_ patch: UserSettingsPatch) -> UInt64 {
         guard let writer else { return revision }
@@ -242,6 +312,7 @@ final class SettingsDraftCoordinator {
             await writer.submit(write)
         }
         errorDescription = nil
+        reconciliationDraft = nil
         return revision
     }
 
@@ -265,6 +336,7 @@ final class SettingsDraftCoordinator {
         write: RevisionedSettingsWrite,
         draft: UserSettingsDraft
     ) {
+        lastPersistedDraft = draft
         guard revision == self.revision else { return }
         errorDescription = nil
         latestCommit = RevisionedSettingsCommit(
@@ -275,6 +347,7 @@ final class SettingsDraftCoordinator {
     }
 
     private func receiveFailure(_ description: String) {
+        reconciliationDraft = lastPersistedDraft
         errorDescription = description
     }
 }

@@ -681,9 +681,17 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)
         sourceContext.autosaveEnabled = false
+        let dateOfBirth = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "1990-05-20T00:00:00Z")
+        )
         sourceContext.insert(UserProfile(
             displayName: "Peter",
             athleteType: .powerlifting,
+            calorieEstimateSex: .female,
+            dateOfBirth: dateOfBirth,
+            heightCentimeters: 172.5,
+            bodyWeightKilograms: 68.25,
+            showsCalorieEstimates: false,
             preferredWeightUnit: .lb,
             preferredDistanceUnit: .miles,
             workoutNotificationStyle: .standard,
@@ -712,6 +720,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNotNil(restoreResult)
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.displayName, "Peter")
+        XCTAssertEqual(profiles.first?.calorieEstimateSex, .female)
+        XCTAssertEqual(profiles.first?.dateOfBirth, dateOfBirth)
+        XCTAssertEqual(profiles.first?.heightCentimeters, 172.5)
+        XCTAssertEqual(profiles.first?.bodyWeightKilograms, 68.25)
+        XCTAssertEqual(profiles.first?.showsCalorieEstimates, false)
         XCTAssertEqual(profiles.first?.preferredWeightUnit, .lb)
         XCTAssertEqual(profiles.first?.preferredDistanceUnit, .miles)
         XCTAssertEqual(profiles.first?.workoutNotificationStyle, .standard)
@@ -914,6 +927,15 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         var json = try XCTUnwrap(try JSONSerialization.jsonObject(with: record.payloadData) as? [String: Any])
         var profiles = try XCTUnwrap(json["profiles"] as? [[String: Any]])
         profiles[0].removeValue(forKey: "preferredDistanceUnitRaw")
+        for key in [
+            "calorieEstimateSexRaw",
+            "dateOfBirth",
+            "heightCentimeters",
+            "bodyWeightKilograms",
+            "showsCalorieEstimates",
+        ] {
+            profiles[0].removeValue(forKey: key)
+        }
         json["profiles"] = profiles
         var customExercises = try XCTUnwrap(json["customExercises"] as? [[String: Any]])
         customExercises[0].removeValue(forKey: "cardioTrackingProfileRaw")
@@ -937,11 +959,89 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
 
         XCTAssertNil(restoredProfile.preferredDistanceUnitRaw)
         XCTAssertEqual(restoredProfile.preferredDistanceUnit, .regionalDefault(locale: .current))
+        XCTAssertNil(restoredProfile.calorieEstimateSex)
+        XCTAssertNil(restoredProfile.dateOfBirth)
+        XCTAssertNil(restoredProfile.heightCentimeters)
+        XCTAssertNil(restoredProfile.bodyWeightKilograms)
+        XCTAssertTrue(restoredProfile.showsCalorieEstimates)
         XCTAssertNil(restoredCustom.cardioTrackingProfileRaw)
         XCTAssertEqual(restoredActivity.role, .finisher)
         XCTAssertEqual(restoredActivity.sortOrder, 0)
         XCTAssertEqual(restoredActivity.goalKind, .time)
         XCTAssertNil(restoredActivity.targetDistanceMeters)
+    }
+
+    func testBackupRoundTripPersistsSessionCalorieEstimateResults() async throws {
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(WorkoutSession(
+            id: sessionID,
+            name: "Upper",
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000),
+            estimatedActiveCalories: 145,
+            calorieEstimateVersion: 1
+        ))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+
+        let restored = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restored,
+            backupStore: backupStore
+        ).restoreLatestBackup()
+        let restoredSession = try XCTUnwrap(
+            ModelContext(restored).fetch(FetchDescriptor<WorkoutSession>()).first { $0.id == sessionID }
+        )
+
+        XCTAssertEqual(restoredSession.estimatedActiveCalories, 145)
+        XCTAssertEqual(restoredSession.calorieEstimateVersion, 1)
+    }
+
+    func testBackupWithoutSessionCalorieEstimateFieldsRestoresNilValues() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(WorkoutSession(
+            name: "Upper",
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000)
+        ))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let fetchedRecord = try await backupStore.fetchBackup()
+        let exported = try XCTUnwrap(fetchedRecord)
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: exported.payloadData) as? [String: Any]
+        )
+        var workoutSessions = try XCTUnwrap(json["workoutSessions"] as? [[String: Any]])
+        workoutSessions[0].removeValue(forKey: "estimatedActiveCalories")
+        workoutSessions[0].removeValue(forKey: "calorieEstimateVersion")
+        json["workoutSessions"] = workoutSessions
+        await backupStore.replaceRecord(UserDataCloudBackupRemoteRecord(
+            updatedAt: exported.updatedAt,
+            payloadData: try JSONSerialization.data(withJSONObject: json)
+        ))
+
+        let restored = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restored,
+            backupStore: backupStore
+        ).restoreLatestBackup()
+        let restoredSession = try XCTUnwrap(
+            ModelContext(restored).fetch(FetchDescriptor<WorkoutSession>()).first
+        )
+
+        XCTAssertNil(restoredSession.estimatedActiveCalories)
+        XCTAssertNil(restoredSession.calorieEstimateVersion)
     }
 
     func testRestoreLatestBackupCanReplaceBrokenLocalTemplates() async throws {

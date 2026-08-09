@@ -1,6 +1,66 @@
 import SwiftData
 import SwiftUI
 
+nonisolated struct WorkoutCalorieSettingsPresentation: Equatable, Sendable {
+    let isAvailable: Bool
+    let storedPreference: Bool
+    let effectiveToggleValue: Bool
+    let missingFieldTitles: [String]
+
+    init(
+        profile: WorkoutCalorieProfileSnapshot,
+        referenceDate: Date,
+        calendar: Calendar
+    ) {
+        let issues = profile.validationIssues(
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let unavailableFields = Set(issues.map { issue in
+            switch issue {
+            case let .missing(field), let .invalid(field):
+                field
+            }
+        })
+
+        isAvailable = unavailableFields.isEmpty
+        storedPreference = profile.showsCalorieEstimates
+        effectiveToggleValue = unavailableFields.isEmpty && profile.showsCalorieEstimates
+        missingFieldTitles = WorkoutCalorieProfileField.allCases.compactMap { field in
+            guard unavailableFields.contains(field) else { return nil }
+            return switch field {
+            case .sex:
+                "Sex used for estimate"
+            case .dateOfBirth:
+                "Date of birth"
+            case .height:
+                "Height"
+            case .bodyWeight:
+                "Body weight"
+            }
+        }
+    }
+
+    func updatingStoredPreference(_ storedPreference: Bool) -> Self {
+        Self(
+            isAvailable: isAvailable,
+            storedPreference: storedPreference,
+            missingFieldTitles: missingFieldTitles
+        )
+    }
+
+    private init(
+        isAvailable: Bool,
+        storedPreference: Bool,
+        missingFieldTitles: [String]
+    ) {
+        self.isAvailable = isAvailable
+        self.storedPreference = storedPreference
+        effectiveToggleValue = isAvailable && storedPreference
+        self.missingFieldTitles = missingFieldTitles
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
@@ -23,6 +83,7 @@ struct SettingsView: View {
     @State private var preferredDistanceUnit = WorkoutDistanceUnit.regionalDefault(locale: .current)
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var notificationPermissions: NotificationPermissionSnapshot?
+    @State private var calorieSettingsPresentation: WorkoutCalorieSettingsPresentation?
     @State private var submittedSettingsDraft = UserSettingsDraft.default
     @State private var hasLoadedProfile = false
     @State private var showingDiagnostics = false
@@ -95,6 +156,10 @@ struct SettingsView: View {
                 }
                 .padding(14)
                 .wgjCardContainer()
+
+                if let calorieSettingsPresentation {
+                    estimatedActiveCaloriesCard(calorieSettingsPresentation)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("App Preferences", subtitle: "Control how the app behaves while you train and browse.")
@@ -337,6 +402,9 @@ struct SettingsView: View {
         }
         .onChange(of: settingsPersistenceCoordinator.errorDescription) { _, description in
             guard let description else { return }
+            if let persistedDraft = settingsPersistenceCoordinator.reconciliationDraft {
+                reconcileSettingsView(with: persistedDraft)
+            }
             errorMessage = description
             showingError = true
         }
@@ -366,6 +434,59 @@ struct SettingsView: View {
         .font(.subheadline)
     }
 
+    private func estimatedActiveCaloriesCard(
+        _ presentation: WorkoutCalorieSettingsPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader(
+                "Estimated Active Calories",
+                subtitle: "Choose whether eligible workouts show a conservative estimate."
+            )
+
+            Toggle("Show calorie estimates", isOn: calorieEstimatePreferenceBinding)
+                .tint(WGJTheme.accentBlue)
+                .disabled(!presentation.isAvailable)
+
+            Text("This is a conservative guesstimate based on your profile and logged workout—not a medical measurement or a substitute for wearable data.")
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !presentation.isAvailable {
+                Text("Missing or invalid profile details: \(presentation.missingFieldTitles.joined(separator: ", ")).")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                NavigationLink {
+                    ProfileManagementView()
+                        .onDisappear {
+                            Task {
+                                await refreshCalorieSettingsPresentation()
+                            }
+                        }
+                } label: {
+                    Label("Complete Profile", systemImage: "person.crop.circle.badge.plus")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var calorieEstimatePreferenceBinding: Binding<Bool> {
+        Binding(
+            get: {
+                calorieSettingsPresentation?.effectiveToggleValue ?? false
+            },
+            set: { isEnabled in
+                saveCalorieEstimatesPreference(isEnabled)
+            }
+        )
+    }
+
     private func bootstrapCatalog() async {
         let backgroundStore = settingsBackgroundStore
         do {
@@ -387,6 +508,27 @@ struct SettingsView: View {
 
     private func refreshNotificationPermissions() async {
         notificationPermissions = await SystemUserNotificationCenterClient().settings()
+    }
+
+    private func refreshCalorieSettingsPresentation() async {
+        let backgroundStore = settingsBackgroundStore
+        do {
+            let presentation = try await backgroundStore.perform("settings.calorie-profile.reload") { backgroundContext in
+                guard let profile = try ProfileRepository(modelContext: backgroundContext).currentProfile() else {
+                    return nil as WorkoutCalorieSettingsPresentation?
+                }
+                return WorkoutCalorieSettingsPresentation(
+                    profile: profile.calorieProfileSnapshot,
+                    referenceDate: .now,
+                    calendar: .current
+                )
+            }
+            guard let presentation else { return }
+            calorieSettingsPresentation = presentation
+            submittedSettingsDraft.showsCalorieEstimates = presentation.storedPreference
+        } catch {
+            showError(error)
+        }
     }
 
     private func loadProfileIfNeeded() async {
@@ -435,15 +577,36 @@ struct SettingsView: View {
         preferredWeightUnit = snapshot.preferredWeightUnit
         preferredDistanceUnit = snapshot.preferredDistanceUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
-        submittedSettingsDraft = UserSettingsDraft(
+        calorieSettingsPresentation = snapshot.calorieSettingsPresentation
+        let persistedDraft = UserSettingsDraft(
             weeklyWorkoutGoal: snapshot.weeklyGoal,
             isTrainingGuidanceEnabled: snapshot.isTrainingGuidanceEnabled,
             keepsScreenAwake: snapshot.keepsScreenAwake,
             preferredWeightUnit: snapshot.preferredWeightUnit,
             preferredDistanceUnit: snapshot.preferredDistanceUnit,
             workoutNotificationStyle: snapshot.workoutNotificationStyle,
-            automaticallyClosesCompletedExercises: snapshot.automaticallyClosesCompletedExercises
+            automaticallyClosesCompletedExercises: snapshot.automaticallyClosesCompletedExercises,
+            showsCalorieEstimates: snapshot.calorieSettingsPresentation.storedPreference
         )
+        submittedSettingsDraft = persistedDraft
+        settingsPersistenceCoordinator.synchronizePersistedDraft(persistedDraft)
+    }
+
+    @MainActor
+    private func reconcileSettingsView(with persistedDraft: UserSettingsDraft) {
+        submittedSettingsDraft = persistedDraft
+        weeklyGoal = persistedDraft.weeklyWorkoutGoal
+        savedWeeklyGoal = persistedDraft.weeklyWorkoutGoal
+        isTrainingGuidanceEnabled = persistedDraft.isTrainingGuidanceEnabled
+        keepsScreenAwake = persistedDraft.keepsScreenAwake
+        automaticallyClosesCompletedExercises = persistedDraft.automaticallyClosesCompletedExercises
+        preferredWeightUnit = persistedDraft.preferredWeightUnit
+        preferredDistanceUnit = persistedDraft.preferredDistanceUnit
+        workoutNotificationStyle = persistedDraft.workoutNotificationStyle
+        calorieSettingsPresentation = calorieSettingsPresentation?.updatingStoredPreference(
+            persistedDraft.showsCalorieEstimates
+        )
+        clearWeeklyGoalSaveFeedback()
     }
 
     private func saveWeeklyGoal() {
@@ -533,6 +696,19 @@ struct SettingsView: View {
         )
     }
 
+    private func saveCalorieEstimatesPreference(_ isEnabled: Bool) {
+        guard let presentation = calorieSettingsPresentation,
+              presentation.isAvailable,
+              isEnabled != submittedSettingsDraft.showsCalorieEstimates else {
+            return
+        }
+        calorieSettingsPresentation = presentation.updatingStoredPreference(isEnabled)
+        submittedSettingsDraft.showsCalorieEstimates = isEnabled
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(showsCalorieEstimates: isEnabled)
+        )
+    }
+
     private func configureSettingsPersistenceIfNeeded() {
         let backgroundStore = settingsBackgroundStore
         settingsPersistenceCoordinator.configure { write in
@@ -553,6 +729,23 @@ struct SettingsView: View {
         if commit.write.patch.weeklyWorkoutGoal != nil {
             applyWeeklyGoalSave(commit.persistedDraft.weeklyWorkoutGoal)
         }
+        if let isEnabled = commit.write.patch.showsCalorieEstimates {
+            applyCalorieEstimatePreferenceCommit(isEnabled: isEnabled)
+        }
+    }
+
+    @MainActor
+    private func applyCalorieEstimatePreferenceCommit(isEnabled: Bool) {
+        let container = modelContext.container
+        HistoryAnalyticsCache.shared.invalidate(container: container)
+        WorkoutHistoryChangeBroadcaster.post()
+
+        guard isEnabled else { return }
+        WorkoutCalorieBackfillScheduler.schedule(
+            backgroundStore: settingsBackgroundStore,
+            container: container,
+            reason: .settingsSaved
+        )
     }
 
     @MainActor
@@ -575,6 +768,7 @@ private struct SettingsProfileSnapshot: Sendable {
     let preferredWeightUnit: PreferredWeightUnit
     let preferredDistanceUnit: WorkoutDistanceUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
+    let calorieSettingsPresentation: WorkoutCalorieSettingsPresentation
 
     nonisolated init(profile: UserProfile) {
         weeklyGoal = profile.weeklyWorkoutGoal
@@ -584,6 +778,11 @@ private struct SettingsProfileSnapshot: Sendable {
         preferredWeightUnit = profile.preferredWeightUnit
         preferredDistanceUnit = profile.preferredDistanceUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
+        calorieSettingsPresentation = WorkoutCalorieSettingsPresentation(
+            profile: profile.calorieProfileSnapshot,
+            referenceDate: .now,
+            calendar: .current
+        )
     }
 
     nonisolated init(profile: ProfileIdentitySnapshot) {
@@ -594,6 +793,17 @@ private struct SettingsProfileSnapshot: Sendable {
         preferredWeightUnit = profile.preferredWeightUnit
         preferredDistanceUnit = profile.preferredDistanceUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
+        calorieSettingsPresentation = WorkoutCalorieSettingsPresentation(
+            profile: WorkoutCalorieProfileSnapshot(
+                sex: profile.calorieEstimateSex,
+                dateOfBirth: profile.dateOfBirth,
+                heightCentimeters: profile.heightCentimeters,
+                bodyWeightKilograms: profile.bodyWeightKilograms,
+                showsCalorieEstimates: profile.showsCalorieEstimates
+            ),
+            referenceDate: .now,
+            calendar: .current
+        )
     }
 }
 

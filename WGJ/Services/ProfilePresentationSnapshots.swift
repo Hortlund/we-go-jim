@@ -6,6 +6,11 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
     let displayName: String
     let athleteType: ProfileAthleteType?
     let avatarImageData: Data?
+    let calorieEstimateSex: CalorieEstimateSex?
+    let dateOfBirth: Date?
+    let heightCentimeters: Double?
+    let bodyWeightKilograms: Double?
+    let showsCalorieEstimates: Bool
     let weeklyWorkoutGoal: Int
     let isTrainingGuidanceEnabled: Bool
     let keepsScreenAwake: Bool
@@ -20,6 +25,11 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
         displayName = profile.displayName
         athleteType = profile.athleteType
         avatarImageData = profile.avatarImageData
+        calorieEstimateSex = profile.calorieEstimateSex
+        dateOfBirth = profile.dateOfBirth
+        heightCentimeters = profile.heightCentimeters
+        bodyWeightKilograms = profile.bodyWeightKilograms
+        showsCalorieEstimates = profile.showsCalorieEstimates
         weeklyWorkoutGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake

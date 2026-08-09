@@ -11,6 +11,9 @@ build/
 DerivedData/
 .worktrees/
 
+# Local agent planning artifacts
+/docs/superpowers/
+
 # Signing material must stay local
 *.mobileprovision
 *.p12
