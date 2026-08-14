@@ -50,7 +50,7 @@ Automated validation rejects any alias that exactly matches a different canonica
 
 ### Existing equipment metadata
 
-Populate the currently empty equipment field on all 25 existing chest exercises. Use only equipment already implied by each movement, such as `Barbell,Bench`, `Dumbbells,Bench`, `Cable`, `Machine`, `Bodyweight`, or `Dip Station`. This restores correct equipment filtering without creating new exercise identities.
+Populate the currently empty equipment field on all 24 affected chest exercises. Use only equipment already implied by each movement, such as `Barbell,Bench`, `Dumbbells,Bench`, `Cable`, `Machine`, `Bodyweight`, or `Dip Station`. This restores correct equipment filtering without creating new exercise identities.
 
 ## Data and upgrade behavior
 
