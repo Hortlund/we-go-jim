@@ -9,6 +9,8 @@ Correct the three issues found in the exercise catalog and progress review witho
 - Search normalization treats punctuation and symbols as token boundaries. A query such as `t bar row` matches `T-Bar Row`, while existing case- and diacritic-insensitive ranking remains unchanged.
 - Workout-frequency projections include zero-valued calendar weeks between the first relevant week and the current/range-ending week. This makes inactive gaps visible instead of connecting only active weeks.
 - Superseded catalog projections stop consuming CPU. Cancellation reaches the actual background projection work, and catalog reload paths request one projection for the final current input.
+- Catalog projection explicitly uses a concurrent executor under WGJ's approachable-concurrency and MainActor-default build settings.
+- Exercise-detail rendering computes only the selected full timeline. Metric-menu availability uses a lightweight dataset scan instead of rebuilding six complete timelines.
 
 ## Boundaries
 
@@ -24,4 +26,6 @@ Use test-driven fixes:
 1. Add a search regression test for punctuation-equivalent tokens.
 2. Add a progress regression test proving inactive weeks appear as zeroes.
 3. Add a controller regression test proving superseded projection work observes cancellation.
-4. Run the focused tests, the broader WGJ unit suite, and a Release simulator build.
+4. Add an executor-isolation regression test for the default catalog projector.
+5. Add availability tests covering weighted and bodyweight histories without chart projection.
+6. Run the focused tests, the broader WGJ unit suite, and a Release simulator build.
