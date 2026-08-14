@@ -699,7 +699,8 @@ nonisolated enum HistoryOverviewSnapshotLoader {
                 session: session,
                 summaryRows: rows,
                 calorieMetric: caloriePresentationPolicy.metric(
-                    estimatedActiveCalories: session.estimatedActiveCalories
+                    estimatedActiveCalories: session.estimatedActiveCalories,
+                    calorieEstimateVersion: session.calorieEstimateVersion
                 )
             )
         }

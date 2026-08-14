@@ -13,7 +13,7 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
         XCTAssertEqual(bursts.first?.origin, .overlayCenter)
-        XCTAssertEqual(bursts.first?.pieceCount, 38)
+        XCTAssertEqual(bursts.first?.pieceCount, 46)
         XCTAssertEqual(bursts.first?.variant, .standard)
         XCTAssertEqual(bursts.first?.delay, 0)
         XCTAssertEqual(WorkoutCompletionConfettiPolicy.automaticCelebrationDelay, .milliseconds(180))
@@ -26,9 +26,11 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
             variant: .personalRecord
         )
 
-        XCTAssertEqual(bursts.count, 1)
-        XCTAssertEqual(bursts.first?.pieceCount, 46)
+        XCTAssertEqual(bursts.count, 2)
+        XCTAssertEqual(bursts.first?.pieceCount, 54)
         XCTAssertEqual(bursts.first?.variant, .personalRecord)
+        XCTAssertEqual(bursts.last?.pieceCount, 24)
+        XCTAssertEqual(bursts.last?.delay, 0.18)
         XCTAssertGreaterThan(
             WorkoutCompletionConfettiPolicy.colorRoles(for: .personalRecord).filter { $0 == .gold }.count,
             WorkoutCompletionConfettiPolicy.colorRoles(for: .standard).filter { $0 == .gold }.count
@@ -46,7 +48,7 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
         XCTAssertEqual(bursts.first?.origin, .global(origin))
-        XCTAssertEqual(bursts.first?.pieceCount, 18)
+        XCTAssertEqual(bursts.first?.pieceCount, 22)
     }
 
     func testAutomaticOriginResolvesFromLiveOverlaySize() {
@@ -134,6 +136,7 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(pieces.filter { $0.originX < -0.65 }.count, 8)
         XCTAssertGreaterThanOrEqual(pieces.filter { $0.originX > 0.65 }.count, 8)
         XCTAssertTrue(pieces.allSatisfy { abs($0.driftX) <= 0.27 })
+        XCTAssertTrue(pieces.allSatisfy { $0.launchHeight >= 0.30 && $0.launchHeight <= 0.50 })
         XCTAssertTrue(pieces.allSatisfy { $0.duration >= 4.2 && $0.duration <= 5.4 })
         XCTAssertTrue(pieces.allSatisfy { $0.delay >= 0 && $0.delay <= 0.14 })
     }
