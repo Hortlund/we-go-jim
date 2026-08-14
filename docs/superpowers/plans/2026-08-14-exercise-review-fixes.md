@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Correct exercise search punctuation handling, workout-frequency gaps, and catalog projection cancellation without changing the UI design.
+**Goal:** Correct exercise search punctuation handling, workout-frequency gaps, catalog projection cancellation, and the two final review-identified performance issues without changing the UI design.
 
-**Architecture:** Keep all behavior in the existing pure projectors and projection controller. Search normalization remains a shared projector helper; frequency zero-filling remains in the progress projector; cancellation uses the controller's existing task rather than an unstructured detached child.
+**Architecture:** Keep all behavior in the existing pure projectors and projection controller. Search normalization remains a shared projector helper; frequency zero-filling remains in the progress projector; cancellation uses the controller's existing task rather than an unstructured detached child. The default catalog projection explicitly leaves the main actor, while metric-menu availability uses one lightweight dataset scan and reserves full timeline projection for the selected metric.
 
 **Tech Stack:** Swift 6, SwiftUI, Swift Concurrency, XCTest, Xcode 26.
 
@@ -75,7 +75,54 @@
 - Verify only; no planned production edits.
 
 **Interfaces:**
-- Consumes: all fixes and regression tests above.
+- Consumes: tasks 1 through 3.
+- Produces: the first focused verification checkpoint.
+
+- [x] Run `git diff --check`.
+- [x] Run the complete `WGJTests` suite on an available iOS Simulator.
+- [x] Build the `WGJ` scheme with `Release` configuration for the same simulator destination.
+
+### Task 5: Concurrent catalog projection execution
+
+**Files:**
+- Modify: `WGJ/Services/ExercisesCatalogProjectionController.swift:68`
+- Test: `WGJTests/ExercisesCatalogProjectionControllerTests.swift`
+
+**Interfaces:**
+- Consumes: `ExercisesCatalogProjectionController.defaultProject(documents:input:)` as the controller's default async projector.
+- Produces: an `@concurrent nonisolated` default projector that cannot inherit `MainActor` under approachable concurrency.
+
+- [ ] Confirm the target enables approachable concurrency and MainActor default isolation, establishing that plain `nonisolated async` does not guarantee executor switching.
+- [ ] Run the existing controller tests as a baseline; executor annotations are a compiler-enforced isolation property and do not justify adding a test-only production hook.
+- [ ] Add `@concurrent` to `defaultProject` while retaining its cancellation checks and existing call shape; compile the target to verify the annotation under the project's Swift language settings.
+- [ ] Run `ExercisesCatalogProjectionControllerTests` and verify cancellation and stale-result protection remain green.
+- [ ] Commit with `perf(exercises): move catalog projection off main actor`.
+
+### Task 6: Lightweight metric availability
+
+**Files:**
+- Modify: `WGJTests/ExerciseProgressProjectorTests.swift`
+- Modify: `WGJ/Services/ExerciseProgressProjector.swift`
+- Modify: `WGJ/Views/Exercises/ExerciseDetailStatsSection.swift`
+
+**Interfaces:**
+- Consumes: `ExerciseProgressDataset`, `ExerciseProgressRange`, `Date`, and `Calendar`.
+- Produces: `ExerciseProgressProjector.availabilityByMetric(dataset:range:now:calendar:) -> [ExerciseProgressMetric: ExerciseProgressAvailability]`.
+
+- [ ] Add tests proving the availability summary distinguishes weighted from bodyweight metrics and excludes metric data outside the selected range.
+- [ ] Run `ExerciseProgressProjectorTests` and verify the new API is absent or the assertions fail.
+- [ ] Implement `availabilityByMetric` with one in-range session pass: weighted metrics require their corresponding optional value, best-set reps requires a non-nil value, and total reps/frequency require at least one completed session.
+- [ ] Update `ExerciseDetailStatsSection` to compute the summary once per render, use it for menu disabling and initial metric fallback, and compute a full projection only for `selectedMetric`.
+- [ ] Run `ExerciseProgressProjectorTests` and the app build; verify all timeline behavior remains green.
+- [ ] Commit with `perf(exercises): avoid redundant timeline projections`.
+
+### Task 7: Final branch verification
+
+**Files:**
+- Verify only; no planned production edits.
+
+**Interfaces:**
+- Consumes: all fixes and regression tests above, including final review fixes.
 - Produces: verified branch ready for review.
 
 - [ ] Run `git diff --check`.
