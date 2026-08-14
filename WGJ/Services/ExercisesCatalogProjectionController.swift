@@ -32,11 +32,6 @@ final class ExercisesCatalogProjectionController {
     @ObservationIgnored private let project: ExerciseCatalogProject
     @ObservationIgnored private var generationState = ExerciseCatalogProjectionGenerationState()
     @ObservationIgnored private var projectionTask: Task<Void, Never>?
-    @ObservationIgnored private var currentInput = ExerciseCatalogProjectionInput(
-        query: "",
-        filters: .default,
-        sortDescending: false
-    )
 
     init(project: @escaping ExerciseCatalogProject = ExercisesCatalogProjectionController.defaultProject) {
         self.project = project
@@ -44,11 +39,9 @@ final class ExercisesCatalogProjectionController {
 
     func replaceCatalog(snapshot: ExercisesCatalogSnapshot) {
         catalog = snapshot
-        requestProjection(input: currentInput)
     }
 
     func requestProjection(input: ExerciseCatalogProjectionInput) {
-        currentInput = input
         projectionTask?.cancel()
 
         let generation = generationState.begin()
@@ -76,8 +69,8 @@ final class ExercisesCatalogProjectionController {
         documents: [ExerciseCatalogSearchDocument],
         input: ExerciseCatalogProjectionInput
     ) async -> ExerciseCatalogProjection {
-        await Task.detached(priority: .userInitiated) {
-            ExerciseCatalogProjector.project(documents: documents, input: input)
-        }.value
+        await Task.yield()
+        guard !Task.isCancelled else { return .empty }
+        return ExerciseCatalogProjector.project(documents: documents, input: input)
     }
 }

@@ -20,6 +20,20 @@ final class ExercisesCatalogProjectionControllerTests: XCTestCase {
         XCTAssertFalse(state.accept(generation))
     }
 
+    func testReplacingCatalogDoesNotStartIntermediateProjection() async {
+        let recorder = ExerciseCatalogProjectionInvocationRecorder()
+        let controller = ExercisesCatalogProjectionController { _, _ in
+            await recorder.recordInvocation()
+            return .empty
+        }
+
+        controller.replaceCatalog(snapshot: .empty)
+        await waitForMainActorTasks()
+
+        let invocationCount = await recorder.invocationCount
+        XCTAssertEqual(invocationCount, 0)
+    }
+
     func testOlderAsyncCompletionCannotReplaceNewerProjection() async {
         let gate = ExerciseCatalogProjectorGate()
         let controller = ExercisesCatalogProjectionController { _, input in
@@ -66,6 +80,14 @@ final class ExercisesCatalogProjectionControllerTests: XCTestCase {
         for _ in 0..<10 {
             await Task.yield()
         }
+    }
+}
+
+private actor ExerciseCatalogProjectionInvocationRecorder {
+    private(set) var invocationCount = 0
+
+    func recordInvocation() {
+        invocationCount += 1
     }
 }
 

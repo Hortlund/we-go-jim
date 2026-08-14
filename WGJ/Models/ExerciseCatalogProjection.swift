@@ -91,30 +91,41 @@ nonisolated enum ExerciseCatalogProjector {
         documents: [ExerciseCatalogSearchDocument],
         input: ExerciseCatalogProjectionInput
     ) -> ExerciseCatalogProjection {
+        guard !Task.isCancelled else { return .empty }
         let query = normalize(input.query)
         let queryTokens = tokens(in: query)
-        let visibleDocuments = documents.filter { document in
-            matchesFilters(document, filters: input.filters)
+        var visibleDocuments: [ExerciseCatalogSearchDocument] = []
+        visibleDocuments.reserveCapacity(documents.count)
+        for document in documents {
+            guard !Task.isCancelled else { return .empty }
+            if matchesFilters(document, filters: input.filters) {
+                visibleDocuments.append(document)
+            }
         }
 
-        var ranked = visibleDocuments.compactMap { document -> RankedDocument? in
-            guard let match = strongMatch(document, query: query, queryTokens: queryTokens) else {
-                return nil
+        var ranked: [RankedDocument] = []
+        ranked.reserveCapacity(visibleDocuments.count)
+        for document in visibleDocuments {
+            guard !Task.isCancelled else { return .empty }
+            if let match = strongMatch(document, query: query, queryTokens: queryTokens) {
+                ranked.append(RankedDocument(
+                    document: document,
+                    rank: match.rank,
+                    matchedNameTokens: match.matchedNameTokens
+                ))
             }
-            return RankedDocument(
-                document: document,
-                rank: match.rank,
-                matchedNameTokens: match.matchedNameTokens
-            )
         }
 
         if !queryTokens.isEmpty, ranked.isEmpty {
-            ranked = visibleDocuments.compactMap { document in
-                guard matchesTypo(document, queryTokens: queryTokens) else { return nil }
-                return RankedDocument(document: document, rank: 5, matchedNameTokens: [])
+            for document in visibleDocuments {
+                guard !Task.isCancelled else { return .empty }
+                if matchesTypo(document, queryTokens: queryTokens) {
+                    ranked.append(RankedDocument(document: document, rank: 5, matchedNameTokens: []))
+                }
             }
         }
 
+        guard !Task.isCancelled else { return .empty }
         ranked.sort { lhs, rhs in
             if lhs.rank != rhs.rank {
                 return lhs.rank < rhs.rank
@@ -128,6 +139,7 @@ nonisolated enum ExerciseCatalogProjector {
             }
             return lhs.document.id < rhs.document.id
         }
+        guard !Task.isCancelled else { return .empty }
 
         if !query.isEmpty {
             let rows = ranked.map(projectedRow)
@@ -140,6 +152,7 @@ nonisolated enum ExerciseCatalogProjector {
 
         var sections: [ExerciseCatalogProjectedSection] = []
         for item in ranked {
+            guard !Task.isCancelled else { return .empty }
             let key = item.document.indexKey
             let row = projectedRow(item)
             if sections.last?.id == key {

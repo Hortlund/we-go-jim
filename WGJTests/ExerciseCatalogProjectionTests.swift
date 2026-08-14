@@ -82,6 +82,25 @@ final class ExerciseCatalogProjectionTests: XCTestCase {
         XCTAssertEqual(result.rows.map(\.id), ["t-bar-row"])
     }
 
+    func testAlreadyCancelledProjectionExitsWithoutResults() async {
+        let bench = document(id: "bench", name: "Bench Press")
+        let result = await Task.detached {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return ExerciseCatalogProjector.project(
+                documents: [bench],
+                input: ExerciseCatalogProjectionInput(
+                    query: "bench",
+                    filters: .default,
+                    sortDescending: false
+                )
+            )
+        }.value
+
+        XCTAssertEqual(result, .empty)
+    }
+
     func testNameMatchPublishesTokensForStableHighlighting() {
         let result = ExerciseCatalogProjector.project(
             documents: [document(id: "incline", name: "Incline Dumbbell Press")],
