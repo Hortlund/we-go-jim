@@ -165,6 +165,9 @@ nonisolated enum ExerciseCatalogProjector {
                 locale: Locale(identifier: "en_US_POSIX")
             )
             .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
     }

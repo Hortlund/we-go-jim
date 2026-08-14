@@ -69,6 +69,19 @@ final class ExerciseCatalogProjectionTests: XCTestCase {
         XCTAssertTrue(result.rows.isEmpty)
     }
 
+    func testPunctuationAndWhitespaceProduceEquivalentSearchTokens() {
+        let result = ExerciseCatalogProjector.project(
+            documents: [document(id: "t-bar-row", name: "T-Bar Row")],
+            input: ExerciseCatalogProjectionInput(
+                query: "t bar row",
+                filters: .default,
+                sortDescending: false
+            )
+        )
+
+        XCTAssertEqual(result.rows.map(\.id), ["t-bar-row"])
+    }
+
     func testNameMatchPublishesTokensForStableHighlighting() {
         let result = ExerciseCatalogProjector.project(
             documents: [document(id: "incline", name: "Incline Dumbbell Press")],
