@@ -20,11 +20,11 @@ final class ExerciseSeedCatalogTests: XCTestCase {
         let uuids = payload.exercises.map(\.uuid)
 
         XCTAssertEqual(payload.version, 6)
-        XCTAssertEqual(payload.exercises.count, 246)
+        XCTAssertEqual(payload.exercises.count, 247)
         XCTAssertEqual(remoteIDs.count, payload.exercises.count)
         XCTAssertEqual(Set(remoteIDs).count, remoteIDs.count)
         XCTAssertEqual(Set(uuids).count, uuids.count)
-        XCTAssertEqual(Set(remoteIDs), Set(1001...1246))
+        XCTAssertEqual(Set(remoteIDs), Set(1001...1247))
         XCTAssertTrue(payload.exercises.allSatisfy {
             !$0.isCurated || !$0.equipmentSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         })
@@ -50,6 +50,7 @@ final class ExerciseSeedCatalogTests: XCTestCase {
             "Kettlebell Snatch": .init(remoteID: 1244, uuid: "seed-kettlebell-snatch", category: "Conditioning", equipment: "Kettlebell", primary: [2], secondary: [7, 6, 12], cardioProfile: nil),
             "Hiking": .init(remoteID: 1245, uuid: "seed-hiking", category: "Cardio", equipment: "Outdoor", primary: [5], secondary: [7, 9], cardioProfile: .walkRun),
             "Swimming": .init(remoteID: 1246, uuid: "seed-swimming", category: "Cardio", equipment: "Pool", primary: [4], secondary: [2, 3], cardioProfile: .timeOnly),
+            "Barbell Reverse Curl": .init(remoteID: 1247, uuid: "seed-barbell-reverse-curl", category: "Arms", equipment: "Barbell", primary: [11], secondary: [1], cardioProfile: nil),
         ]
 
         for (name, expectedRow) in expected {
@@ -75,9 +76,13 @@ final class ExerciseSeedCatalogTests: XCTestCase {
         XCTAssertEqual(benchPress.equipmentSummary, "Dumbbells,Bench")
 
         let reverseCurl = try XCTUnwrap(rowsByUUID["seed-reverse-curl"])
-        XCTAssertEqual(reverseCurl.name, "Barbell Reverse Curl")
-        XCTAssertEqual(reverseCurl.equipmentSummary, "Barbell")
-        XCTAssertFalse(reverseCurl.aliases.contains("EZ Bar Reverse Curl"))
+        XCTAssertEqual(reverseCurl.name, "Reverse Curl")
+        XCTAssertEqual(reverseCurl.equipmentSummary, "EZ Bar")
+        XCTAssertFalse(reverseCurl.aliases.contains("Barbell Reverse Curl"))
+
+        let barbellReverseCurl = try XCTUnwrap(rowsByUUID["seed-barbell-reverse-curl"])
+        XCTAssertEqual(barbellReverseCurl.name, "Barbell Reverse Curl")
+        XCTAssertEqual(barbellReverseCurl.equipmentSummary, "Barbell")
 
         let canonicalNames = Dictionary(uniqueKeysWithValues: payload.exercises.map {
             ($0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), $0.uuid)
@@ -110,6 +115,7 @@ final class ExerciseSeedCatalogTests: XCTestCase {
     func testVersion6UpgradePreservesStableRowsAndCustomExercises() throws {
         let current = try BundleExerciseSeedLoader().loadSeed()
         let currentPress = try XCTUnwrap(current.exercises.first { $0.uuid == "seed-dumbbell-flat-press" })
+        let currentReverseCurl = try XCTUnwrap(current.exercises.first { $0.uuid == "seed-reverse-curl" })
         let legacyPress = SeedExercise(
             remoteID: currentPress.remoteID,
             uuid: currentPress.uuid,
@@ -132,7 +138,27 @@ final class ExerciseSeedCatalogTests: XCTestCase {
             version: 5,
             generatedAt: "2026-07-20T00:00:00Z",
             muscles: current.muscles,
-            exercises: [legacyPress]
+            exercises: [
+                legacyPress,
+                SeedExercise(
+                    remoteID: currentReverseCurl.remoteID,
+                    uuid: currentReverseCurl.uuid,
+                    name: "Reverse Curl",
+                    aliases: ["Barbell Reverse Curl"],
+                    categoryName: "Arms",
+                    equipmentSummary: "EZ Bar",
+                    instructions: currentReverseCurl.instructions,
+                    cardioTrackingProfileRaw: nil,
+                    primaryMuscleIDs: [11],
+                    secondaryMuscleIDs: [1],
+                    imageURL: currentReverseCurl.imageURL,
+                    sourceURL: currentReverseCurl.sourceURL,
+                    licenseName: currentReverseCurl.licenseName,
+                    licenseURL: currentReverseCurl.licenseURL,
+                    licenseAuthor: currentReverseCurl.licenseAuthor,
+                    isCurated: true
+                ),
+            ]
         )
         let container = try AppSchema.makeInMemoryContainer(name: "ExerciseSeedUpgradeTests")
         let context = ModelContext(container)
@@ -159,6 +185,11 @@ final class ExerciseSeedCatalogTests: XCTestCase {
             "Dumbbell Bench Press"
         )
         XCTAssertNotNil(rows.first(where: { $0.remoteUUID == "seed-dumbbell-curl" }))
+        XCTAssertEqual(
+            rows.first(where: { $0.remoteUUID == "seed-reverse-curl" })?.equipmentSummary,
+            "EZ Bar"
+        )
+        XCTAssertNotNil(rows.first(where: { $0.remoteUUID == "seed-barbell-reverse-curl" }))
         XCTAssertNotNil(rows.first(where: { $0.displayName == "My Curl" && $0.sourceName == "custom" }))
     }
 }

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add 16 carefully classified exercises, correct misleading canonical names and aliases, and restore complete equipment filtering without breaking existing exercise identities.
+**Goal:** Add 17 carefully classified exercises, correct misleading canonical names and aliases, and restore complete equipment filtering without breaking existing exercise identities.
 
 **Architecture:** Keep the implementation entirely inside the bundled versioned seed. Add a focused XCTest contract suite that decodes the real app resource, verifies identity and taxonomy, exercises search by the requested canonical name, and simulates a version-5-to-version-6 import through the existing UUID-based synchronization service.
 
@@ -15,7 +15,7 @@
 - Preserve every existing exercise UUID and remote ID.
 - Aliases must describe the same movement as their canonical exercise; they must not collapse equipment, stance, grip, or unilateral/bilateral variants.
 - An alias must never exactly equal a different exercise's canonical name.
-- New remote IDs are exactly `1231...1246`; seed version is exactly `6`.
+- New remote IDs are exactly `1231...1247`; seed version is exactly `6`.
 - Use the existing WGJ bundled attribution and leave image URLs empty.
 
 ---
@@ -70,18 +70,18 @@ func testBundledSeedV6HasUniqueCompleteIdentitiesAndEquipment() throws {
     let uuids = payload.exercises.map(\.uuid)
 
     XCTAssertEqual(payload.version, 6)
-    XCTAssertEqual(payload.exercises.count, 246)
+    XCTAssertEqual(payload.exercises.count, 247)
     XCTAssertEqual(remoteIDs.count, payload.exercises.count)
     XCTAssertEqual(Set(remoteIDs).count, remoteIDs.count)
     XCTAssertEqual(Set(uuids).count, uuids.count)
-    XCTAssertEqual(Set(remoteIDs), Set(1001...1246))
+    XCTAssertEqual(Set(remoteIDs), Set(1001...1247))
     XCTAssertTrue(payload.exercises.allSatisfy {
         !$0.isCurated || !$0.equipmentSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     })
 }
 ```
 
-- [ ] **Step 3: Add a failing taxonomy test for all 16 additions**
+- [ ] **Step 3: Add a failing taxonomy test for all 17 additions**
 
 Add the exact expected table and compare real rows by name:
 
@@ -106,6 +106,7 @@ func testBundledSeedContainsExpectedExerciseExpansion() throws {
         "Kettlebell Snatch": .init(remoteID: 1244, uuid: "seed-kettlebell-snatch", category: "Conditioning", equipment: "Kettlebell", primary: [2], secondary: [7, 6, 12], cardioProfile: nil),
         "Hiking": .init(remoteID: 1245, uuid: "seed-hiking", category: "Cardio", equipment: "Outdoor", primary: [5], secondary: [7, 9], cardioProfile: .walkRun),
         "Swimming": .init(remoteID: 1246, uuid: "seed-swimming", category: "Cardio", equipment: "Pool", primary: [4], secondary: [2, 3], cardioProfile: .timeOnly),
+        "Barbell Reverse Curl": .init(remoteID: 1247, uuid: "seed-barbell-reverse-curl", category: "Arms", equipment: "Barbell", primary: [11], secondary: [1], cardioProfile: nil),
     ]
 
     for (name, expectedRow) in expected {
@@ -135,9 +136,13 @@ func testCanonicalNamesAndAliasesDescribeTheSameExercise() throws {
     XCTAssertEqual(benchPress.equipmentSummary, "Dumbbells,Bench")
 
     let reverseCurl = try XCTUnwrap(rowsByUUID["seed-reverse-curl"])
-    XCTAssertEqual(reverseCurl.name, "Barbell Reverse Curl")
-    XCTAssertEqual(reverseCurl.equipmentSummary, "Barbell")
-    XCTAssertFalse(reverseCurl.aliases.contains("EZ Bar Reverse Curl"))
+    XCTAssertEqual(reverseCurl.name, "Reverse Curl")
+    XCTAssertEqual(reverseCurl.equipmentSummary, "EZ Bar")
+    XCTAssertFalse(reverseCurl.aliases.contains("Barbell Reverse Curl"))
+
+    let barbellReverseCurl = try XCTUnwrap(rowsByUUID["seed-barbell-reverse-curl"])
+    XCTAssertEqual(barbellReverseCurl.name, "Barbell Reverse Curl")
+    XCTAssertEqual(barbellReverseCurl.equipmentSummary, "Barbell")
 
     let canonicalNames = Dictionary(uniqueKeysWithValues: payload.exercises.map {
         ($0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), $0.uuid)
@@ -175,6 +180,7 @@ func testSearchingDumbbellBenchPressReturnsTheCanonicalWorkout() throws {
 func testVersion6UpgradePreservesStableRowsAndCustomExercises() throws {
     let current = try BundleExerciseSeedLoader().loadSeed()
     let currentPress = try XCTUnwrap(current.exercises.first { $0.uuid == "seed-dumbbell-flat-press" })
+    let currentReverseCurl = try XCTUnwrap(current.exercises.first { $0.uuid == "seed-reverse-curl" })
     let legacyPress = SeedExercise(
         remoteID: currentPress.remoteID,
         uuid: currentPress.uuid,
@@ -197,7 +203,27 @@ func testVersion6UpgradePreservesStableRowsAndCustomExercises() throws {
         version: 5,
         generatedAt: "2026-07-20T00:00:00Z",
         muscles: current.muscles,
-        exercises: [legacyPress]
+        exercises: [
+            legacyPress,
+            SeedExercise(
+                remoteID: currentReverseCurl.remoteID,
+                uuid: currentReverseCurl.uuid,
+                name: "Reverse Curl",
+                aliases: ["Barbell Reverse Curl"],
+                categoryName: "Arms",
+                equipmentSummary: "EZ Bar",
+                instructions: currentReverseCurl.instructions,
+                cardioTrackingProfileRaw: nil,
+                primaryMuscleIDs: [11],
+                secondaryMuscleIDs: [1],
+                imageURL: currentReverseCurl.imageURL,
+                sourceURL: currentReverseCurl.sourceURL,
+                licenseName: currentReverseCurl.licenseName,
+                licenseURL: currentReverseCurl.licenseURL,
+                licenseAuthor: currentReverseCurl.licenseAuthor,
+                isCurated: true
+            ),
+        ]
     )
     let container = try AppSchema.makeInMemoryContainer(name: "ExerciseSeedUpgradeTests")
     let context = ModelContext(container)
@@ -213,6 +239,8 @@ func testVersion6UpgradePreservesStableRowsAndCustomExercises() throws {
 
     XCTAssertEqual(rows.first(where: { $0.remoteUUID == "seed-dumbbell-flat-press" })?.displayName, "Dumbbell Bench Press")
     XCTAssertNotNil(rows.first(where: { $0.remoteUUID == "seed-dumbbell-curl" }))
+    XCTAssertEqual(rows.first(where: { $0.remoteUUID == "seed-reverse-curl" })?.equipmentSummary, "EZ Bar")
+    XCTAssertNotNil(rows.first(where: { $0.remoteUUID == "seed-barbell-reverse-curl" }))
     XCTAssertNotNil(rows.first(where: { $0.displayName == "My Curl" && $0.sourceName == "custom" }))
 }
 ```
@@ -237,7 +265,7 @@ Expected: FAIL because the bundled seed is still version 5, has 230 rows, lacks 
 
 **Interfaces:**
 - Consumes: the seed contract created in Task 1 and the existing `SeedExercise` JSON coding keys
-- Produces: a decodable `ExerciseSeedPayload` at version 6 containing 246 curated exercises
+- Produces: a decodable `ExerciseSeedPayload` at version 6 containing 247 curated exercises
 
 - [ ] **Step 1: Update seed metadata without reordering existing rows**
 
@@ -253,7 +281,8 @@ Keep all existing UUIDs and remote IDs unchanged.
 - [ ] **Step 2: Correct the two existing canonical rows and misleading aliases**
 
 - Keep `seed-dumbbell-flat-press` and its remote ID, rename it to `Dumbbell Bench Press`, set aliases to exactly `Dumbbell Flat Press` and `DB Press`, and set equipment to `Dumbbells,Bench`.
-- Keep `seed-reverse-curl` and its remote ID, rename it to `Barbell Reverse Curl`, remove the inaccurate alias, and set equipment to `Barbell`.
+- Keep `seed-reverse-curl` as `Reverse Curl` with `EZ Bar` equipment, preserving its historical meaning, and remove the inaccurate `Barbell Reverse Curl` alias.
+- Add Barbell Reverse Curl separately as remote ID `1247` with UUID `seed-barbell-reverse-curl` and `Barbell` equipment.
 - Remove `Treadmill Walk` from the aliases of Incline Treadmill Walk while retaining `Incline Walk`.
 - Remove `Wide Grip Pulldown` from the aliases of Lat Pulldown. The separate Wide Grip Lat Pulldown row remains unchanged.
 
@@ -289,9 +318,9 @@ Incline Dumbbell Fly=Dumbbells,Bench
 
 Together with Dumbbell Bench Press, this covers the 24 empty rows shown by the current seed audit; Chest Dip and Smith Machine Bench Press already have equipment and remain unchanged. Before editing, re-run the `jq` audit; if the count differs, stop and reconcile the plan rather than guessing.
 
-- [ ] **Step 4: Append the 16 new exercises**
+- [ ] **Step 4: Append the 17 new exercises**
 
-Append remote IDs `1231...1246` and UUIDs exactly as asserted in Task 1. Use the category, equipment, muscle order, and cardio profile asserted by the test. Use only these aliases:
+Append remote IDs `1231...1247` and UUIDs exactly as asserted in Task 1. Use the category, equipment, muscle order, and cardio profile asserted by the test. Use only these aliases:
 
 ```text
 Dumbbell Curl: Two Arm Dumbbell Curl
@@ -310,6 +339,7 @@ Kettlebell Clean: KB Clean
 Kettlebell Snatch: KB Snatch
 Hiking: Hike
 Swimming: Swim
+Barbell Reverse Curl: none
 ```
 
 Use these exact instruction strings:
@@ -331,6 +361,7 @@ Kettlebell Clean: Hinge with the kettlebell close, drive through the hips, guide
 Kettlebell Snatch: Drive the kettlebell from a strong hip hinge, guide it close to the body, punch through to a stable overhead lockout, and lower it under control.
 Hiking: Walk at a sustainable effort with steady footing, use shorter controlled steps on steep terrain, and reduce pace when balance or posture breaks down.
 Swimming: Use a smooth repeatable stroke, keep breathing controlled, and stop or change stroke before technique deteriorates.
+Barbell Reverse Curl: Hold the bar with an overhand grip, keep your wrists stacked and elbows near your sides, curl without swinging, and lower under control.
 ```
 
 Set `image_url`, `source_url`, and `license_url` to empty strings; use `Bundled with WGJ`, author `WGJ`, and `is_curated: true`. Set Hiking's `cardio_tracking_profile` to `walkRun` and Swimming's to `timeOnly`; omit that key for strength and conditioning rows, matching the current seed format.
@@ -344,7 +375,7 @@ jq empty WGJ/Resources/ExercisesSeed.json
 jq '{version, count:(.exercises|length), unique_ids:([.exercises[].remote_id]|unique|length), unique_uuids:([.exercises[].uuid]|unique|length), empty_equipment:[.exercises[]|select(.is_curated and ((.equipment|gsub("\\s";""))==""))|.name]}' WGJ/Resources/ExercisesSeed.json
 ```
 
-Expected: valid JSON and `{version:6, count:246, unique_ids:246, unique_uuids:246, empty_equipment:[]}`.
+Expected: valid JSON and `{version:6, count:247, unique_ids:247, unique_uuids:247, empty_equipment:[]}`.
 
 - [ ] **Step 6: Run focused tests and verify GREEN**
 
@@ -358,7 +389,7 @@ Expected: `** TEST SUCCEEDED **` with every `ExerciseSeedCatalogTests` test pass
 
 - [ ] **Step 7: Review the semantic exercise data before committing**
 
-Print all changed existing rows and all 16 new rows:
+Print all changed existing rows and all 17 new rows:
 
 ```bash
 jq -r '.exercises[] | select(.remote_id >= 1231 or .uuid == "seed-dumbbell-flat-press" or .uuid == "seed-reverse-curl" or .uuid == "seed-incline-treadmill-walk" or .uuid == "seed-lat-pulldown") | [.remote_id,.uuid,.name,.aliases,.category,.equipment,.primary_muscles,.secondary_muscles,.cardio_tracking_profile] | @json' WGJ/Resources/ExercisesSeed.json

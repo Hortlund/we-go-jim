@@ -2193,10 +2193,10 @@
     {
       "remote_id": 1097,
       "uuid": "seed-reverse-curl",
-      "name": "Barbell Reverse Curl",
+      "name": "Reverse Curl",
       "aliases": [],
       "category": "Arms",
-      "equipment": "Barbell",
+      "equipment": "EZ Bar",
       "instructions": "Use an overhand grip, keep the wrists stacked, and curl smoothly without letting the elbows flare.",
       "primary_muscles": [
         11
@@ -5482,6 +5482,27 @@
       "secondary_muscles": [
         2,
         3
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1247,
+      "uuid": "seed-barbell-reverse-curl",
+      "name": "Barbell Reverse Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Barbell",
+      "instructions": "Hold the bar with an overhand grip, keep your wrists stacked and elbows near your sides, curl without swinging, and lower under control.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        1
       ],
       "image_url": "",
       "source_url": "",

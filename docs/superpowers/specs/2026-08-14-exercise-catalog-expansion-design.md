@@ -10,7 +10,7 @@ This change is limited to the local, versioned exercise seed and focused catalog
 
 ### New exercises
 
-Add these 16 curated exercises with stable seed UUIDs and sequential remote IDs:
+Add these 17 curated exercises with stable seed UUIDs and sequential remote IDs:
 
 | Exercise | Category | Equipment | Primary muscle | Notes |
 | --- | --- | --- | --- | --- |
@@ -30,6 +30,7 @@ Add these 16 curated exercises with stable seed UUIDs and sequential remote IDs:
 | Kettlebell Snatch | Conditioning | Kettlebell | Shoulders | Glutes, hamstrings, and traps are secondary |
 | Hiking | Cardio | Outdoor | Quadriceps | Uses the existing walk/run tracking profile; glutes and calves are secondary |
 | Swimming | Cardio | Pool | Back | Uses the existing time-only tracking profile; shoulders and chest are secondary |
+| Barbell Reverse Curl | Arms | Barbell | Forearms | Biceps are secondary; distinct from both existing EZ-bar reverse-curl identities |
 
 Each entry includes concise technique instructions and the same WGJ bundled attribution used by the current curated catalog.
 
@@ -43,7 +44,7 @@ Audit all existing aliases under the same rule. In particular:
 
 - remove `Treadmill Walk` from Incline Treadmill Walk because Treadmill Walk is already a distinct canonical exercise;
 - remove `Wide Grip Pulldown` from Lat Pulldown because Wide Grip Lat Pulldown is already a distinct canonical exercise;
-- correct the existing `seed-reverse-curl` row to the canonical name `Barbell Reverse Curl` with `Barbell` equipment, preserving its UUID and remote ID, because a separate canonical EZ Bar Reverse Curl already exists;
+- preserve `seed-reverse-curl` as the existing `Reverse Curl` with `EZ Bar` equipment, remove its inaccurate `Barbell Reverse Curl` alias, and add Barbell Reverse Curl under a new UUID so historical EZ-bar workouts keep their original meaning;
 - allow shared generic activity searches such as `Run` or `Walking` only when the results remain visibly distinct canonical choices such as Outdoor Run and Treadmill Run.
 
 Automated validation rejects any alias that exactly matches a different canonical exercise name. Semantic alias review remains explicit because equipment, stance, grip, and unilateral/bilateral equivalence cannot be inferred reliably from strings alone.
@@ -55,7 +56,7 @@ Populate the currently empty equipment field on all 24 affected chest exercises.
 ## Data and upgrade behavior
 
 - Increment the seed version from 5 to 6 and update `generatedAt`.
-- Assign new remote IDs 1231 through 1246 without reusing an existing ID.
+- Assign new remote IDs 1231 through 1247 without reusing an existing ID.
 - Give every new entry a unique, stable `seed-...` UUID.
 - Existing installs re-import because of the version bump. The current UUID-based upsert updates existing seed rows and inserts the new rows.
 - Custom exercises remain untouched because seed import only removes stale non-custom seed rows.
@@ -70,9 +71,9 @@ Automated validation will cover:
 
 - seed decoding succeeds at version 6;
 - exercise UUIDs and remote IDs are unique;
-- all 16 expected canonical entries exist with their required category, equipment, muscle mappings, and cardio profiles;
+- all 17 expected canonical entries exist with their required category, equipment, muscle mappings, and cardio profiles;
 - Dumbbell Bench Press uses the previous stable UUID and has only accurate aliases;
-- Barbell Reverse Curl uses its previous stable UUID and no longer points to EZ Bar equipment;
+- the existing Reverse Curl keeps its stable UUID and EZ Bar equipment while Barbell Reverse Curl uses a new UUID;
 - no alias exactly matches another exercise's canonical name;
 - no curated exercise has an empty equipment field;
 - importing version 6 over an older catalog updates the stable press row and inserts the new rows without changing custom exercises.
