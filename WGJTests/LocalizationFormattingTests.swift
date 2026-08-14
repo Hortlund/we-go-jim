@@ -291,6 +291,23 @@ final class LocalizationFormattingTests: XCTestCase {
         }
     }
 
+    func testCalorieCatalogContainsEveryPresentationKey() throws {
+        let catalogURL = repositoryRoot.appending(path: "WGJ/WidgetShared/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try XCTUnwrap(json["strings"] as? [String: Any])
+        let requiredKeys = [
+            "%lld kcal",
+            "%lld estimated active calories",
+            "<5 kcal",
+            "Under 5 estimated active calories",
+        ]
+
+        for key in requiredKeys {
+            XCTAssertNotNil(strings[key], "Missing calorie localization key: \(key)")
+        }
+    }
+
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

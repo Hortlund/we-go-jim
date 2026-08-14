@@ -776,8 +776,10 @@ nonisolated struct WorkoutCaloriePresentationPolicy: Equatable, Sendable {
 
         if let estimatedActiveCalories, estimatedActiveCalories > 0 {
             return WorkoutCalorieMetricPresentation(
-                text: "\(estimatedActiveCalories) kcal",
-                accessibilityLabel: "\(estimatedActiveCalories) estimated active calories"
+                text: String(localized: "\(estimatedActiveCalories) kcal"),
+                accessibilityLabel: String(
+                    localized: "\(estimatedActiveCalories) estimated active calories"
+                )
             )
         }
 
@@ -786,8 +788,8 @@ nonisolated struct WorkoutCaloriePresentationPolicy: Equatable, Sendable {
         }
 
         return WorkoutCalorieMetricPresentation(
-            text: "<5 kcal",
-            accessibilityLabel: "Under 5 estimated active calories"
+            text: String(localized: "<5 kcal"),
+            accessibilityLabel: String(localized: "Under 5 estimated active calories")
         )
     }
 }
