@@ -39,8 +39,9 @@ struct ExerciseDetailStatsSection: View {
 
     private func readyContent(_ dataset: ExerciseProgressDataset) -> some View {
         let projection = projection(for: dataset)
+        let availabilityByMetric = availabilityByMetric(for: dataset)
         return VStack(alignment: .leading, spacing: 14) {
-            controls(dataset: dataset)
+            controls(availabilityByMetric: availabilityByMetric)
             if let summary = projection.summary {
                 summaryGrid(summary, projection: projection)
             }
@@ -58,11 +59,12 @@ struct ExerciseDetailStatsSection: View {
         }
     }
 
-    private func controls(dataset: ExerciseProgressDataset) -> some View {
+    private func controls(
+        availabilityByMetric: [ExerciseProgressMetric: ExerciseProgressAvailability]
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Menu {
                 ForEach(ExerciseProgressMetric.allCases) { metric in
-                    let availability = projection(for: dataset, metric: metric).availability
                     Button {
                         selectedMetric = metric
                         selectedDate = nil
@@ -71,8 +73,8 @@ struct ExerciseDetailStatsSection: View {
                             ? Label(metric.title, systemImage: "checkmark")
                             : Label(metric.title, systemImage: "chart.xyaxis.line")
                     }
-                    .disabled(!availability.isAvailable)
-                    .accessibilityHint(availability.reason ?? "")
+                    .disabled(availabilityByMetric[metric]?.isAvailable != true)
+                    .accessibilityHint(availabilityByMetric[metric]?.reason ?? "")
                 }
             } label: {
                 HStack {
@@ -250,12 +252,24 @@ struct ExerciseDetailStatsSection: View {
         )
     }
 
+    private func availabilityByMetric(
+        for dataset: ExerciseProgressDataset
+    ) -> [ExerciseProgressMetric: ExerciseProgressAvailability] {
+        ExerciseProgressProjector.availabilityByMetric(
+            dataset: dataset,
+            range: selectedRange,
+            now: .now,
+            calendar: .current
+        )
+    }
+
     private func configureMetricIfNeeded(for dataset: ExerciseProgressDataset) {
         guard configuredDatasetID != dataset.exerciseUUID else { return }
         configuredDatasetID = dataset.exerciseUUID
-        if !projection(for: dataset, metric: selectedMetric).availability.isAvailable,
+        let availabilityByMetric = availabilityByMetric(for: dataset)
+        if availabilityByMetric[selectedMetric]?.isAvailable != true,
            let first = ExerciseProgressMetric.allCases.first(where: {
-               projection(for: dataset, metric: $0).availability.isAvailable
+               availabilityByMetric[$0]?.isAvailable == true
            }) {
             selectedMetric = first
         }

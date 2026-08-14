@@ -75,6 +75,44 @@ final class ExerciseProgressProjectorTests: XCTestCase {
         XCTAssertEqual(projection.availability.reason, "No weighted sets have been completed for this exercise.")
     }
 
+    func testAvailabilitySummarySeparatesWeightedAndBodyweightMetrics() {
+        let availability = ExerciseProgressProjector.availabilityByMetric(
+            dataset: dataset(
+                sessions: [session(day: date(2026, 8, 14), bestSetReps: 12, totalReps: 30)],
+                unit: .bodyweight
+            ),
+            range: .allTime,
+            now: date(2026, 8, 14),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(availability[.estimatedOneRepMax]?.isAvailable, false)
+        XCTAssertEqual(availability[.heaviestWeight]?.isAvailable, false)
+        XCTAssertEqual(availability[.sessionVolume]?.isAvailable, false)
+        XCTAssertEqual(availability[.bestSetReps]?.isAvailable, true)
+        XCTAssertEqual(availability[.totalReps]?.isAvailable, true)
+        XCTAssertEqual(availability[.workoutFrequency]?.isAvailable, true)
+    }
+
+    func testAvailabilitySummaryHonorsSelectedRange() {
+        let availability = ExerciseProgressProjector.availabilityByMetric(
+            dataset: dataset(sessions: [
+                session(day: date(2026, 6, 1), oneRepMax: 120, heaviest: 100, volume: 1_500),
+                session(day: date(2026, 8, 10), bestSetReps: 8, totalReps: 18),
+            ]),
+            range: .oneMonth,
+            now: date(2026, 8, 14),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(availability[.estimatedOneRepMax]?.isAvailable, false)
+        XCTAssertEqual(availability[.heaviestWeight]?.isAvailable, false)
+        XCTAssertEqual(availability[.sessionVolume]?.isAvailable, false)
+        XCTAssertEqual(availability[.bestSetReps]?.isAvailable, true)
+        XCTAssertEqual(availability[.totalReps]?.isAvailable, true)
+        XCTAssertEqual(availability[.workoutFrequency]?.isAvailable, true)
+    }
+
     func testWorkoutFrequencyIncludesInactiveWeeksThroughCurrentWeek() {
         let projection = ExerciseProgressProjector.project(
             dataset: dataset(sessions: [

@@ -17,7 +17,7 @@ nonisolated enum ExerciseProgressProjector {
             now: now,
             calendar: calendar
         )
-        let availability = availability(for: metric, points: points)
+        let availability = availability(for: metric, hasCompatibleData: !points.isEmpty)
         let summary = summary(points: points, sessions: sessions)
         let milestones = milestones(points: points, metric: metric)
         let chartPoints = downsample(
@@ -44,6 +44,33 @@ nonisolated enum ExerciseProgressProjector {
             milestones: milestones,
             accessibilitySummary: accessibilitySummary
         )
+    }
+
+    static func availabilityByMetric(
+        dataset: ExerciseProgressDataset,
+        range: ExerciseProgressRange,
+        now: Date,
+        calendar: Calendar
+    ) -> [ExerciseProgressMetric: ExerciseProgressAvailability] {
+        let sessions = sessionsInRange(dataset.sessions, range: range, now: now, calendar: calendar)
+        var availableMetrics: Set<ExerciseProgressMetric> = []
+
+        for session in sessions {
+            availableMetrics.insert(.totalReps)
+            availableMetrics.insert(.workoutFrequency)
+            if session.estimatedOneRepMaxKilograms != nil { availableMetrics.insert(.estimatedOneRepMax) }
+            if session.heaviestWeightKilograms != nil { availableMetrics.insert(.heaviestWeight) }
+            if session.sessionVolumeKilograms != nil { availableMetrics.insert(.sessionVolume) }
+            if session.bestSetReps != nil { availableMetrics.insert(.bestSetReps) }
+            if availableMetrics.count == ExerciseProgressMetric.allCases.count { break }
+        }
+
+        return Dictionary(uniqueKeysWithValues: ExerciseProgressMetric.allCases.map { metric in
+            (
+                metric,
+                availability(for: metric, hasCompatibleData: availableMetrics.contains(metric))
+            )
+        })
     }
 
     private static func sessionsInRange(
@@ -138,9 +165,9 @@ nonisolated enum ExerciseProgressProjector {
 
     private static func availability(
         for metric: ExerciseProgressMetric,
-        points: [ExerciseProgressPoint]
+        hasCompatibleData: Bool
     ) -> ExerciseProgressAvailability {
-        guard !points.isEmpty else {
+        guard hasCompatibleData else {
             let reason = metric.isWeighted
                 ? "No weighted sets have been completed for this exercise."
                 : "No compatible completed sets are available in this range."
