@@ -34,4 +34,71 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let isPortraitHittable = startEmpty.isHittable
         XCTAssertTrue(isPortraitHittable)
     }
+
+    @MainActor
+    func testExerciseSearchAndDetailReturnPreserveQuery() {
+        let app = launchLocalApp()
+        openExercisesTab(in: app)
+
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("bench")
+
+        let bench = app.staticTexts["Barbell Bench Press"].firstMatch
+        XCTAssertTrue(bench.waitForExistence(timeout: 4))
+        bench.tap()
+
+        let detailTitle = app.staticTexts["exercise-detail-title"]
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 4))
+        app.navigationBars.buttons.firstMatch.tap()
+
+        XCTAssertEqual(search.value as? String, "bench")
+        XCTAssertTrue(bench.waitForExistence(timeout: 4))
+    }
+
+    @MainActor
+    func testExerciseProgressSelectors() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
+        openExercisesTab(in: app)
+
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("bench")
+
+        let bench = app.staticTexts["Barbell Bench Press"].firstMatch
+        XCTAssertTrue(bench.waitForExistence(timeout: 4))
+        bench.tap()
+
+        XCTAssertTrue(app.buttons["exercise-progress-metric-selector"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["exercise-progress-range-sixMonths"].exists)
+        app.buttons["exercise-progress-range-allTime"].tap()
+        XCTAssertEqual(app.buttons["exercise-progress-range-allTime"].value as? String, "Selected")
+        XCTAssertTrue(app.otherElements["exercise-progress-chart"].exists)
+        XCTAssertTrue(app.otherElements["exercise-progress-timeline"].exists)
+    }
+
+    @MainActor
+    private func launchLocalApp(additionalArguments: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_SKIP_SPLASH",
+            "UITEST_IN_MEMORY_STORE",
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ] + additionalArguments
+        app.launch()
+
+        let continueLocally = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(continueLocally.waitForExistence(timeout: 8))
+        continueLocally.tap()
+        return app
+    }
+
+    @MainActor
+    private func openExercisesTab(in app: XCUIApplication) {
+        let tab = app.buttons["Exercises"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 8))
+        tab.tap()
+    }
 }

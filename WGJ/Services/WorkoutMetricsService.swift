@@ -1011,6 +1011,56 @@ nonisolated final class WorkoutMetricsService {
         )
     }
 
+    func exerciseProgressDataset(
+        for catalogExerciseUUID: String,
+        preferredExerciseName: String? = nil
+    ) throws -> ExerciseProgressDataset? {
+        let normalizedUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedUUID.isEmpty else { return nil }
+
+        let snapshot = try metricsSnapshot()
+        guard let history = snapshot.exerciseHistoryByUUID[normalizedUUID], !history.isEmpty else {
+            return nil
+        }
+
+        let resolvedName = preferredExerciseName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+            ?? history.first?.exerciseName
+            ?? normalizedUUID
+        let preferredUnit = history.compactMap { entry -> TemplateLoadUnit? in
+            if entry.weightedOneRepMaxInKilograms != nil { return entry.weightedOneRepMaxUnit }
+            if entry.maxWeightInKilograms != nil { return entry.maxWeightUnit }
+            if entry.totalWeightedVolumeInKilograms != nil { return entry.weightedVolumeUnit }
+            return nil
+        }.first ?? (history.contains { $0.maxReps != nil } ? .bodyweight : .kg)
+
+        return ExerciseProgressDataset(
+            exerciseUUID: normalizedUUID,
+            exerciseName: resolvedName,
+            sessions: history.map { entry in
+                ExerciseProgressSession(
+                    sessionID: entry.sessionID,
+                    completedAt: entry.completedAt,
+                    estimatedOneRepMaxKilograms: entry.weightedOneRepMaxInKilograms,
+                    heaviestWeightKilograms: entry.maxWeightInKilograms,
+                    sessionVolumeKilograms: entry.totalWeightedVolumeInKilograms,
+                    bestSetReps: entry.maxReps,
+                    totalReps: entry.totalReps,
+                    completedSetCount: entry.completedSetCount,
+                    displayUnit: entry.weightedOneRepMaxInKilograms != nil
+                        ? entry.weightedOneRepMaxUnit
+                        : entry.maxWeightInKilograms != nil
+                            ? entry.maxWeightUnit
+                            : entry.totalWeightedVolumeInKilograms != nil
+                                ? entry.weightedVolumeUnit
+                                : .bodyweight
+                )
+            },
+            preferredLoadUnit: preferredUnit
+        )
+    }
+
     func profileDashboardSnapshot(prLimit: Int = 8, weeks: Int = 8) throws -> ProfileDashboardSnapshot {
         let safePRLimit = max(1, prLimit)
         let safeWeeks = max(1, weeks)
@@ -1198,6 +1248,8 @@ nonisolated final class WorkoutMetricsService {
                     )
                 historyEntry.exerciseName = fact.exerciseNameSnapshot
                 historyEntry.completedAt = fact.completedAt
+                historyEntry.completedSetCount += 1
+                historyEntry.totalReps += max(0, fact.reps)
 
                 if fact.reps > 0 {
                     historyEntry.maxReps = max(historyEntry.maxReps ?? 0, fact.reps)
@@ -1282,7 +1334,7 @@ nonisolated final class WorkoutMetricsService {
 
         var exerciseHistoryEntriesByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
         for (key, historyEntry) in perSessionHistory
-            where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics || historyEntry.maxReps != nil
+            where historyEntry.completedSetCount > 0
         {
             exerciseHistoryEntriesByUUID[key.catalogExerciseUUID, default: []].append(
                 CompletedExerciseHistoryEntry(
@@ -1298,7 +1350,9 @@ nonisolated final class WorkoutMetricsService {
                     weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg,
                     maxWeightInKilograms: historyEntry.maxWeightInKilograms,
                     maxWeightUnit: historyEntry.maxWeightUnit ?? .kg,
-                    maxReps: historyEntry.maxReps
+                    maxReps: historyEntry.maxReps,
+                    totalReps: historyEntry.totalReps,
+                    completedSetCount: historyEntry.completedSetCount
                 )
             )
         }
@@ -1729,6 +1783,8 @@ nonisolated struct CompletedExerciseHistoryEntry: Sendable {
     let maxWeightInKilograms: Double?
     let maxWeightUnit: TemplateLoadUnit
     let maxReps: Int?
+    let totalReps: Int
+    let completedSetCount: Int
 }
 
 private extension CompletedExerciseHistoryEntry {
@@ -1761,6 +1817,8 @@ nonisolated private struct WorkingExerciseHistoryEntry {
     var maxWeightInKilograms: Double?
     var maxWeightUnit: TemplateLoadUnit?
     var maxReps: Int?
+    var totalReps = 0
+    var completedSetCount = 0
     var hasWeightedMetrics = false
 }
 

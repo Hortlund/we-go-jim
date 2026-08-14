@@ -744,7 +744,12 @@ private struct TemplateExerciseDetailDestinationView: View {
         Group {
             if catalogExerciseExists {
                 ExerciseDetailDestinationView(
-                    remoteUUID: exercise.catalogExerciseUUID,
+                    displaySnapshot: ExerciseDetailDisplaySnapshot(
+                        remoteUUID: exercise.catalogExerciseUUID,
+                        displayName: exercise.exerciseNameSnapshot,
+                        categoryName: exercise.categorySnapshot,
+                        primaryMuscleNames: exercise.muscleSummarySnapshot
+                    ),
                     availableMuscles: availableMuscles,
                     suggestedCategories: suggestedCategories
                 )

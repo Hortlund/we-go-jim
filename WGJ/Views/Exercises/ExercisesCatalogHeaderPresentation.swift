@@ -1,42 +1,50 @@
 import Observation
 import SwiftUI
 
+nonisolated enum ExercisesCatalogContentPresentationPolicy {
+    static func showsLoadingPlaceholder(
+        hasProjectedSections: Bool,
+        isProjecting: Bool,
+        isCatalogLoading: Bool,
+        isBootstrapping: Bool
+    ) -> Bool {
+        isCatalogLoading
+            || isBootstrapping
+            || (!hasProjectedSections && isProjecting)
+    }
+}
+
 nonisolated enum ExercisesCatalogHeaderCollapsePolicy {
-    static let collapseDistance: CGFloat = 36
-    static let minimumProgressDelta: CGFloat = 1.0 / 120.0
+    static let collapseOffset: CGFloat = 48
+    static let expandOffset: CGFloat = 12
 
-    static func progress(forContentOffsetY offset: CGFloat) -> CGFloat {
-        min(1, max(0, offset / collapseDistance))
-    }
-
-    static func nextProgress(current: CGFloat, candidate: CGFloat) -> CGFloat? {
-        let normalized = min(1, max(0, candidate))
-        guard abs(normalized - current) >= minimumProgressDelta else { return nil }
-        return normalized
-    }
-
-    static func expandedControlsHeight(usesCompactFilterLayout: Bool) -> CGFloat {
-        usesCompactFilterLayout ? 158 : 112
+    static func nextCollapsed(
+        current: Bool,
+        contentOffsetY: CGFloat,
+        isForcedExpanded: Bool
+    ) -> Bool {
+        guard !isForcedExpanded else { return false }
+        return current
+            ? contentOffsetY > expandOffset
+            : contentOffsetY >= collapseOffset
     }
 }
 
 @Observable
 nonisolated final class ExercisesCatalogHeaderPresentationModel {
-    private(set) var progress: CGFloat = 0
+    private(set) var isCollapsed = false
     @ObservationIgnored private var fallbackBaseline: CGFloat?
+    @ObservationIgnored private var isForcedExpanded = false
 
     @discardableResult
     func consume(contentOffsetY: CGFloat) -> Bool {
-        let candidate = ExercisesCatalogHeaderCollapsePolicy.progress(
-            forContentOffsetY: contentOffsetY
+        let next = ExercisesCatalogHeaderCollapsePolicy.nextCollapsed(
+            current: isCollapsed,
+            contentOffsetY: max(0, contentOffsetY),
+            isForcedExpanded: isForcedExpanded
         )
-        guard let next = ExercisesCatalogHeaderCollapsePolicy.nextProgress(
-            current: progress,
-            candidate: candidate
-        ) else {
-            return false
-        }
-        progress = next
+        guard next != isCollapsed else { return false }
+        isCollapsed = next
         return true
     }
 
@@ -52,17 +60,25 @@ nonisolated final class ExercisesCatalogHeaderPresentationModel {
 
     func reset() {
         fallbackBaseline = nil
-        if progress != 0 {
-            progress = 0
+        isForcedExpanded = false
+        if isCollapsed {
+            isCollapsed = false
+        }
+    }
+
+    func forceExpanded(_ isForced: Bool) {
+        isForcedExpanded = isForced
+        if isForced, isCollapsed {
+            isCollapsed = false
         }
     }
 }
 
 struct ExercisesCatalogCollapsingHeader<Content: View>: View {
     let model: ExercisesCatalogHeaderPresentationModel
-    @ViewBuilder let content: (CGFloat) -> Content
+    @ViewBuilder let content: (Bool) -> Content
 
     var body: some View {
-        content(model.progress)
+        content(model.isCollapsed)
     }
 }

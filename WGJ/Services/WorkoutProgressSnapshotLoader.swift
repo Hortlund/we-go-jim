@@ -530,8 +530,8 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
     }
 
     private static func exerciseProgressDelta(
-        previous: ExerciseProgressMetric,
-        current: ExerciseProgressMetric
+        previous: WorkoutExerciseProgressMetric,
+        current: WorkoutExerciseProgressMetric
     ) -> ExerciseProgressDelta {
         switch (previous, current) {
         case let (.estimatedOneRepMaxKg(previousValue), .estimatedOneRepMaxKg(currentValue)):
@@ -643,7 +643,7 @@ nonisolated private struct RankedExerciseComparison: Equatable, Sendable {
     let relativeMagnitude: Double
 }
 
-nonisolated private enum ExerciseProgressMetric: Equatable, Sendable {
+nonisolated private enum WorkoutExerciseProgressMetric: Equatable, Sendable {
     case estimatedOneRepMaxKg(Double)
     case repetitions(Int)
 }
@@ -691,7 +691,7 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
     let bestWeightedOneRepMaxKg: Double?
     let maxReps: Int
 
-    var progressMetric: ExerciseProgressMetric {
+    var progressMetric: WorkoutExerciseProgressMetric {
         if let bestWeightedOneRepMaxKg {
             return .estimatedOneRepMaxKg(bestWeightedOneRepMaxKg)
         }
