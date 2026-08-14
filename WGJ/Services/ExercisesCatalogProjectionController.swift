@@ -65,7 +65,7 @@ final class ExercisesCatalogProjectionController {
         isProjecting = false
     }
 
-    nonisolated private static func defaultProject(
+    @concurrent nonisolated private static func defaultProject(
         documents: [ExerciseCatalogSearchDocument],
         input: ExerciseCatalogProjectionInput
     ) async -> ExerciseCatalogProjection {
