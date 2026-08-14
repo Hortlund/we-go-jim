@@ -5,6 +5,8 @@ final class ExerciseProgressProjectorTests: XCTestCase {
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
         return calendar
     }
 
@@ -71,6 +73,21 @@ final class ExerciseProgressProjectorTests: XCTestCase {
 
         XCTAssertFalse(projection.availability.isAvailable)
         XCTAssertEqual(projection.availability.reason, "No weighted sets have been completed for this exercise.")
+    }
+
+    func testWorkoutFrequencyIncludesInactiveWeeksThroughCurrentWeek() {
+        let projection = ExerciseProgressProjector.project(
+            dataset: dataset(sessions: [
+                session(day: date(2026, 1, 5), bestSetReps: 5),
+                session(day: date(2026, 1, 26), bestSetReps: 8),
+            ]),
+            metric: .workoutFrequency,
+            range: .allTime,
+            now: date(2026, 2, 2),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(projection.points.map(\.value), [1, 0, 0, 1, 0])
     }
 
     func testSummaryAndMilestonesUseCompleteRangeHistory() throws {

@@ -14,6 +14,7 @@ nonisolated enum ExerciseProgressProjector {
             from: sessions,
             metric: metric,
             displayUnit: dataset.preferredLoadUnit,
+            now: now,
             calendar: calendar
         )
         let availability = availability(for: metric, points: points)
@@ -68,10 +69,11 @@ nonisolated enum ExerciseProgressProjector {
         from sessions: [ExerciseProgressSession],
         metric: ExerciseProgressMetric,
         displayUnit: TemplateLoadUnit,
+        now: Date,
         calendar: Calendar
     ) -> [ExerciseProgressPoint] {
         if metric == .workoutFrequency {
-            return frequencyPoints(from: sessions, calendar: calendar)
+            return frequencyPoints(from: sessions, through: now, calendar: calendar)
         }
 
         return sessions.compactMap { session in
@@ -96,13 +98,28 @@ nonisolated enum ExerciseProgressProjector {
 
     private static func frequencyPoints(
         from sessions: [ExerciseProgressSession],
+        through now: Date,
         calendar: Calendar
     ) -> [ExerciseProgressPoint] {
         let grouped = Dictionary(grouping: sessions) { session in
             calendar.dateInterval(of: .weekOfYear, for: session.completedAt)?.start
                 ?? calendar.startOfDay(for: session.completedAt)
         }
-        return grouped.keys.sorted().map { week in
+        guard let firstWeek = grouped.keys.min(),
+              let currentWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start
+        else { return [] }
+
+        var weeks: [Date] = []
+        var week = firstWeek
+        while week <= currentWeek {
+            weeks.append(week)
+            guard let nextWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: week),
+                  nextWeek > week
+            else { break }
+            week = nextWeek
+        }
+
+        return weeks.map { week in
             let count = Set(grouped[week, default: []].map(\.sessionID)).count
             return ExerciseProgressPoint(
                 id: "frequency-\(week.timeIntervalSinceReferenceDate)",
