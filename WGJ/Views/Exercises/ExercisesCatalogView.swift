@@ -2304,13 +2304,14 @@ private struct ExerciseCatalogRowContent: View {
     }
 
     private var highlightedName: Text {
-        let normalizedTokens = matchedNameTokens.map(ExerciseCatalogProjector.normalize)
         let words = exercise.displayName.split(separator: " ", omittingEmptySubsequences: false)
 
         return words.enumerated().reduce(Text("")) { result, pair in
             let (index, word) = pair
-            let normalizedWord = ExerciseCatalogProjector.normalize(String(word))
-            let isMatch = normalizedTokens.contains { normalizedWord.hasPrefix($0) }
+            let isMatch = ExerciseCatalogProjector.shouldHighlight(
+                displaySegment: String(word),
+                matchedNameTokens: matchedNameTokens
+            )
             let separator = index == words.startIndex ? "" : " "
             let segment = Text(separator + String(word))
                 .foregroundColor(isMatch ? WGJTheme.accentBlue : WGJTheme.textPrimary)

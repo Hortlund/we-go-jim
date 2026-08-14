@@ -55,7 +55,7 @@ nonisolated struct ExerciseCatalogSearchDocument: Identifiable, Equatable, Senda
             ([categoryName, primaryMuscleNames, secondaryMuscleNames] + equipmentTokens.sorted())
                 .joined(separator: " ")
         )
-        indexKey = displayName.first.map { String($0).uppercased() } ?? "#"
+        indexKey = ExerciseCatalogProjector.sectionKey(for: displayName)
     }
 }
 
@@ -150,25 +150,30 @@ nonisolated enum ExerciseCatalogProjector {
             )
         }
 
-        var sections: [ExerciseCatalogProjectedSection] = []
+        var sectionOrder: [String] = []
+        var rowsBySection: [String: [ExerciseCatalogProjectedRow]] = [:]
         for item in ranked {
             guard !Task.isCancelled else { return .empty }
             let key = item.document.indexKey
-            let row = projectedRow(item)
-            if sections.last?.id == key {
-                let existing = sections.removeLast()
-                sections.append(
-                    ExerciseCatalogProjectedSection(
-                        id: existing.id,
-                        title: existing.title,
-                        rows: existing.rows + [row]
-                    )
-                )
-            } else {
-                sections.append(ExerciseCatalogProjectedSection(id: key, title: key, rows: [row]))
+            if rowsBySection[key] == nil {
+                sectionOrder.append(key)
             }
+            rowsBySection[key, default: []].append(projectedRow(item))
         }
-        return ExerciseCatalogProjection(sections: sections)
+        return ExerciseCatalogProjection(sections: sectionOrder.map { key in
+            ExerciseCatalogProjectedSection(id: key, title: key, rows: rowsBySection[key, default: []])
+        })
+    }
+
+    static func sectionKey(for displayName: String) -> String {
+        displayName
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
+            .first
+            .map { String($0).uppercased() }
+            ?? "#"
     }
 
     static func normalize(_ value: String) -> String {
@@ -183,6 +188,19 @@ nonisolated enum ExerciseCatalogProjector {
             .joined(separator: " ")
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
+    }
+
+    static func shouldHighlight(
+        displaySegment: String,
+        matchedNameTokens: [String]
+    ) -> Bool {
+        let segmentTokens = tokens(in: normalize(displaySegment))
+        let matchedTokens = matchedNameTokens
+            .flatMap { tokens(in: normalize($0)) }
+            .filter { !$0.isEmpty }
+        return matchedTokens.contains { matchedToken in
+            segmentTokens.contains { $0.hasPrefix(matchedToken) }
+        }
     }
 
     private static func matchesFilters(

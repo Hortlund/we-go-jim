@@ -82,6 +82,17 @@ final class ExerciseCatalogProjectionTests: XCTestCase {
         XCTAssertEqual(result.rows.map(\.id), ["t-bar-row"])
     }
 
+    func testHighlightingTokenizesPunctuationLikeSearch() {
+        XCTAssertTrue(ExerciseCatalogProjector.shouldHighlight(
+            displaySegment: "T-Bar",
+            matchedNameTokens: ["bar"]
+        ))
+        XCTAssertTrue(ExerciseCatalogProjector.shouldHighlight(
+            displaySegment: "Pull-Up",
+            matchedNameTokens: ["up"]
+        ))
+    }
+
     func testAlreadyCancelledProjectionExitsWithoutResults() async {
         let bench = document(id: "bench", name: "Bench Press")
         let result = await Task.detached {
@@ -154,6 +165,26 @@ final class ExerciseCatalogProjectionTests: XCTestCase {
 
         XCTAssertEqual(result.sections.map(\.id), ["B", "C"])
         XCTAssertEqual(result.rows.map(\.id), ["squat", "bench", "curl"])
+    }
+
+    func testEmptyQueryFoldsAccentedNamesIntoOneStableSection() {
+        let result = ExerciseCatalogProjector.project(
+            documents: [
+                document(id: "aardvark", name: "Aardvark"),
+                document(id: "acute", name: "á Fly"),
+                document(id: "ring", name: "Ångström Raise"),
+                document(id: "apple", name: "Apple Press"),
+                document(id: "umlaut", name: "Ärm Curl"),
+            ],
+            input: ExerciseCatalogProjectionInput(
+                query: "",
+                filters: .default,
+                sortDescending: false
+            )
+        )
+
+        XCTAssertEqual(result.sections.map(\.id), ["A"])
+        XCTAssertEqual(result.rows.count, 5)
     }
 
     private func document(
