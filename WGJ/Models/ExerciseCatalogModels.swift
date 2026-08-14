@@ -218,7 +218,7 @@ final class ExerciseCatalogSyncState {
     }
 }
 
-nonisolated struct ExerciseFilters: Equatable {
+nonisolated struct ExerciseFilters: Equatable, Sendable {
     var primaryMuscleID: Int?
     var secondaryMuscleID: Int?
     var equipmentToken: String?

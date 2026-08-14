@@ -1282,6 +1282,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let displayName: String
     let categoryName: String
     let equipmentSummary: String
+    let equipmentTokens: Set<String>
     let primaryMuscleNames: String
     let cardioTrackingProfileRaw: String?
     let secondaryMuscleNames: String
@@ -1291,6 +1292,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let isHidden: Bool
     let isCurated: Bool
     let isCustomExercise: Bool
+    let aliases: [String]
     let searchBlob: String
     let image: ExerciseCatalogImageSnapshot?
 
@@ -1311,6 +1313,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         displayName = exercise.displayName
         categoryName = exercise.categoryName
         equipmentSummary = exercise.equipmentSummary
+        equipmentTokens = Set(exercise.equipmentTokens.map { $0.lowercased() })
         primaryMuscleNames = exercise.primaryMuscleNames
         cardioTrackingProfileRaw = exercise.cardioTrackingProfile?.rawValue
         secondaryMuscleNames = exercise.secondaryMuscleNames
@@ -1320,6 +1323,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         isHidden = exercise.isHidden
         isCurated = exercise.isCurated
         isCustomExercise = exercise.isCustomExercise
+        aliases = exercise.aliases.map(\.value)
         searchBlob = exercise.searchableTerms
             .joined(separator: " ")
             .lowercased()
@@ -1339,6 +1343,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
     var availableMuscleNamesByID: [Int: String] = [:]
     var availableMuscles: [ExerciseMuscleSnapshot] = []
     var availableCategories: [String] = []
+    var searchDocuments: [ExerciseCatalogSearchDocument] = []
     var sections: [ExercisesSectionSnapshot] = []
     var totalSectionCount = 0
     private var allRows: [ExerciseCatalogRowSnapshot] = []
@@ -1406,6 +1411,23 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         availableCategories = categories
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        searchDocuments = uniqueExercises
+            .filter { !$0.isHidden }
+            .map { exercise in
+                ExerciseCatalogSearchDocument(
+                    id: exercise.remoteUUID,
+                    displayName: exercise.displayName,
+                    aliases: exercise.aliases,
+                    categoryName: exercise.categoryName,
+                    primaryMuscleNames: exercise.primaryMuscleNames,
+                    secondaryMuscleNames: exercise.secondaryMuscleNames,
+                    primaryMuscleIDs: exercise.primaryMuscleIDs,
+                    secondaryMuscleIDs: exercise.secondaryMuscleIDs,
+                    equipmentTokens: exercise.equipmentTokens,
+                    isCurated: exercise.isCurated,
+                    isCustomExercise: exercise.isCustomExercise
+                )
+            }
         totalSectionCount = Set(rows.map(\.indexKey)).count
         allRows = rows
         sections = Self.sections(
