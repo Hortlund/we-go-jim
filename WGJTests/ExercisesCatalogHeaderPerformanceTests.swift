@@ -3,25 +3,46 @@ import XCTest
 
 @MainActor
 final class ExercisesCatalogHeaderPerformanceTests: XCTestCase {
-    func testProgressClampsAndStopsPublishingAfterCollapse() {
+    func testHeaderCollapsesAfterUpperThresholdAndExpandsAfterLowerThreshold() {
         let model = ExercisesCatalogHeaderPresentationModel()
 
-        XCTAssertTrue(model.consume(contentOffsetY: 18))
-        XCTAssertEqual(model.progress, 0.5, accuracy: 0.001)
-        XCTAssertTrue(model.consume(contentOffsetY: 36))
-        XCTAssertEqual(model.progress, 1, accuracy: 0.001)
-        XCTAssertFalse(model.consume(contentOffsetY: 80))
-        XCTAssertFalse(model.consume(contentOffsetY: 120))
+        XCTAssertFalse(model.consume(contentOffsetY: 30))
+        XCTAssertTrue(model.consume(contentOffsetY: 52))
+        XCTAssertTrue(model.isCollapsed)
+        XCTAssertFalse(model.consume(contentOffsetY: 24))
+        XCTAssertTrue(model.consume(contentOffsetY: 8))
+        XCTAssertFalse(model.isCollapsed)
     }
 
-    func testFallbackAndScrollGeometryProduceEqualProgress() {
+    func testRepeatedOffsetsDoNotRepublishUnchangedState() {
+        let model = ExercisesCatalogHeaderPresentationModel()
+
+        XCTAssertTrue(model.consume(contentOffsetY: 60))
+        XCTAssertFalse(model.consume(contentOffsetY: 80))
+        XCTAssertFalse(model.consume(contentOffsetY: 120))
+        XCTAssertTrue(model.isCollapsed)
+    }
+
+    func testFocusForceExpansionPreventsScrollCollapse() {
+        let model = ExercisesCatalogHeaderPresentationModel()
+
+        model.forceExpanded(true)
+        XCTAssertFalse(model.consume(contentOffsetY: 100))
+        XCTAssertFalse(model.isCollapsed)
+
+        model.forceExpanded(false)
+        XCTAssertTrue(model.consume(contentOffsetY: 100))
+        XCTAssertTrue(model.isCollapsed)
+    }
+
+    func testFallbackAndScrollGeometryProduceEqualCollapsedState() {
         let geometryModel = ExercisesCatalogHeaderPresentationModel()
         let fallbackModel = ExercisesCatalogHeaderPresentationModel()
 
-        _ = geometryModel.consume(contentOffsetY: 27)
+        _ = geometryModel.consume(contentOffsetY: 52)
         _ = fallbackModel.consumeFallback(markerY: 100)
-        _ = fallbackModel.consumeFallback(markerY: 73)
+        _ = fallbackModel.consumeFallback(markerY: 48)
 
-        XCTAssertEqual(geometryModel.progress, fallbackModel.progress, accuracy: 0.001)
+        XCTAssertEqual(geometryModel.isCollapsed, fallbackModel.isCollapsed)
     }
 }

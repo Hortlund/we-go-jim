@@ -154,20 +154,6 @@ struct ExercisesCatalogView: View {
         14
     }
 
-    private var expandedControlsHeight: CGFloat {
-        let baseHeight = ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(
-            usesCompactFilterLayout: shouldUseCompactFilterLayout
-        )
-        switch activeFilterDropdown {
-        case .bodyPart:
-            return baseHeight + 292
-        case .category:
-            return baseHeight + 252
-        case nil:
-            return baseHeight
-        }
-    }
-
     private var bodyMapFilterOptions: [ExerciseBodyMapFilterOption] {
         controller.snapshot.availableMuscles.map {
             ExerciseBodyMapFilterOption(id: $0.id, name: $0.name)
@@ -371,51 +357,43 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedSearchControls: some View {
-        ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedProgress in
-            let progress = !isPickerMode && !isSearchFieldFocused && !isSearchToolbarExpanded
-                ? storedProgress
-                : 0
+        ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedCollapsed in
+            let isCollapsed = storedCollapsed
+                && !isPickerMode
+                && !isSearchFieldFocused
+                && !isSearchToolbarExpanded
             VStack(alignment: .leading, spacing: 0) {
-            if !isPickerMode && progress < 0.99 {
-                WGJRootHeader(
-                    "Exercises",
-                    subtitle: "Find exercises by name, body part, or category.",
-                    titleAccessibilityIdentifier: "exercises-catalog-title"
-                )
-                .opacity(1 - progress)
-                .offset(y: -18 * progress)
-                .frame(height: 66 * (1 - progress), alignment: .top)
-                .clipped()
-                .allowsHitTesting(progress < 0.5)
-                .accessibilityHidden(progress > 0.5)
+                if !isPickerMode && !isCollapsed {
+                    WGJRootHeader(
+                        "Exercises",
+                        subtitle: "Find exercises by name, body part, or category.",
+                        titleAccessibilityIdentifier: "exercises-catalog-title"
+                    )
+                    .transition(.opacity)
 
-                Color.clear
-                    .frame(height: headerSearchSpacing * (1 - progress))
-            }
-
-            searchField
-
-            if isPickerMode || progress < 0.99 {
-                Color.clear
-                    .frame(height: controlsSpacing * (1 - progress))
-
-                VStack(alignment: .leading, spacing: controlsSpacing) {
-                    filterRow
-                    createExerciseButton
+                    Color.clear
+                        .frame(height: headerSearchSpacing)
                 }
-                .opacity(1 - progress)
-                .offset(y: -16 * progress)
-                .frame(height: expandedControlsHeight * (1 - progress), alignment: .top)
-                .clipped()
-                .allowsHitTesting(progress < 0.5)
-                .accessibilityHidden(progress > 0.5)
+
+                searchField
+
+                if isPickerMode || !isCollapsed {
+                    Color.clear
+                        .frame(height: controlsSpacing)
+
+                    VStack(alignment: .leading, spacing: controlsSpacing) {
+                        filterRow
+                        createExerciseButton
+                    }
+                    .transition(.opacity)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, isPickerMode ? 10 : 16)
+            .padding(.bottom, 10)
+            .background(WGJTheme.bgBase)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isCollapsed)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, isPickerMode ? 10 : (16 - (2 * progress)))
-        .padding(.bottom, 10)
-        .background(WGJTheme.bgBase)
-            }
     }
 
     private var scrollOffsetReader: some View {
@@ -457,6 +435,7 @@ struct ExercisesCatalogView: View {
             set: { isFocused in
                 isSearchFieldFocused = isFocused
                 isSearchToolbarExpanded = isFocused || activeFilterDropdown != nil
+                headerPresentation.forceExpanded(isSearchToolbarExpanded)
             }
         )
     }
@@ -635,12 +614,14 @@ struct ExercisesCatalogView: View {
         }
         isSearchToolbarExpanded = nextDropdown != nil
         isSearchFieldFocused = false
+        headerPresentation.forceExpanded(nextDropdown != nil)
     }
 
     private func closeFilterDropdownAfterSelection() {
         activeFilterDropdown = nil
         isSearchToolbarExpanded = false
         isSearchFieldFocused = false
+        headerPresentation.forceExpanded(false)
     }
 
     private func compactFilterPill(_ title: String, isActive: Bool) -> some View {
