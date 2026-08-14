@@ -1,6 +1,19 @@
 import Observation
 import SwiftUI
 
+nonisolated enum ExercisesCatalogContentPresentationPolicy {
+    static func showsLoadingPlaceholder(
+        hasProjectedSections: Bool,
+        isProjecting: Bool,
+        isCatalogLoading: Bool,
+        isBootstrapping: Bool
+    ) -> Bool {
+        isCatalogLoading
+            || isBootstrapping
+            || (!hasProjectedSections && isProjecting)
+    }
+}
+
 nonisolated enum ExercisesCatalogHeaderCollapsePolicy {
     static let collapseOffset: CGFloat = 48
     static let expandOffset: CGFloat = 12

@@ -3,6 +3,39 @@ import XCTest
 
 @MainActor
 final class ExercisesCatalogHeaderPerformanceTests: XCTestCase {
+    func testContentPresentationShowsLoadingOnlyForEmptyActiveProjection() {
+        XCTAssertTrue(ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: false,
+            isProjecting: true,
+            isCatalogLoading: false,
+            isBootstrapping: false
+        ))
+        XCTAssertFalse(ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: false,
+            isProjecting: false,
+            isCatalogLoading: false,
+            isBootstrapping: false
+        ))
+        XCTAssertFalse(ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: true,
+            isProjecting: true,
+            isCatalogLoading: false,
+            isBootstrapping: false
+        ))
+        XCTAssertTrue(ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: false,
+            isProjecting: false,
+            isCatalogLoading: true,
+            isBootstrapping: false
+        ))
+        XCTAssertTrue(ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: false,
+            isProjecting: false,
+            isCatalogLoading: false,
+            isBootstrapping: true
+        ))
+    }
+
     func testHeaderCollapsesAfterUpperThresholdAndExpandsAfterLowerThreshold() {
         let model = ExercisesCatalogHeaderPresentationModel()
 

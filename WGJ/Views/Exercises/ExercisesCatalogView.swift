@@ -139,6 +139,15 @@ struct ExercisesCatalogView: View {
         searchState.hasActiveFilters
     }
 
+    private var showsLoadingPlaceholder: Bool {
+        ExercisesCatalogContentPresentationPolicy.showsLoadingPlaceholder(
+            hasProjectedSections: !controller.projection.sections.isEmpty,
+            isProjecting: controller.isProjecting,
+            isCatalogLoading: loadState == .loading,
+            isBootstrapping: isBootstrappingCatalog
+        )
+    }
+
     private var shouldLoadCatalog: Bool {
         isPickerMode || isTabActive
     }
@@ -782,7 +791,9 @@ struct ExercisesCatalogView: View {
             message: emptyStateMessage,
             icon: emptyStateIcon
         ) {
-            if hasActiveFilters && loadState != .loading && !isBootstrappingCatalog {
+            if showsLoadingPlaceholder {
+                ProgressView()
+            } else if hasActiveFilters {
                 Button {
                     clearSearchAndFilters()
                 } label: {
@@ -790,19 +801,17 @@ struct ExercisesCatalogView: View {
                 }
                 .buttonStyle(WGJGhostButtonStyle())
                 .accessibilityIdentifier("exercises-clear-filters-button")
-            } else if controller.catalog.catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
+            } else if controller.catalog.catalogExercises.isEmpty {
                 Button("Retry") {
                     beginRetryCatalogBootstrap()
                 }
                 .buttonStyle(WGJGhostButtonStyle())
-            } else if loadState == .loading || isBootstrappingCatalog {
-                ProgressView()
             }
         }
     }
 
     private var emptyStateTitle: String {
-        if loadState == .loading || isBootstrappingCatalog {
+        if showsLoadingPlaceholder {
             return "Loading exercises"
         }
         if controller.catalog.catalogExercises.isEmpty {
@@ -812,7 +821,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var emptyStateMessage: String {
-        if loadState == .loading || isBootstrappingCatalog {
+        if showsLoadingPlaceholder {
             return "Getting exercises ready."
         }
         if controller.catalog.catalogExercises.isEmpty {
@@ -824,7 +833,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var emptyStateIcon: String {
-        if loadState == .loading || isBootstrappingCatalog {
+        if showsLoadingPlaceholder {
             return "dumbbell.fill"
         }
         if controller.catalog.catalogExercises.isEmpty {
