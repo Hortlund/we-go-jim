@@ -39,6 +39,15 @@ Rename the existing displayed exercise "Dumbbell Flat Press" to "Dumbbell Bench 
 
 Aliases are limited to genuine synonyms or unambiguous abbreviations. They must not collapse equipment variants, unilateral/bilateral variants, or materially different techniques into one result. Searching an alias returns the canonical exercise row whose displayed name accurately describes the workout.
 
+Audit all existing aliases under the same rule. In particular:
+
+- remove `Treadmill Walk` from Incline Treadmill Walk because Treadmill Walk is already a distinct canonical exercise;
+- remove `Wide Grip Pulldown` from Lat Pulldown because Wide Grip Lat Pulldown is already a distinct canonical exercise;
+- correct the existing `seed-reverse-curl` row to the canonical name `Barbell Reverse Curl` with `Barbell` equipment, preserving its UUID and remote ID, because a separate canonical EZ Bar Reverse Curl already exists;
+- allow shared generic activity searches such as `Run` or `Walking` only when the results remain visibly distinct canonical choices such as Outdoor Run and Treadmill Run.
+
+Automated validation rejects any alias that exactly matches a different canonical exercise name. Semantic alias review remains explicit because equipment, stance, grip, and unilateral/bilateral equivalence cannot be inferred reliably from strings alone.
+
 ### Existing equipment metadata
 
 Populate the currently empty equipment field on all 25 existing chest exercises. Use only equipment already implied by each movement, such as `Barbell,Bench`, `Dumbbells,Bench`, `Cable`, `Machine`, `Bodyweight`, or `Dip Station`. This restores correct equipment filtering without creating new exercise identities.
@@ -63,6 +72,8 @@ Automated validation will cover:
 - exercise UUIDs and remote IDs are unique;
 - all 16 expected canonical entries exist with their required category, equipment, muscle mappings, and cardio profiles;
 - Dumbbell Bench Press uses the previous stable UUID and has only accurate aliases;
+- Barbell Reverse Curl uses its previous stable UUID and no longer points to EZ Bar equipment;
+- no alias exactly matches another exercise's canonical name;
 - no curated exercise has an empty equipment field;
 - importing version 6 over an older catalog updates the stable press row and inserts the new rows without changing custom exercises.
 
