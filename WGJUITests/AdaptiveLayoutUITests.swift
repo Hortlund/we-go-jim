@@ -58,6 +58,28 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testExerciseProgressSelectors() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
+        openExercisesTab(in: app)
+
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("bench")
+
+        let bench = app.staticTexts["Barbell Bench Press"].firstMatch
+        XCTAssertTrue(bench.waitForExistence(timeout: 4))
+        bench.tap()
+
+        XCTAssertTrue(app.buttons["exercise-progress-metric-selector"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["exercise-progress-range-sixMonths"].exists)
+        app.buttons["exercise-progress-range-allTime"].tap()
+        XCTAssertEqual(app.buttons["exercise-progress-range-allTime"].value as? String, "Selected")
+        XCTAssertTrue(app.otherElements["exercise-progress-chart"].exists)
+        XCTAssertTrue(app.otherElements["exercise-progress-timeline"].exists)
+    }
+
+    @MainActor
     private func launchLocalApp(additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

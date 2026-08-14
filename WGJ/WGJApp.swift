@@ -99,6 +99,7 @@ struct WGJApp: App {
 
         let container = try ModelContainer(for: appSchema, configurations: [inMemory])
         try seedUITestCatalogIfNeeded(container: container)
+        try seedUITestExerciseProgressIfRequested(container: container)
         return container
     }
 
@@ -254,6 +255,102 @@ struct WGJApp: App {
         context.insert(bench)
         try context.save()
         ExerciseSearchService.invalidateCatalogIndex(for: context)
+    }
+
+    nonisolated private static func seedUITestExerciseProgressIfRequested(container: ModelContainer) throws {
+        guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_EXERCISE_PROGRESS") else { return }
+
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date()
+        let completedDates = [
+            calendar.date(byAdding: .month, value: -8, to: now)!,
+            calendar.date(byAdding: .month, value: -4, to: now)!,
+            calendar.date(byAdding: .day, value: -7, to: now)!,
+        ]
+        let sessionIDs = [
+            UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+            UUID(uuidString: "10000000-0000-0000-0000-000000000003")!,
+        ]
+
+        for index in completedDates.indices {
+            let completedAt = completedDates[index]
+            let sessionID = sessionIDs[index]
+            let session = WorkoutSession(
+                id: sessionID,
+                name: "Progress Fixture \(index + 1)",
+                status: .completed,
+                startedAt: completedAt.addingTimeInterval(-3_600),
+                endedAt: completedAt,
+                durationSeconds: 3_600,
+                totalVolume: Double(1_000 + index * 250),
+                summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion,
+                createdAt: completedAt,
+                updatedAt: completedAt
+            )
+            let exerciseID = UUID()
+            let exercise = WorkoutSessionExercise(
+                id: exerciseID,
+                sessionID: sessionID,
+                catalogExerciseUUID: "seed-bench-press",
+                exerciseNameSnapshot: "Barbell Bench Press",
+                categorySnapshot: "Chest",
+                muscleSummarySnapshot: "Chest",
+                totalSetCount: 2,
+                completedSetCount: 2,
+                createdAt: completedAt,
+                updatedAt: completedAt,
+                session: session
+            )
+            var sets: [WorkoutSessionSet] = []
+
+            for setIndex in 0..<2 {
+                let weight = Double(70 + index * 10 + setIndex * 5)
+                let reps = 8 + index + setIndex
+                let setID = UUID()
+                let set = WorkoutSessionSet(
+                    id: setID,
+                    sessionExerciseID: exerciseID,
+                    sortOrder: setIndex,
+                    actualReps: reps,
+                    actualWeight: weight,
+                    actualLoadUnit: .kg,
+                    isCompleted: true,
+                    createdAt: completedAt,
+                    updatedAt: completedAt,
+                    sessionExercise: exercise
+                )
+                sets.append(set)
+                context.insert(CompletedSetFact(
+                    sessionSetID: setID,
+                    sessionID: sessionID,
+                    sessionExerciseID: exerciseID,
+                    catalogExerciseUUID: "seed-bench-press",
+                    exerciseNameSnapshot: "Barbell Bench Press",
+                    completedAt: completedAt,
+                    setIndex: setIndex,
+                    isWarmup: false,
+                    reps: reps,
+                    weight: weight,
+                    loadUnit: .kg,
+                    normalizedWeightKg: weight,
+                    estimatedOneRepMaxKg: WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+                    volumeKg: weight * Double(reps),
+                    sourceSessionUpdatedAt: completedAt
+                ))
+            }
+            session.exercises = [exercise]
+            exercise.sets = sets
+            context.insert(session)
+            context.insert(exercise)
+            sets.forEach(context.insert)
+        }
+
+        try context.save()
+        HistoryAnalyticsCache.shared.invalidate(container: container)
     }
 
     private static func configureNavigationTitleAppearance() {

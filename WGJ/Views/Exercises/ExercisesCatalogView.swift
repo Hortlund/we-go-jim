@@ -1648,7 +1648,7 @@ struct ExerciseDetailDestinationView: View {
     @State private var showingCustomExerciseEditor = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
     @State private var showingDeleteConfirmation = false
-    @State private var statsSnapshot: ExerciseDetailStatsSnapshot?
+    @State private var statsLoadState: ExerciseDetailStatsLoadState = .loading
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -1751,7 +1751,7 @@ struct ExerciseDetailDestinationView: View {
             Text("This removes \(currentDisplaySnapshot.displayName) from your exercises. Built-in exercises cannot be deleted.")
         }
         .task(id: remoteUUID) {
-            loadStatsSnapshot()
+            await loadProgressDataset()
         }
     }
 
@@ -1786,7 +1786,12 @@ struct ExerciseDetailDestinationView: View {
                 detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
             }
 
-            ExerciseDetailStatsSection(snapshot: statsSnapshot)
+            ExerciseDetailStatsSection(
+                state: statsLoadState,
+                onRetry: {
+                    Task { await loadProgressDataset() }
+                }
+            )
 
             if !exercise.instructionSteps.isEmpty {
                 detailStepList(title: "How to perform", steps: exercise.instructionSteps)
@@ -1892,7 +1897,7 @@ struct ExerciseDetailDestinationView: View {
                     try repository.updateCustomExercise(exercise, draft: draft)
                 }
                 onUpdate?()
-                loadStatsSnapshot()
+                await loadProgressDataset()
                 showingCustomExerciseEditor = false
             } catch {
                 errorMessage = String(describing: error)
@@ -1923,21 +1928,23 @@ struct ExerciseDetailDestinationView: View {
         }
     }
 
-    private func loadStatsSnapshot() {
-        let preferredExerciseName = exercise?.displayName ?? ""
-        Task { @MainActor in
-            do {
-                statsSnapshot = try await detailBackgroundStore.perform("exercise-detail.stats") { backgroundContext in
-                    try WorkoutMetricsService(modelContext: backgroundContext).exerciseDetailStats(
-                        for: remoteUUID,
-                        preferredExerciseName: preferredExerciseName,
-                        limit: 8
-                    )
-                }
-            } catch {
-                errorMessage = String(describing: error)
-                showingError = true
+    @MainActor
+    private func loadProgressDataset() async {
+        statsLoadState = .loading
+        let requestedRemoteUUID = remoteUUID
+        let preferredExerciseName = currentDisplaySnapshot.displayName
+        do {
+            let dataset = try await detailBackgroundStore.perform("exercise-detail.progress") { backgroundContext in
+                try WorkoutMetricsService(modelContext: backgroundContext).exerciseProgressDataset(
+                    for: requestedRemoteUUID,
+                    preferredExerciseName: preferredExerciseName
+                )
             }
+            guard !Task.isCancelled else { return }
+            statsLoadState = dataset.map(ExerciseDetailStatsLoadState.ready) ?? .empty
+        } catch {
+            guard !Task.isCancelled else { return }
+            statsLoadState = .failed(message: String(describing: error))
         }
     }
 }
