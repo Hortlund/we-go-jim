@@ -11,7 +11,14 @@ nonisolated final class DemoSeedService {
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         self.profileRepository = ProfileRepository(modelContext: modelContext)
-        self.templateRepository = TemplateRepository(modelContext: modelContext)
+        self.templateRepository = TemplateRepository(
+            modelContext: modelContext,
+            autoSaveChanges: false,
+            boundaryEffects: TemplateSaveBoundaryEffects(
+                postLibraryChange: {},
+                scheduleBackup: { _, _ in }
+            )
+        )
         self.catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
     }
 
@@ -20,25 +27,18 @@ nonisolated final class DemoSeedService {
 
         let profile = try profileRepository.loadOrCreateProfile()
         if profile.displayName == "Athlete" {
-            try profileRepository.updateDisplayName("Demo Lifter")
+            profile.displayName = "Demo Lifter"
+            profile.athleteType = .hybridAthlete
+            profile.calorieEstimateSex = .male
+            profile.dateOfBirth = Calendar.current.date(byAdding: .year, value: -30, to: .now)
+            profile.heightCentimeters = 180
+            profile.bodyWeightKilograms = 82
+            profile.weeklyWorkoutGoal = 4
+            profile.updatedAt = .now
         }
 
         let existingFolders = try templateRepository.folders()
         let hasAnyTemplates = existingFolders.contains { !($0.templates ?? []).isEmpty }
-
-        if hasAnyTemplates {
-            return
-        }
-
-        for folderName in DemoSeedCatalog.folderNames where !existingFolders.contains(where: { $0.name.caseInsensitiveCompare(folderName) == .orderedSame }) {
-            try templateRepository.createFolder(name: folderName)
-        }
-
-        let refreshedFolders = try templateRepository.folders()
-        let foldersByName = Dictionary(
-            refreshedFolders.map { ($0.name.lowercased(), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
 
         let catalogItems = try modelContext.fetch(
             FetchDescriptor<ExerciseCatalogItem>(
@@ -50,58 +50,190 @@ nonisolated final class DemoSeedService {
             uniquingKeysWith: { first, _ in first }
         )
 
-        for seedTemplate in DemoSeedCatalog.templates {
-            guard let folder = foldersByName[seedTemplate.folderName.lowercased()] else {
-                continue
+        if !hasAnyTemplates {
+            for folderName in DemoSeedCatalog.folderNames where !existingFolders.contains(where: { $0.name.caseInsensitiveCompare(folderName) == .orderedSame }) {
+                try templateRepository.createFolder(name: folderName)
             }
 
-            let existingTemplates = try templateRepository.templates(in: folder.id)
-            let template: WorkoutTemplate
+            try modelContext.save()
 
-            if let existing = existingTemplates.first(where: { $0.name.caseInsensitiveCompare(seedTemplate.name) == .orderedSame }) {
-                template = existing
-            } else {
-                template = try templateRepository.createTemplate(
+            let refreshedFolders = try templateRepository.folders()
+            let foldersByName = Dictionary(
+                refreshedFolders.map { ($0.name.lowercased(), $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+
+            for seedTemplate in DemoSeedCatalog.templates {
+                guard let folder = foldersByName[seedTemplate.folderName.lowercased()] else {
+                    continue
+                }
+
+                let template = try templateRepository.createTemplate(
                     folderID: folder.id,
                     name: seedTemplate.name,
                     notes: seedTemplate.notes
                 )
-            }
 
-            if !(try templateRepository.exercises(in: template.id)).isEmpty {
-                continue
-            }
+                var drafts: [TemplateExerciseDraft] = []
+                for reference in seedTemplate.exercises {
+                    if let matchByUUID = itemsByUUID[reference.uuid] {
+                        drafts.append(TemplateExerciseDraft(catalogItem: matchByUUID))
+                        continue
+                    }
 
-            var drafts: [TemplateExerciseDraft] = []
-            for reference in seedTemplate.exercises {
-                if let matchByUUID = itemsByUUID[reference.uuid] {
-                    drafts.append(TemplateExerciseDraft(catalogItem: matchByUUID))
-                    continue
+                    if let fallback = catalogItems.first(where: {
+                        $0.displayName.caseInsensitiveCompare(reference.fallbackName) == .orderedSame
+                    }) {
+                        drafts.append(TemplateExerciseDraft(catalogItem: fallback))
+                    }
                 }
 
-                if let fallback = catalogItems.first(where: {
-                    $0.displayName.caseInsensitiveCompare(reference.fallbackName) == .orderedSame
-                }) {
-                    drafts.append(TemplateExerciseDraft(catalogItem: fallback))
-                }
+                try templateRepository.setExercises(templateID: template.id, drafts: drafts)
             }
-
-            try templateRepository.setExercises(templateID: template.id, drafts: drafts)
-        }
-    }
-
-    func clearDemoData() throws {
-        let folders = try modelContext.fetch(FetchDescriptor<TemplateFolder>())
-        for folder in folders {
-            modelContext.delete(folder)
-        }
-
-        let profiles = try modelContext.fetch(FetchDescriptor<UserProfile>())
-        for profile in profiles {
-            modelContext.delete(profile)
         }
 
         try modelContext.save()
+        try seedWorkoutHistoryIfEmpty(itemsByUUID: itemsByUUID)
+        TemplateLibraryChangeBroadcaster.post()
+        WorkoutHistoryChangeBroadcaster.post()
+    }
+
+    func resetLocalDevelopmentData() async throws {
+        try await AppDataDeletionService(modelContext: modelContext).deleteLocalDeviceData()
+        TemplateLibraryChangeBroadcaster.post()
+        WorkoutHistoryChangeBroadcaster.post()
+    }
+
+    private func seedWorkoutHistoryIfEmpty(
+        itemsByUUID: [String: ExerciseCatalogItem],
+        now: Date = .now
+    ) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.status == .completed }) else { return }
+
+        let calendar = Calendar.current
+        var seededSessions: [WorkoutSession] = []
+
+        for definition in DemoSeedCatalog.workouts {
+            guard let completedAt = calendar.date(byAdding: .day, value: -definition.daysAgo, to: now) else {
+                continue
+            }
+            let startedAt = completedAt.addingTimeInterval(-TimeInterval(definition.durationMinutes * 60))
+            let session = WorkoutSession(
+                name: definition.name,
+                status: .completed,
+                startedAt: startedAt,
+                endedAt: completedAt,
+                durationSeconds: definition.durationMinutes * 60,
+                estimatedActiveCalories: definition.activeCalories,
+                calorieEstimateVersion: WorkoutCalorieEstimator.currentVersion,
+                notes: definition.note,
+                createdAt: startedAt,
+                updatedAt: completedAt
+            )
+            modelContext.insert(session)
+
+            var sessionExercises: [WorkoutSessionExercise] = []
+            for (exerciseIndex, exerciseDefinition) in definition.exercises.enumerated() {
+                guard let catalogItem = itemsByUUID[exerciseDefinition.catalogUUID] else { continue }
+
+                let exercise = WorkoutSessionExercise(
+                    sessionID: session.id,
+                    catalogExerciseUUID: catalogItem.remoteUUID,
+                    exerciseNameSnapshot: catalogItem.displayName,
+                    categorySnapshot: catalogItem.categoryName,
+                    muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+                    targetRepMin: exerciseDefinition.sets.map(\.reps).min(),
+                    targetRepMax: exerciseDefinition.sets.map(\.reps).max(),
+                    totalSetCount: exerciseDefinition.sets.count,
+                    completedSetCount: exerciseDefinition.sets.count,
+                    sortOrder: exerciseIndex,
+                    createdAt: startedAt,
+                    updatedAt: completedAt,
+                    session: session
+                )
+                modelContext.insert(exercise)
+
+                let sets = exerciseDefinition.sets.enumerated().map { setIndex, definition in
+                    let set = WorkoutSessionSet(
+                        sessionExerciseID: exercise.id,
+                        sortOrder: setIndex,
+                        isWarmup: definition.isWarmup,
+                        restSeconds: exerciseDefinition.restSeconds,
+                        targetReps: definition.reps,
+                        targetWeight: definition.weight,
+                        targetLoadUnit: .kg,
+                        actualReps: definition.reps,
+                        actualWeight: definition.weight,
+                        actualLoadUnit: .kg,
+                        isCompleted: true,
+                        isLocked: true,
+                        createdAt: startedAt,
+                        updatedAt: completedAt,
+                        sessionExercise: exercise
+                    )
+                    modelContext.insert(set)
+                    return set
+                }
+                exercise.sets = sets
+                sessionExercises.append(exercise)
+            }
+            session.exercises = sessionExercises
+
+            if definition.includesCardio, let bike = itemsByUUID["seed-bike"] {
+                let cardio = WorkoutSessionCardioBlock(
+                    sessionID: session.id,
+                    phase: .postWorkout,
+                    role: .finisher,
+                    catalogExerciseUUID: bike.remoteUUID,
+                    exerciseNameSnapshot: bike.displayName,
+                    categorySnapshot: bike.categoryName,
+                    muscleSummarySnapshot: bike.primaryMuscleNames,
+                    trackingProfile: bike.cardioTrackingProfile,
+                    goalKind: .time,
+                    targetDurationSeconds: 600,
+                    actualDurationSeconds: 600,
+                    actualDistanceMeters: 4_200,
+                    preferredDistanceUnit: .kilometers,
+                    resistanceLevel: 7,
+                    cardioNotes: "Strong finish.",
+                    isCompleted: true,
+                    createdAt: startedAt,
+                    updatedAt: completedAt,
+                    session: session
+                )
+                modelContext.insert(cardio)
+                session.cardioBlocks = [cardio]
+            }
+
+            guard !sessionExercises.isEmpty else {
+                modelContext.delete(session)
+                continue
+            }
+            seededSessions.append(session)
+        }
+
+        try modelContext.save()
+
+        let metricsService = WorkoutMetricsService(modelContext: modelContext)
+        let projectionRepository = HistoryProjectionRepository(modelContext: modelContext)
+        for session in seededSessions.sorted(by: { $0.startedAt < $1.startedAt }) {
+            let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+            let summary = try metricsService.sessionSummary(
+                session: session,
+                projectedFacts: projectedFacts
+            )
+            session.totalVolume = summary.totalVolume
+            session.prHitsCount = summary.prHitsCount
+            session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
+            _ = try projectionRepository.rebuildFacts(
+                forSessionID: session.id,
+                persistChanges: false
+            )
+            try modelContext.save()
+        }
+
+        HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
     }
 }
 
@@ -115,6 +247,28 @@ nonisolated private struct DemoSeedTemplateDefinition {
     let name: String
     let notes: String
     let exercises: [DemoSeedExerciseReference]
+}
+
+nonisolated private struct DemoSeedSetDefinition {
+    let weight: Double
+    let reps: Int
+    var isWarmup = false
+}
+
+nonisolated private struct DemoSeedWorkoutExerciseDefinition {
+    let catalogUUID: String
+    let restSeconds: Int
+    let sets: [DemoSeedSetDefinition]
+}
+
+nonisolated private struct DemoSeedWorkoutDefinition {
+    let daysAgo: Int
+    let name: String
+    let durationMinutes: Int
+    let activeCalories: Int
+    let note: String
+    let includesCardio: Bool
+    let exercises: [DemoSeedWorkoutExerciseDefinition]
 }
 
 nonisolated private enum DemoSeedCatalog {
@@ -155,5 +309,65 @@ nonisolated private enum DemoSeedCatalog {
             ]
         ),
     ]
+
+    static let workouts: [DemoSeedWorkoutDefinition] = [
+        workout(daysAgo: 20, name: "Push Foundation", duration: 58, calories: 390, lifts: [
+            ("seed-bench-press", [50, 55, 55], 10),
+            ("seed-overhead-press", [30, 32.5, 32.5], 8),
+            ("seed-incline-dumbbell-press", [20, 22, 22], 10),
+        ]),
+        workout(daysAgo: 16, name: "Pull Foundation", duration: 64, calories: 430, lifts: [
+            ("seed-deadlift", [90, 100, 105], 5),
+            ("seed-bent-over-row", [45, 50, 50], 8),
+            ("seed-lat-pulldown", [45, 50, 50], 10),
+        ]),
+        workout(daysAgo: 12, name: "Leg Day", duration: 70, calories: 510, lifts: [
+            ("seed-back-squat", [60, 65, 70], 8),
+            ("seed-leg-press", [120, 140, 150], 10),
+            ("seed-dumbbell-lunge", [16, 18, 18], 10),
+        ]),
+        workout(daysAgo: 8, name: "Push Power", duration: 61, calories: 420, lifts: [
+            ("seed-bench-press", [60, 65, 70], 6),
+            ("seed-overhead-press", [35, 37.5, 40], 6),
+            ("seed-incline-dumbbell-press", [22, 24, 24], 8),
+        ]),
+        workout(daysAgo: 4, name: "Pull Strength", duration: 67, calories: 460, lifts: [
+            ("seed-deadlift", [110, 120, 125], 4),
+            ("seed-bent-over-row", [50, 55, 60], 6),
+            ("seed-lat-pulldown", [50, 55, 60], 8),
+        ]),
+        workout(daysAgo: 1, name: "Full Body PR Day", duration: 76, calories: 560, includesCardio: true, lifts: [
+            ("seed-back-squat", [70, 80, 85], 5),
+            ("seed-bench-press", [70, 75, 80], 5),
+            ("seed-deadlift", [120, 130, 140], 3),
+        ]),
+    ]
+
+    private static func workout(
+        daysAgo: Int,
+        name: String,
+        duration: Int,
+        calories: Int,
+        includesCardio: Bool = false,
+        lifts: [(String, [Double], Int)]
+    ) -> DemoSeedWorkoutDefinition {
+        DemoSeedWorkoutDefinition(
+            daysAgo: daysAgo,
+            name: name,
+            durationMinutes: duration,
+            activeCalories: calories,
+            note: "Simulator demo workout.",
+            includesCardio: includesCardio,
+            exercises: lifts.map { catalogUUID, weights, reps in
+                DemoSeedWorkoutExerciseDefinition(
+                    catalogUUID: catalogUUID,
+                    restSeconds: 120,
+                    sets: weights.enumerated().map { index, weight in
+                        DemoSeedSetDefinition(weight: weight, reps: reps, isWarmup: index == 0)
+                    }
+                )
+            }
+        )
+    }
 }
 #endif

@@ -79,10 +79,18 @@ struct WGJApp: App {
     nonisolated private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = AppSchema.makeFull()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
-        return try ModelContainer(
+        let container = try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations()
         )
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("DEV_SEED_DEMO_DATA") {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            try DemoSeedService(modelContext: context).seedDemoDataIfEmpty()
+        }
+#endif
+        return container
     }
 
     nonisolated private static func makeUITestContainer() throws -> ModelContainer {

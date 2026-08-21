@@ -104,7 +104,11 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .scrollPosition(id: scrollPositionTracker.binding)
+            // Observe the nearest restore target without ever feeding it back as a
+            // programmatic scroll command. Explicit restoration uses scrollProxy.
+            .scrollPosition(id: scrollPositionTracker.binding(
+                isSuspended: isMetricInputFocused || isKeyboardVisible
+            ))
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -2366,6 +2370,9 @@ struct ActiveWorkoutView: View {
 
     private func handleMetricInputFocusChange(_ isFocused: Bool, exerciseID: UUID) {
         if isFocused {
+            // Drop the stale pre-keyboard anchor before suspending tracking so it
+            // cannot snap the scroll view back when the keyboard later dismisses.
+            scrollPositionTracker.currentTarget = nil
             isMetricInputFocused = true
             focusedMetricInputExerciseID = exerciseID
             keyboardDismissTargetExerciseID = nil
@@ -2741,6 +2748,10 @@ struct ActiveWorkoutView: View {
         let keyboardIsVisible = WGJKeyboard.isVisible(
             from: notification,
             containerFrame: keyboardContainerFrame
+        )
+        scrollPositionTracker.prepareForKeyboardVisibilityChange(
+            wasVisible: isKeyboardVisible,
+            isVisible: keyboardIsVisible
         )
         isKeyboardVisible = keyboardIsVisible
     }

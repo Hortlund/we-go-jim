@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated enum WorkoutCalorieEstimator {
-    private static let version = 1
+    static let currentVersion = 1
     private static let secondsPerMinute = 60
     private static let maximumStrengthSecondsPerSet = 3 * secondsPerMinute
     private static let maximumStrengthSeconds = 180 * secondsPerMinute
@@ -37,10 +37,10 @@ nonisolated enum WorkoutCalorieEstimator {
         let activeCalories = Int(totalActiveCalories / 5) * 5
 
         guard activeCalories >= 5 else {
-            return .evaluatedWithoutEstimate(version: version)
+            return .evaluatedWithoutEstimate(version: currentVersion)
         }
 
-        return .estimated(activeCalories: activeCalories, version: version)
+        return .estimated(activeCalories: activeCalories, version: currentVersion)
     }
 
     private static func restingMetabolicRate(profile: ValidatedWorkoutCalorieProfile) -> Double {

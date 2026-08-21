@@ -16,6 +16,8 @@ struct SettingsDiagnosticsSection: View {
     @State private var templateCount = 0
     @State private var workoutCount = 0
     @State private var diagnosticsErrorDescription: String?
+    @State private var showingLocalResetConfirmation = false
+    @State private var isResettingLocalData = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -76,17 +78,32 @@ struct SettingsDiagnosticsSection: View {
             .buttonStyle(WGJGhostButtonStyle())
 
             Button(role: .destructive) {
-                clearDemoData()
+                showingLocalResetConfirmation = true
             } label: {
-                Label("Clear Demo Data", systemImage: "trash")
+                Label("Reset Local Dev Data", systemImage: "trash")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(WGJGhostButtonStyle())
+            .disabled(isResettingLocalData)
         }
         .padding(14)
         .wgjCardContainer()
         .task {
             await loadDiagnostics()
+        }
+        .confirmationDialog(
+            "Reset local development data?",
+            isPresented: $showingLocalResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Local Data", role: .destructive) {
+                Task {
+                    await resetLocalDevelopmentData()
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This deletes all local profiles, custom exercises, templates, workouts, active drafts, and widget data in WGJ Dev. Your Development CloudKit backup is not deleted.")
         }
     }
 
@@ -146,12 +163,14 @@ struct SettingsDiagnosticsSection: View {
     }
 
     @MainActor
-    private func clearDemoData() {
+    private func resetLocalDevelopmentData() async {
+        guard !isResettingLocalData else { return }
+        isResettingLocalData = true
+        defer { isResettingLocalData = false }
+
         do {
-            try DemoSeedService(modelContext: modelContext).clearDemoData()
-            Task {
-                await loadDiagnostics()
-            }
+            try await DemoSeedService(modelContext: modelContext).resetLocalDevelopmentData()
+            await loadDiagnostics()
         } catch {
             diagnosticsErrorDescription = error.localizedDescription
         }
