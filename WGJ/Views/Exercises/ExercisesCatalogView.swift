@@ -216,6 +216,7 @@ struct ExercisesCatalogView: View {
                             .padding(.trailing, contentTrailingPadding)
                             .padding(.bottom, 104)
                         }
+                        .coordinateSpace(name: ExercisesCatalogCoordinateSpace.scroll)
                         .scrollDismissesKeyboard(.interactively)
                         .scrollPosition(id: $visibleRowID, anchor: .top)
                         .modifier(ExercisesCatalogScrollOffsetModifier { offset in
@@ -391,42 +392,58 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedSearchControls: some View {
-        ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedCollapsed in
-            let isCollapsed = storedCollapsed
-                && !isPickerMode
-                && !isSearchFieldFocused
-                && !isSearchToolbarExpanded
+        ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedProgress in
+            let collapseProgress = isPickerMode || isSearchFieldFocused || isSearchToolbarExpanded
+                ? 0
+                : storedProgress
             VStack(alignment: .leading, spacing: 0) {
-                if !isPickerMode && !isCollapsed {
-                    WGJRootHeader(
-                        "Exercises",
-                        subtitle: "Find exercises by name, body part, or category.",
-                        titleAccessibilityIdentifier: "exercises-catalog-title"
-                    )
-                    .transition(.opacity)
+                if !isPickerMode {
+                    ExercisesCatalogCollapsibleHeaderSection(
+                        progress: collapseProgress,
+                        reduceMotion: reduceMotion
+                    ) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            WGJRootHeader(
+                                "Exercises",
+                                subtitle: "Find exercises by name, body part, or category.",
+                                titleAccessibilityIdentifier: "exercises-catalog-title"
+                            )
 
-                    Color.clear
-                        .frame(height: headerSearchSpacing)
+                            Color.clear
+                                .frame(height: headerSearchSpacing)
+                        }
+                    }
                 }
 
                 searchField
 
-                if isPickerMode || !isCollapsed {
-                    Color.clear
-                        .frame(height: controlsSpacing)
-
-                    VStack(alignment: .leading, spacing: controlsSpacing) {
-                        filterRow
-                        createExerciseButton
+                if isPickerMode {
+                    expandedFilterControls
+                } else {
+                    ExercisesCatalogCollapsibleHeaderSection(
+                        progress: collapseProgress,
+                        reduceMotion: reduceMotion
+                    ) {
+                        expandedFilterControls
                     }
-                    .transition(.opacity)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, isPickerMode ? 10 : 16)
             .padding(.bottom, 10)
             .background(WGJTheme.bgBase)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isCollapsed)
+        }
+    }
+
+    private var expandedFilterControls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear
+                .frame(height: controlsSpacing)
+
+            VStack(alignment: .leading, spacing: controlsSpacing) {
+                filterRow
+                createExerciseButton
+            }
         }
     }
 
@@ -434,7 +451,7 @@ struct ExercisesCatalogView: View {
         GeometryReader { proxy in
             Color.clear.preference(
                 key: ExercisesCatalogScrollOffsetPreferenceKey.self,
-                value: proxy.frame(in: .global).minY
+                value: proxy.frame(in: .named(ExercisesCatalogCoordinateSpace.scroll)).minY
             )
         }
         .frame(height: 1)
@@ -1267,6 +1284,10 @@ private struct ExercisesCatalogScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+private enum ExercisesCatalogCoordinateSpace {
+    static let scroll = "ExercisesCatalogScroll"
+}
+
 private struct ExercisesCatalogScrollOffsetModifier: ViewModifier {
     let onOffsetChange: (CGFloat) -> Void
 
@@ -1388,6 +1409,10 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
 
     mutating func rebuild(from exercises: [ExerciseCatalogItem], muscleGroups: [MuscleGroup]) {
         let muscleSnapshots = muscleGroups.map(ExerciseMuscleSnapshot.init(muscle:))
+        let muscleByID = Dictionary(
+            muscleSnapshots.map { ($0.remoteID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         var seenExerciseUUIDs: Set<String> = []
         let uniqueExercises = exercises.map(ExerciseCatalogItemSnapshot.init(exercise:)).filter { exercise in
             seenExerciseUUIDs.insert(exercise.remoteUUID).inserted
@@ -1407,7 +1432,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
 
         for exercise in uniqueExercises where !exercise.isHidden {
             for muscleID in exercise.primaryMuscleIDs {
-                if let muscle = muscleSnapshots.first(where: { $0.remoteID == muscleID }) {
+                if let muscle = muscleByID[muscleID] {
                     muscleNameByID[muscle.remoteID] = muscle.name
                 }
             }

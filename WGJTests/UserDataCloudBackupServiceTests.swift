@@ -219,11 +219,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             isCompleted: true,
             sessionExercise: exercise
         )
-        session.exercises = [exercise]
-        exercise.sets = [set]
         sourceContext.insert(session)
         sourceContext.insert(exercise)
         sourceContext.insert(set)
+        session.exercises = [exercise]
+        exercise.sets = [set]
         try sourceContext.save()
         let backupStore = CapturingBackupStore()
         _ = try await UserDataCloudBackupService(
@@ -448,12 +448,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             previousLoadUnit: .kg,
             templateExercise: exercise
         )
-        template.exercises = [exercise]
-        exercise.prescribedSets = [set]
-
         context.insert(template)
         context.insert(exercise)
         context.insert(set)
+        template.exercises = [exercise]
+        exercise.prescribedSets = [set]
         try context.save()
 
         let copied = try TemplateRepository(modelContext: context)
@@ -506,9 +505,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             muscleSummarySnapshot: "Back",
             session: secondSession
         )
-        firstSession.exercises = [firstExercise]
-        secondSession.exercises = [secondExercise]
-
         for model in [
             firstSession,
             secondSession,
@@ -517,6 +513,8 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         ] as [any PersistentModel] {
             context.insert(model)
         }
+        firstSession.exercises = [firstExercise]
+        secondSession.exercises = [secondExercise]
         try context.save()
 
         XCTAssertThrowsError(
@@ -565,9 +563,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             muscleSummarySnapshot: "Back",
             session: secondSession
         )
-        firstSession.exercises = [firstExercise]
-        secondSession.exercises = [secondExercise]
-
         for model in [
             firstSession,
             secondSession,
@@ -576,6 +571,8 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         ] as [any PersistentModel] {
             context.insert(model)
         }
+        firstSession.exercises = [firstExercise]
+        secondSession.exercises = [secondExercise]
         try context.save()
 
         XCTAssertThrowsError(
@@ -636,11 +633,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             template: template,
             supersetGroup: group
         )
-        folder.templates = [template]
-        template.supersetGroups = [group]
-        template.exercises = [firstExercise, secondExercise]
-        group.exercises = [firstExercise, secondExercise]
-
         for model in [
             folder,
             template,
@@ -650,6 +642,10 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         ] as [any PersistentModel] {
             sourceContext.insert(model)
         }
+        folder.templates = [template]
+        template.supersetGroups = [group]
+        template.exercises = [firstExercise, secondExercise]
+        group.exercises = [firstExercise, secondExercise]
         try sourceContext.save()
 
         let backupStore = CapturingBackupStore()
@@ -783,8 +779,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             preferredDistanceUnit: .miles,
             template: template
         )
-        template.cardioBlocks = [firstTemplateActivity, secondTemplateActivity]
-
         let session = WorkoutSession(
             templateID: template.id,
             name: template.name,
@@ -834,8 +828,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             isCompleted: true,
             session: session
         )
-        session.cardioBlocks = [firstResult, secondResult]
-
         for model in [
             customExercise,
             template,
@@ -847,6 +839,8 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         ] as [any PersistentModel] {
             sourceContext.insert(model)
         }
+        template.cardioBlocks = [firstTemplateActivity, secondTemplateActivity]
+        session.cardioBlocks = [firstResult, secondResult]
         try sourceContext.save()
 
         let backupStore = CapturingBackupStore()
@@ -915,10 +909,10 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             targetDurationSeconds: 600,
             template: template
         )
-        template.cardioBlocks = [activity]
         for model in [custom, template, activity] as [any PersistentModel] {
             sourceContext.insert(model)
         }
+        template.cardioBlocks = [activity]
         try sourceContext.save()
         let store = CapturingBackupStore()
         _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
@@ -1064,11 +1058,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             sortOrder: 0,
             template: sourceTemplate
         )
-        sourceFolder.templates = [sourceTemplate]
-        sourceTemplate.exercises = [sourceExercise]
         sourceContext.insert(sourceFolder)
         sourceContext.insert(sourceTemplate)
         sourceContext.insert(sourceExercise)
+        sourceFolder.templates = [sourceTemplate]
+        sourceTemplate.exercises = [sourceExercise]
         try sourceContext.save()
 
         let backupStore = CapturingBackupStore()

@@ -4,12 +4,12 @@ import XCTest
 final class WorkoutCardioTimerCoordinatorTests: XCTestCase {
     private enum TestError: Error { case finish }
 
-    func testConflictOrchestratorCommitsFinishBeforeRequestedTransition() throws {
+    func testConflictOrchestratorCommitsFinishBeforeRequestedTransition() {
         let runningID = UUID()
         let requested = ActiveWorkoutCardioRequestedTimerTransition.start(activityID: UUID())
         var boundaries: [ActiveWorkoutCardioConflictTransitionOrchestrator.Boundary] = []
 
-        try ActiveWorkoutCardioConflictTransitionOrchestrator.perform(
+        ActiveWorkoutCardioConflictTransitionOrchestrator.perform(
             conflict: .init(runningActivityID: runningID, requestedTransition: requested)
         ) { boundary in
             boundaries.append(boundary)

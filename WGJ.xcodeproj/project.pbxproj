@@ -443,7 +443,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.WGJWidgetExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -456,6 +456,7 @@
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
+				WGJ_URL_SCHEME = wgj;
 			};
 			name = Release;
 		};
@@ -478,7 +479,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev.WGJWidgetExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -491,6 +492,7 @@
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
+				WGJ_URL_SCHEME = "wgj-dev";
 			};
 			name = Debug;
 		};
@@ -638,7 +640,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -653,6 +655,7 @@
 				WGJ_APP_ENVIRONMENT = development;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
+				WGJ_URL_SCHEME = "wgj-dev";
 			};
 			name = Debug;
 		};
@@ -675,7 +678,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -690,6 +693,7 @@
 				WGJ_APP_ENVIRONMENT = production;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
+				WGJ_URL_SCHEME = wgj;
 			};
 			name = Release;
 		};

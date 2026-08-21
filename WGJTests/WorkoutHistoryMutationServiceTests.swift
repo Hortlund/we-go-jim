@@ -379,12 +379,12 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
             volumeKg: 800,
             sourceSessionUpdatedAt: completedAt
         )
-        session.exercises = [exercise]
-        exercise.sets = [set]
         context.insert(session)
         context.insert(exercise)
         context.insert(set)
         context.insert(fact)
+        session.exercises = [exercise]
+        exercise.sets = [set]
         try context.save()
         return container
     }
@@ -479,13 +479,13 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
             isCompleted: true,
             sessionExercise: exercise
         )
-        exercise.sets = [set]
-        session.exercises = [exercise]
-        session.cardioBlocks = activities
         context.insert(session)
         context.insert(exercise)
         context.insert(set)
         activities.forEach(context.insert)
+        exercise.sets = [set]
+        session.exercises = [exercise]
+        session.cardioBlocks = activities
         try context.save()
         return container
     }
@@ -524,9 +524,9 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
             isCompleted: true,
             session: session
         )
-        session.cardioBlocks = [activity]
         context.insert(session)
         context.insert(activity)
+        session.cardioBlocks = [activity]
         try context.save()
         return container
     }

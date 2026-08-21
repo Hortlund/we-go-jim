@@ -121,6 +121,42 @@ final class AppLaunchBootstrapTests: XCTestCase {
         XCTAssertEqual(publishedModes, [.durable])
     }
 
+    func testFailedPersistentStoreResetRemainsPendingForNextLaunch() throws {
+        let suiteName = "AppLaunchBootstrapTests.reset-failure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        AppStoreLayout.requestPersistentStoreResetOnNextLaunch(defaults: defaults)
+
+        XCTAssertThrowsError(
+            try AppStoreLayout.performPendingPersistentStoreReset(defaults: defaults) {
+                throw TestError.storeOpen
+            }
+        )
+
+        var retried = false
+        try AppStoreLayout.performPendingPersistentStoreReset(defaults: defaults) {
+            retried = true
+        }
+        XCTAssertTrue(retried)
+    }
+
+    func testSuccessfulPersistentStoreResetIsConsumedOnce() throws {
+        let suiteName = "AppLaunchBootstrapTests.reset-success.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        AppStoreLayout.requestPersistentStoreResetOnNextLaunch(defaults: defaults)
+        var resetCount = 0
+
+        try AppStoreLayout.performPendingPersistentStoreReset(defaults: defaults) {
+            resetCount += 1
+        }
+        try AppStoreLayout.performPendingPersistentStoreReset(defaults: defaults) {
+            resetCount += 1
+        }
+
+        XCTAssertEqual(resetCount, 1)
+    }
+
     private func makeState() -> AppLaunchBootstrapState {
         AppLaunchBootstrapState(runtimeStateUpdater: { _ in })
     }

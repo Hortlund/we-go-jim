@@ -58,7 +58,7 @@ struct WGJApp: App {
     }
 
     nonisolated private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
-        AppStoreLayout.clearPersistentStoreFilesForPendingReset()
+        try AppStoreLayout.clearPersistentStoreFilesForPendingReset()
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
         resetActiveWorkoutSnapshotForUITestsIfRequested()
@@ -350,11 +350,11 @@ struct WGJApp: App {
                     sourceSessionUpdatedAt: completedAt
                 ))
             }
-            session.exercises = [exercise]
-            exercise.sets = sets
             context.insert(session)
             context.insert(exercise)
             sets.forEach(context.insert)
+            session.exercises = [exercise]
+            exercise.sets = sets
         }
 
         try context.save()
@@ -422,9 +422,18 @@ nonisolated enum AppStoreLayout {
     static func clearPersistentStoreFilesForPendingReset(
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default
-    ) {
+    ) throws {
+        try performPendingPersistentStoreReset(defaults: defaults) {
+            try clearPersistentStoreFiles(fileManager: fileManager)
+        }
+    }
+
+    static func performPendingPersistentStoreReset(
+        defaults: UserDefaults,
+        reset: () throws -> Void
+    ) throws {
         guard defaults.bool(forKey: resetPersistentStoresKey) else { return }
-        try? clearPersistentStoreFiles(fileManager: fileManager)
+        try reset()
         defaults.removeObject(forKey: resetPersistentStoresKey)
     }
 
@@ -460,7 +469,7 @@ nonisolated enum AppStoreLayout {
                 includingPropertiesForKeys: nil
             )
             for fileURL in fileURLs where isPersistentStoreFile(fileURL) {
-                try? fileManager.removeItem(at: fileURL)
+                try fileManager.removeItem(at: fileURL)
             }
         }
     }

@@ -271,6 +271,12 @@ nonisolated enum ActiveWorkoutCardioQuickAddPolicy {
     }
 }
 
+nonisolated enum ActiveWorkoutCardioInteractionPolicy {
+    static func usesQuickCompletion(for role: WorkoutCardioRole) -> Bool {
+        role != .main
+    }
+}
+
 nonisolated enum ActiveWorkoutCardioRecordedDataPolicy {
     static func hasRecordedData(activity: ActiveWorkoutRuntimeCardioBlock) -> Bool {
         activity.actualDurationSeconds != nil

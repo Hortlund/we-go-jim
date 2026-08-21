@@ -57,10 +57,10 @@ final class TemplateTransferServiceTests: XCTestCase {
             preferredDistanceUnit: .miles,
             template: template
         )
-        template.cardioBlocks = [first, second]
         sourceContext.insert(template)
         sourceContext.insert(first)
         sourceContext.insert(second)
+        template.cardioBlocks = [first, second]
         try sourceContext.save()
 
         let exported = try TemplateTransferService(modelContext: sourceContext)
