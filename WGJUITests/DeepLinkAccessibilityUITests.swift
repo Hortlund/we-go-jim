@@ -9,7 +9,7 @@ final class DeepLinkAccessibilityUITests: XCTestCase {
             "UITEST_IN_MEMORY_STORE",
             "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
         ]
-        app.launchEnvironment["UITEST_INITIAL_URL"] = "wgj://profile/weekly-goal"
+        app.launchEnvironment["UITEST_INITIAL_URL"] = "wgj-dev://profile/weekly-goal"
         app.launch()
 
         let continueLocally = app.buttons["Continue Locally"].firstMatch

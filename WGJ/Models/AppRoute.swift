@@ -15,8 +15,11 @@ nonisolated struct AppRouteRequest: Identifiable, Equatable, Sendable {
 }
 
 nonisolated enum AppRouteParser {
-    static func parse(_ url: URL) -> AppRoute? {
-        guard url.scheme?.lowercased() == "wgj",
+    static func parse(
+        _ url: URL,
+        expectedScheme: String = AppRuntimeConfig.urlScheme
+    ) -> AppRoute? {
+        guard url.scheme?.lowercased() == expectedScheme.lowercased(),
               url.host?.lowercased() == "profile",
               url.path.lowercased() == "/weekly-goal"
         else { return nil }

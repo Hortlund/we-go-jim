@@ -143,13 +143,13 @@ nonisolated final class ExerciseImageCacheService {
     }
 
     private func decodeImage(from data: Data) async -> UIImage? {
-        Self.decodeImageSynchronously(
+        await ExerciseImageDecodeWorker.shared.decodeImage(
             from: data,
             maxPixelSize: decodedThumbnailMaxPixelSize
         )
     }
 
-    private static func decodeImageSynchronously(
+    fileprivate static func decodeImageSynchronously(
         from data: Data,
         maxPixelSize: Int
     ) -> UIImage? {
@@ -190,6 +190,17 @@ nonisolated final class ExerciseImageCacheService {
         return UIImage(data: data)
     }
 
+}
+
+actor ExerciseImageDecodeWorker {
+    static let shared = ExerciseImageDecodeWorker()
+
+    func decodeImage(from data: Data, maxPixelSize: Int) -> UIImage? {
+        ExerciseImageCacheService.decodeImageSynchronously(
+            from: data,
+            maxPixelSize: maxPixelSize
+        )
+    }
 }
 
 actor ExerciseImageDiskWorker {

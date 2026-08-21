@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import WGJ
 
@@ -19,7 +20,8 @@ final class CardioActivityQuickPickerTests: XCTestCase {
         XCTAssertTrue(state.includeUncurated)
     }
 
-    func testCatalogSnapshotHonorsCompleteExerciseFilters() {
+    func testCatalogSnapshotHonorsCompleteExerciseFilters() throws {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
         let primary = MuscleGroup(remoteID: 9, name: "Legs", nameEn: "Legs")
         let secondary = MuscleGroup(remoteID: 5, name: "Calves", nameEn: "Calves")
         let curatedMatch = ExerciseCatalogItem(
@@ -29,8 +31,6 @@ final class CardioActivityQuickPickerTests: XCTestCase {
             equipmentSummary: "Treadmill",
             isCurated: true
         )
-        curatedMatch.primaryMuscles = [primary]
-        curatedMatch.secondaryMuscles = [secondary]
         let customMatch = ExerciseCatalogItem(
             remoteUUID: "custom-match",
             displayName: "Custom Match",
@@ -38,16 +38,12 @@ final class CardioActivityQuickPickerTests: XCTestCase {
             equipmentSummary: "TREADMILL",
             sourceName: "custom"
         )
-        customMatch.primaryMuscles = [primary]
-        customMatch.secondaryMuscles = [secondary]
         let uncuratedMatch = ExerciseCatalogItem(
             remoteUUID: "uncurated-match",
             displayName: "Uncurated Match",
             categoryName: "Cardio",
             equipmentSummary: "Treadmill"
         )
-        uncuratedMatch.primaryMuscles = [primary]
-        uncuratedMatch.secondaryMuscles = [secondary]
         let wrongEquipment = ExerciseCatalogItem(
             remoteUUID: "wrong-equipment",
             displayName: "Bike",
@@ -55,8 +51,20 @@ final class CardioActivityQuickPickerTests: XCTestCase {
             equipmentSummary: "Bike",
             isCurated: true
         )
-        wrongEquipment.primaryMuscles = [primary]
-        wrongEquipment.secondaryMuscles = [secondary]
+        for model in [
+            primary,
+            secondary,
+            curatedMatch,
+            customMatch,
+            uncuratedMatch,
+            wrongEquipment,
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        for exercise in [curatedMatch, customMatch, uncuratedMatch, wrongEquipment] {
+            exercise.primaryMuscles = [primary]
+            exercise.secondaryMuscles = [secondary]
+        }
         var snapshot = ExercisesCatalogSnapshot.empty
         snapshot.rebuild(
             from: [curatedMatch, customMatch, uncuratedMatch, wrongEquipment],

@@ -257,11 +257,15 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
 nonisolated enum WeeklyGoalWidgetDeepLink {
     static let profileWeeklyGoalURL: URL = {
         var components = URLComponents()
-        components.scheme = "wgj"
+        components.scheme = urlScheme
         components.host = "profile"
         components.path = "/weekly-goal"
         return components.url ?? URL(fileURLWithPath: "/profile/weekly-goal")
     }()
+
+    private static let urlScheme = Bundle.main.object(
+        forInfoDictionaryKey: "WGJURLScheme"
+    ) as? String ?? (Bundle.main.bundleIdentifier?.contains(".dev") == true ? "wgj-dev" : "wgj")
 }
 
 nonisolated enum WeeklyGoalWidgetDescriptor {
@@ -271,7 +275,9 @@ nonisolated enum WeeklyGoalWidgetDescriptor {
 nonisolated struct WeeklyGoalWidgetStore {
     static let appGroupIdentifier = Bundle.main.object(
         forInfoDictionaryKey: "WGJAppGroupIdentifier"
-    ) as? String ?? "group.se.highball.WeGoJim"
+    ) as? String ?? (Bundle.main.bundleIdentifier?.contains(".dev") == true
+        ? "group.se.highball.WeGoJim.dev"
+        : "group.se.highball.WeGoJim")
     static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.current"
     static let legacySnapshotDefaultsKeys = [
         "weeklyGoalWidget.snapshot.v1",

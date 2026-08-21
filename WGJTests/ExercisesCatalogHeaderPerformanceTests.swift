@@ -36,14 +36,17 @@ final class ExercisesCatalogHeaderPerformanceTests: XCTestCase {
         ))
     }
 
-    func testHeaderCollapsesAfterUpperThresholdAndExpandsAfterLowerThreshold() {
+    func testHeaderCollapseProgressTracksScrollOffset() {
         let model = ExercisesCatalogHeaderPresentationModel()
 
-        XCTAssertFalse(model.consume(contentOffsetY: 30))
-        XCTAssertTrue(model.consume(contentOffsetY: 52))
+        XCTAssertTrue(model.consume(contentOffsetY: 24))
+        XCTAssertEqual(model.collapseProgress, 0.5, accuracy: 0.001)
+        XCTAssertFalse(model.isCollapsed)
+        XCTAssertTrue(model.consume(contentOffsetY: 48))
+        XCTAssertEqual(model.collapseProgress, 1, accuracy: 0.001)
         XCTAssertTrue(model.isCollapsed)
-        XCTAssertFalse(model.consume(contentOffsetY: 24))
-        XCTAssertTrue(model.consume(contentOffsetY: 8))
+        XCTAssertTrue(model.consume(contentOffsetY: 12))
+        XCTAssertEqual(model.collapseProgress, 0.25, accuracy: 0.001)
         XCTAssertFalse(model.isCollapsed)
     }
 

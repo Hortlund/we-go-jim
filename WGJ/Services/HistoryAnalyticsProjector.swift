@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftData
 
 nonisolated enum HistoryProjectionSnapshotBuilder {
@@ -174,6 +175,7 @@ nonisolated final class HistoryAnalyticsCache: @unchecked Sendable {
     func clear() {
         lock.lock()
         metricsSnapshotsByContainerID.removeAll()
+        revisionByContainerID.removeAll()
         lock.unlock()
     }
 
@@ -215,18 +217,34 @@ nonisolated final class HistoryAnalyticsCache: @unchecked Sendable {
     }
 }
 
+nonisolated enum HistoryProjectionRetryPolicy {
+    private static let retryDelays: [TimeInterval] = [1, 4]
+
+    static func delay(forRetryAttempt attempt: Int) -> TimeInterval? {
+        guard attempt > 0, attempt <= retryDelays.count else { return nil }
+        return retryDelays[attempt - 1]
+    }
+}
+
 nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendable {
     static let shared = HistoryProjectionBackgroundReconciler()
+
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "HistoryProjectionReconciler"
+    )
 
     private let queue = DispatchQueue(label: "wgj.history-projection.background", qos: .utility)
     private let lock = NSLock()
     private var pendingSessionIDsByContainerID: [ObjectIdentifier: Set<UUID>] = [:]
+    private var retryAttemptBySessionIDByContainerID: [ObjectIdentifier: [UUID: Int]] = [:]
     private var activeContainerIDs: Set<ObjectIdentifier> = []
 
     func scheduleRebuild(sessionID: UUID, container: ModelContainer) {
         let containerID = ObjectIdentifier(container)
         lock.lock()
         pendingSessionIDsByContainerID[containerID, default: []].insert(sessionID)
+        retryAttemptBySessionIDByContainerID[containerID, default: [:]][sessionID] = 0
         let shouldStart = activeContainerIDs.insert(containerID).inserted
         lock.unlock()
 
@@ -274,8 +292,27 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
             }
         }
 
-        if !failedSessionIDs.isEmpty {
-            enqueuePendingSessionIDs(failedSessionIDs, for: containerID)
+        let successfulSessionIDs = processedSessionIDs.subtracting(failedSessionIDs)
+        let retryPlan = prepareRetryPlan(
+            failedSessionIDs: failedSessionIDs,
+            successfulSessionIDs: successfulSessionIDs,
+            containerID: containerID
+        )
+
+        if retryPlan.exhaustedCount > 0 {
+            Self.logger.error(
+                "Deferred \(retryPlan.exhaustedCount, privacy: .public) history projection rebuild(s) to the next maintenance pass after bounded retries"
+            )
+        }
+
+        for retry in retryPlan.scheduledRetries {
+            queue.asyncAfter(deadline: .now() + retry.delay) { [container] in
+                self.enqueueRetry(
+                    sessionIDs: retry.sessionIDs,
+                    expectedAttempt: retry.attempt,
+                    container: container
+                )
+            }
         }
 
         lock.lock()
@@ -299,11 +336,76 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
         return sessionIDs.sorted { $0.uuidString < $1.uuidString }
     }
 
-    private func enqueuePendingSessionIDs(_ sessionIDs: Set<UUID>, for containerID: ObjectIdentifier) {
-        guard !sessionIDs.isEmpty else { return }
-
-        lock.lock()
-        pendingSessionIDsByContainerID[containerID, default: []].formUnion(sessionIDs)
-        lock.unlock()
+    private struct ScheduledRetry {
+        let sessionIDs: Set<UUID>
+        let attempt: Int
+        let delay: TimeInterval
     }
+
+    private struct RetryPlan {
+        let scheduledRetries: [ScheduledRetry]
+        let exhaustedCount: Int
+    }
+
+    private func prepareRetryPlan(
+        failedSessionIDs: Set<UUID>,
+        successfulSessionIDs: Set<UUID>,
+        containerID: ObjectIdentifier
+    ) -> RetryPlan {
+        lock.lock()
+        defer { lock.unlock() }
+
+        for sessionID in successfulSessionIDs {
+            retryAttemptBySessionIDByContainerID[containerID]?.removeValue(forKey: sessionID)
+        }
+
+        var sessionIDsByAttempt: [Int: Set<UUID>] = [:]
+        var exhaustedCount = 0
+        for sessionID in failedSessionIDs {
+            let nextAttempt = (retryAttemptBySessionIDByContainerID[containerID]?[sessionID] ?? 0) + 1
+            guard HistoryProjectionRetryPolicy.delay(forRetryAttempt: nextAttempt) != nil else {
+                retryAttemptBySessionIDByContainerID[containerID]?.removeValue(forKey: sessionID)
+                exhaustedCount += 1
+                continue
+            }
+
+            retryAttemptBySessionIDByContainerID[containerID, default: [:]][sessionID] = nextAttempt
+            sessionIDsByAttempt[nextAttempt, default: []].insert(sessionID)
+        }
+
+        if retryAttemptBySessionIDByContainerID[containerID]?.isEmpty == true {
+            retryAttemptBySessionIDByContainerID.removeValue(forKey: containerID)
+        }
+
+        let scheduledRetries = sessionIDsByAttempt.compactMap { attempt, sessionIDs -> ScheduledRetry? in
+            guard let delay = HistoryProjectionRetryPolicy.delay(forRetryAttempt: attempt) else { return nil }
+            return ScheduledRetry(sessionIDs: sessionIDs, attempt: attempt, delay: delay)
+        }
+        return RetryPlan(scheduledRetries: scheduledRetries, exhaustedCount: exhaustedCount)
+    }
+
+    private func enqueueRetry(
+        sessionIDs: Set<UUID>,
+        expectedAttempt: Int,
+        container: ModelContainer
+    ) {
+        let containerID = ObjectIdentifier(container)
+        lock.lock()
+        let eligibleSessionIDs = sessionIDs.filter {
+            retryAttemptBySessionIDByContainerID[containerID]?[$0] == expectedAttempt
+        }
+        guard !eligibleSessionIDs.isEmpty else {
+            lock.unlock()
+            return
+        }
+        pendingSessionIDsByContainerID[containerID, default: []].formUnion(eligibleSessionIDs)
+        let shouldStart = activeContainerIDs.insert(containerID).inserted
+        lock.unlock()
+
+        guard shouldStart else { return }
+        queue.async { [container] in
+            self.process(container: container)
+        }
+    }
+
 }

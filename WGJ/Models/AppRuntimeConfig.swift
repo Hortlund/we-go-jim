@@ -62,6 +62,7 @@ nonisolated enum AppRuntimeConfig {
     private enum InfoKey {
         static let appEnvironment = "WGJAppEnvironment"
         static let cloudKitContainerIdentifier = "WGJCloudKitContainerIdentifier"
+        static let urlScheme = "WGJURLScheme"
     }
 
     private enum TestArgument {
@@ -75,13 +76,25 @@ nonisolated enum AppRuntimeConfig {
     static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
     static let termsURL = URL(string: "https://highball.se/wgj/index.html")
     static var appEnvironment: AppEnvironment {
-        guard let rawValue = infoString(for: InfoKey.appEnvironment)?.lowercased(),
-              let environment = AppEnvironment(rawValue: rawValue)
-        else {
-            return .production
+        resolvedAppEnvironment(
+            configuredValue: infoString(for: InfoKey.appEnvironment),
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        )
+    }
+
+    static func resolvedAppEnvironment(
+        configuredValue: String?,
+        bundleIdentifier: String?
+    ) -> AppEnvironment {
+        let normalizedValue = configuredValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if let normalizedValue,
+           let environment = AppEnvironment(rawValue: normalizedValue) {
+            return environment
         }
 
-        return environment
+        return bundleIdentifier?.contains(".dev") == true ? .development : .production
     }
 
     static var cloudKitConsoleEnvironmentName: String {
@@ -90,6 +103,10 @@ nonisolated enum AppRuntimeConfig {
 
     static var cloudKitContainerIdentifier: String {
         normalizedInfoString(for: InfoKey.cloudKitContainerIdentifier) ?? "iCloud.se.highball.WeGoJim"
+    }
+
+    static var urlScheme: String {
+        normalizedInfoString(for: InfoKey.urlScheme) ?? fallbackURLScheme
     }
 
     static var isRunningTests: Bool {
@@ -162,6 +179,10 @@ nonisolated enum AppRuntimeConfig {
         }
 
         return CKContainer(identifier: cloudKitContainerIdentifier)
+    }
+
+    private static var fallbackURLScheme: String {
+        Bundle.main.bundleIdentifier?.contains(".dev") == true ? "wgj-dev" : "wgj"
     }
 
     private static func infoString(for key: String) -> String? {

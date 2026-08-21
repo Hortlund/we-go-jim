@@ -1,15 +1,17 @@
+import SwiftData
 import XCTest
 @testable import WGJ
 
 @MainActor
 final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
     func testDetectsOtherwiseIdenticalSecondMainActivityAsAdded() throws {
-        let fixture = makeMatchedFixture()
+        let fixture = try makeMatchedFixture()
         let added = makeSessionActivity(
             session: fixture.session,
             sourceTemplateCardioID: nil,
             sortOrder: 1
         )
+        fixture.context.insert(added)
         fixture.session.cardioBlocks = [fixture.sessionActivity, added]
 
         let preview = try XCTUnwrap(
@@ -27,12 +29,13 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
     }
 
     func testDetectsRemovingOneOfTwoSameRoleActivities() throws {
-        let fixture = makeMatchedFixture()
+        let fixture = try makeMatchedFixture()
         let removedTemplateActivity = makeTemplateActivity(
             template: fixture.template,
             sortOrder: 1,
             name: "Bike"
         )
+        fixture.context.insert(removedTemplateActivity)
         fixture.template.cardioBlocks = [fixture.templateActivity, removedTemplateActivity]
 
         let preview = try XCTUnwrap(
@@ -49,12 +52,13 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
     }
 
     func testSameRoleAddAndRemovePreviewItemsHaveDistinctActivityIDs() throws {
-        let fixture = makeMatchedFixture()
+        let fixture = try makeMatchedFixture()
         let secondTemplateActivity = makeTemplateActivity(
             template: fixture.template,
             sortOrder: 1,
             name: "Bike"
         )
+        fixture.context.insert(secondTemplateActivity)
         fixture.template.cardioBlocks = [fixture.templateActivity, secondTemplateActivity]
         let firstAdded = makeSessionActivity(
             session: fixture.session,
@@ -66,6 +70,8 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
             sourceTemplateCardioID: UUID(),
             sortOrder: 1
         )
+        fixture.context.insert(firstAdded)
+        fixture.context.insert(secondAdded)
         fixture.session.cardioBlocks = [firstAdded, secondAdded]
 
         let preview = try XCTUnwrap(
@@ -81,7 +87,7 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         XCTAssertEqual(Set(preview.removedCardioBlocks.map(\.id)).count, 2)
     }
 
-    func testDetectsEveryReusableCardioPlanFieldAsEdited() {
+    func testDetectsEveryReusableCardioPlanFieldAsEdited() throws {
         let changes: [(String, (WorkoutSessionCardioBlock) -> Void)] = [
             ("role", { $0.role = .finisher }),
             ("sort order", { $0.sortOrder = 4 }),
@@ -97,7 +103,7 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         ]
 
         for (field, applyChange) in changes {
-            let fixture = makeMatchedFixture()
+            let fixture = try makeMatchedFixture()
             applyChange(fixture.sessionActivity)
 
             let preview = WorkoutTemplateSyncPreviewBuilder.buildPreview(
@@ -111,8 +117,8 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         }
     }
 
-    func testIgnoresActualCardioResultOnlyChanges() {
-        let fixture = makeMatchedFixture()
+    func testIgnoresActualCardioResultOnlyChanges() throws {
+        let fixture = try makeMatchedFixture()
         fixture.sessionActivity.actualDurationSeconds = 1_500
         fixture.sessionActivity.actualDistanceMeters = 6_200
         fixture.sessionActivity.inclinePercent = 3
@@ -129,7 +135,7 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
     }
 
     func testLegacyActivityWithoutSourceIDMatchesByRoleAndOrder() throws {
-        let fixture = makeMatchedFixture()
+        let fixture = try makeMatchedFixture()
         fixture.sessionActivity.sourceTemplateCardioID = nil
         fixture.sessionActivity.actualDurationSeconds = 1_500
         fixture.sessionActivity.actualDistanceMeters = 6_200
@@ -155,23 +161,29 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         XCTAssertNil(preview.mutation.cardioBlocks.first?.sourceTemplateCardioID)
     }
 
-    private func makeMatchedFixture() -> (
+    private func makeMatchedFixture() throws -> (
+        context: ModelContext,
         template: WorkoutTemplate,
         session: WorkoutSession,
         templateActivity: TemplateCardioBlock,
         sessionActivity: WorkoutSessionCardioBlock
     ) {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
         let template = WorkoutTemplate(folderID: UUID(), name: "Cardio")
         let templateActivity = makeTemplateActivity(template: template)
-        template.cardioBlocks = [templateActivity]
 
         let session = WorkoutSession(templateID: template.id, name: template.name)
         let sessionActivity = makeSessionActivity(
             session: session,
             sourceTemplateCardioID: templateActivity.id
         )
+        context.insert(template)
+        context.insert(templateActivity)
+        context.insert(session)
+        context.insert(sessionActivity)
+        template.cardioBlocks = [templateActivity]
         session.cardioBlocks = [sessionActivity]
-        return (template, session, templateActivity, sessionActivity)
+        return (context, template, session, templateActivity, sessionActivity)
     }
 
     private func makeTemplateActivity(

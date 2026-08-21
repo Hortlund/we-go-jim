@@ -14,6 +14,8 @@
 	<string>$(WGJ_APP_GROUP_IDENTIFIER)</string>
 	<key>WGJCloudKitContainerIdentifier</key>
 	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
+	<key>WGJURLScheme</key>
+	<string>$(WGJ_URL_SCHEME)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -26,10 +28,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>se.highball.WeGoJim</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>wgj</string>
+				<string>$(WGJ_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>

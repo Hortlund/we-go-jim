@@ -52,7 +52,7 @@ nonisolated final class ExerciseCatalogSyncService {
 
         do {
             let now = nowProvider()
-            let musclesByID = upsertSeedMuscles(payload.muscles)
+            let musclesByID = try upsertSeedMuscles(payload.muscles)
             let existing = try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
             var byUUID = Dictionary(
                 existing.map { ($0.remoteUUID, $0) },
@@ -123,10 +123,22 @@ nonisolated final class ExerciseCatalogSyncService {
             try modelContext.save()
             ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         } catch {
-            state.lastRefreshAttemptAt = nowProvider()
-            state.lastErrorMessage = String(describing: error)
-            try? modelContext.save()
-            throw error
+            let importError = error
+            modelContext.rollback()
+
+            // Record the failure on a clean context. Saving the dirty import
+            // context here could otherwise commit a partial seed catalog.
+            if let failureState = try? syncState() {
+                failureState.lastRefreshAttemptAt = nowProvider()
+                failureState.lastErrorMessage = String(describing: importError)
+                do {
+                    try modelContext.save()
+                } catch {
+                    modelContext.rollback()
+                }
+            }
+
+            throw importError
         }
     }
 
@@ -160,8 +172,12 @@ nonisolated final class ExerciseCatalogSyncService {
             return true
         }
 
+        let existingByUUID = Dictionary(
+            existingExercises.map { ($0.remoteUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         if payload.exercises.contains(where: { seed in
-            guard let existing = existingExercises.first(where: { $0.remoteUUID == seed.uuid }) else {
+            guard let existing = existingByUUID[seed.uuid] else {
                 return true
             }
             return existing.sourceName != "seed" || existing.isHidden
@@ -172,8 +188,8 @@ nonisolated final class ExerciseCatalogSyncService {
         return false
     }
 
-    private func upsertSeedMuscles(_ muscles: [SeedMuscle]) -> [Int: MuscleGroup] {
-        let existing = (try? modelContext.fetch(FetchDescriptor<MuscleGroup>())) ?? []
+    private func upsertSeedMuscles(_ muscles: [SeedMuscle]) throws -> [Int: MuscleGroup] {
+        let existing = try modelContext.fetch(FetchDescriptor<MuscleGroup>())
         var byID = Dictionary(
             existing.map { ($0.remoteID, $0) },
             uniquingKeysWith: { first, _ in first }

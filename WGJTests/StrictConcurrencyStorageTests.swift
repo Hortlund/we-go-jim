@@ -88,4 +88,11 @@ final class StrictConcurrencyStorageTests: XCTestCase {
 
         XCTAssertEqual(cache.currentRevision(for: container), 100)
     }
+
+    func testHistoryProjectionRetriesUseBoundedBackoff() {
+        XCTAssertEqual(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 1), 1)
+        XCTAssertEqual(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 2), 4)
+        XCTAssertNil(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 3))
+        XCTAssertNil(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 0))
+    }
 }

@@ -141,6 +141,31 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         )
     }
 
+    func testWarmUpAndFinisherUseQuickCompletionWhileMainKeepsDetailedTracking() {
+        XCTAssertTrue(ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: .warmUp))
+        XCTAssertFalse(ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: .main))
+        XCTAssertTrue(ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: .finisher))
+    }
+
+    func testQuickCompletionGoalSummaryPreservesNonTimePlans() {
+        let distance = ActiveWorkoutCardioPresentation.make(
+            activity: .fixture(
+                goalKind: .distance,
+                targetDurationSeconds: 0,
+                targetDistanceMeters: 5_000
+            )
+        )
+        let open = ActiveWorkoutCardioPresentation.make(
+            activity: .fixture(
+                goalKind: .open,
+                targetDurationSeconds: 0
+            )
+        )
+
+        XCTAssertEqual(distance.goalText, "Goal · 5 km")
+        XCTAssertEqual(open.goalText, "No target")
+    }
+
     func testResultRemovalRequiresConfirmationButEmptyPlanDoesNot() {
         XCTAssertFalse(
             ActiveWorkoutCardioRemovalPolicy.requiresConfirmation(
@@ -438,6 +463,9 @@ private extension ActiveWorkoutRuntimeCardioBlock {
         inclinePercent: Double? = nil,
         resistanceLevel: Double? = nil,
         cardioNotes: String = "",
+        goalKind: WorkoutCardioGoalKind = .time,
+        targetDurationSeconds: Int = 1_200,
+        targetDistanceMeters: Double? = nil,
         isCompleted: Bool = false
     ) -> Self {
         ActiveWorkoutRuntimeCardioBlock(
@@ -449,9 +477,9 @@ private extension ActiveWorkoutRuntimeCardioBlock {
             categorySnapshot: "Cardio",
             muscleSummarySnapshot: "Legs",
             trackingProfile: .treadmill,
-            goalKind: .time,
-            targetDurationSeconds: 1_200,
-            targetDistanceMeters: nil,
+            goalKind: goalKind,
+            targetDurationSeconds: targetDurationSeconds,
+            targetDistanceMeters: targetDistanceMeters,
             actualDurationSeconds: actualDurationSeconds,
             actualDistanceMeters: actualDistanceMeters,
             preferredDistanceUnit: .kilometers,

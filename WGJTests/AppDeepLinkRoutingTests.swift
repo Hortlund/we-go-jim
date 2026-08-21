@@ -15,9 +15,19 @@ final class AppDeepLinkRoutingTests: XCTestCase {
 
     func testParserAcceptsOnlyWeeklyGoalURL() throws {
         XCTAssertEqual(
-            AppRouteParser.parse(try XCTUnwrap(URL(string: "wgj://profile/weekly-goal"))),
+            AppRouteParser.parse(
+                try XCTUnwrap(URL(string: "wgj-dev://profile/weekly-goal")),
+                expectedScheme: "wgj-dev"
+            ),
             .profile(.weeklyGoal)
         )
-        XCTAssertNil(AppRouteParser.parse(try XCTUnwrap(URL(string: "wgj://unknown"))))
+        XCTAssertNil(AppRouteParser.parse(
+            try XCTUnwrap(URL(string: "wgj-dev://unknown")),
+            expectedScheme: "wgj-dev"
+        ))
+        XCTAssertNil(AppRouteParser.parse(
+            try XCTUnwrap(URL(string: "wgj://profile/weekly-goal")),
+            expectedScheme: "wgj-dev"
+        ))
     }
 }

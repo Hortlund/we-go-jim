@@ -15,6 +15,13 @@ nonisolated struct WorkoutCalorieBackfillDependencies {
 }
 
 nonisolated final class WorkoutCalorieBackfillService {
+    private struct SessionEstimateSnapshot {
+        let session: WorkoutSession
+        let estimatedActiveCalories: Int?
+        let calorieEstimateVersion: Int?
+        let updatedAt: Date
+    }
+
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
     private let dependencies: WorkoutCalorieBackfillDependencies
@@ -66,6 +73,14 @@ nonisolated final class WorkoutCalorieBackfillService {
 
             var batchEvaluatedCount = 0
             var batchEstimatedCount = 0
+            let snapshots = sessions.map {
+                SessionEstimateSnapshot(
+                    session: $0,
+                    estimatedActiveCalories: $0.estimatedActiveCalories,
+                    calorieEstimateVersion: $0.calorieEstimateVersion,
+                    updatedAt: $0.updatedAt
+                )
+            }
 
             do {
                 for session in sessions {
@@ -99,7 +114,7 @@ nonisolated final class WorkoutCalorieBackfillService {
                 }
 
                 guard batchEvaluatedCount == sessions.count else {
-                    modelContext.rollback()
+                    restore(snapshots)
                     return WorkoutCalorieBackfillResult(
                         evaluatedCount: committedEvaluatedCount,
                         estimatedCount: committedEstimatedCount
@@ -107,13 +122,24 @@ nonisolated final class WorkoutCalorieBackfillService {
                 }
                 try dependencies.saveBatch(modelContext)
             } catch {
-                modelContext.rollback()
+                restore(snapshots)
                 throw error
             }
 
             committedEvaluatedCount += batchEvaluatedCount
             committedEstimatedCount += batchEstimatedCount
         }
+    }
+
+    private func restore(_ snapshots: [SessionEstimateSnapshot]) {
+        // On iOS 17, rollback clears change tracking without reliably refreshing loaded values.
+        modelContext.rollback()
+        for snapshot in snapshots {
+            snapshot.session.estimatedActiveCalories = snapshot.estimatedActiveCalories
+            snapshot.session.calorieEstimateVersion = snapshot.calorieEstimateVersion
+            snapshot.session.updatedAt = snapshot.updatedAt
+        }
+        modelContext.rollback()
     }
 
     private func eligibleSessions(limit: Int) throws -> [WorkoutSession] {

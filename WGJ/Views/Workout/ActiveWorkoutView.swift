@@ -635,21 +635,66 @@ struct ActiveWorkoutView: View {
                 }
 
                 ForEach(activities) { activity in
-                    ActiveWorkoutCardioActivityCard(
-                        presentation: .make(activity: activity),
-                        onStart: { startCardioTimer(activityID: activity.id) },
-                        onPause: { pauseCardioTimer(activityID: activity.id) },
-                        onResume: { resumeCardioTimer(activityID: activity.id) },
-                        onFinish: { finishCardioTimer(activityID: activity.id) },
-                        onEditResult: { presentCardioResult(activityID: activity.id) },
-                        onEditPlan: { presentCardioSetup(for: activity) },
-                        onChangeExercise: { requestCardioReplacement(for: activity) },
-                        onRemove: { requestCardioRemoval(for: activity) }
-                    )
-                    .id(cardioScrollTarget(for: activity))
+                    if ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: activity.role) {
+                        quickCompletionCard(for: activity)
+                            .id(cardioScrollTarget(for: activity))
+                    } else {
+                        ActiveWorkoutCardioActivityCard(
+                            presentation: .make(activity: activity),
+                            onStart: { startCardioTimer(activityID: activity.id) },
+                            onPause: { pauseCardioTimer(activityID: activity.id) },
+                            onResume: { resumeCardioTimer(activityID: activity.id) },
+                            onFinish: { finishCardioTimer(activityID: activity.id) },
+                            onEditResult: { presentCardioResult(activityID: activity.id) },
+                            onEditPlan: { presentCardioSetup(for: activity) },
+                            onChangeExercise: { requestCardioReplacement(for: activity) },
+                            onRemove: { requestCardioRemoval(for: activity) }
+                        )
+                        .id(cardioScrollTarget(for: activity))
+                    }
                 }
             }
         }
+    }
+
+    @MainActor
+    private func quickCompletionCard(
+        for activity: ActiveWorkoutRuntimeCardioBlock
+    ) -> some View {
+        let presentation = ActiveWorkoutCardioPresentation.make(activity: activity)
+        return ActiveWorkoutCardioPhaseCard(
+            phase: activity.phase,
+            exerciseName: activity.exerciseNameSnapshot,
+            descriptor: presentation.descriptor,
+            goalText: presentation.goalText,
+            statusText: activity.isCompleted ? CardioLocalizedCopy.stateTitle(.complete) : nil,
+            statusTint: WGJTheme.success,
+            isCompleted: activity.isCompleted,
+            canComplete: true,
+            completionTitle: "Complete",
+            completionAccessibilityLabel: "Complete \(activity.exerciseNameSnapshot)",
+            undoAccessibilityLabel: "Mark \(activity.exerciseNameSnapshot) incomplete",
+            completionAccessibilityIdentifier: "active-workout-cardio-\(activity.id)-quick-completion-button",
+            accessibilityIdentifier: "active-workout-cardio-\(activity.id)-card",
+            onToggleCompletion: { toggleQuickCardioCompletion(activityID: activity.id) }
+        ) {
+            Menu {
+                Button("Edit Plan") { presentCardioSetup(for: activity) }
+                Button("Change Exercise") { requestCardioReplacement(for: activity) }
+                Button("Remove", role: .destructive) { requestCardioRemoval(for: activity) }
+            } label: {
+                ActiveWorkoutCardioHeaderActionIcon(
+                    tint: activity.isCompleted ? WGJTheme.success : quickCardioTint(for: activity.role)
+                )
+            }
+            .menuIndicator(.hidden)
+            .accessibilityLabel("Cardio Actions")
+            .accessibilityIdentifier("active-workout-cardio-\(activity.id)-actions-button")
+        }
+    }
+
+    private func quickCardioTint(for role: WorkoutCardioRole) -> Color {
+        role == .warmUp ? WGJTheme.accentBlue : WGJTheme.accentGold
     }
 
     @MainActor
@@ -1726,6 +1771,27 @@ struct ActiveWorkoutView: View {
 
     private func resumeCardioTimer(activityID: UUID) {
         requestCardioTimerTransition(.resume(activityID: activityID))
+    }
+
+    private func toggleQuickCardioCompletion(activityID: UUID) {
+        guard let activity = cardioBlock(activityID: activityID) else { return }
+
+        if activity.isCompleted {
+            pendingCardioCompletionsByID[activityID] = false
+            refreshRenderProjection()
+            persistCommittedUserEditSnapshot()
+            return
+        }
+
+        if activity.timerState != .idle {
+            _ = finishCardioTimer(activityID: activityID, presentsResult: false)
+            return
+        }
+
+        pendingCardioCompletionsByID[activityID] = true
+        refreshRenderProjection()
+        WorkoutFeedbackCenter.shared.exerciseCompleted()
+        persistCommittedUserEditSnapshot()
     }
 
     @discardableResult
@@ -3436,6 +3502,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
                     .accessibilityLabel("Dismiss rest timer")
                 }
             }
+            .frame(minHeight: 44)
             .accessibilityLabel(accessibilityLabel(isResting: isResting, primaryValue: primaryValue, secondaryText: secondaryText))
             .allowsHitTesting(isResting)
         }

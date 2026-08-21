@@ -4,7 +4,7 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let descriptor: String?
-    let targetDurationSeconds: Int
+    let goalText: String
     let statusText: String?
     let statusTint: Color
     let footnote: String?
@@ -22,7 +22,7 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
         phase: WorkoutCardioPhase,
         exerciseName: String,
         descriptor: String?,
-        targetDurationSeconds: Int,
+        goalText: String,
         statusText: String? = nil,
         statusTint: Color = WGJTheme.textSecondary,
         footnote: String? = nil,
@@ -39,7 +39,7 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
         self.phase = phase
         self.exerciseName = exerciseName
         self.descriptor = descriptor
-        self.targetDurationSeconds = targetDurationSeconds
+        self.goalText = goalText
         self.statusText = statusText
         self.statusTint = statusTint
         self.footnote = footnote
@@ -76,7 +76,7 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
 
                     HStack(spacing: 8) {
                         cardioInfoChip(
-                            WorkoutCardioDurationFormatter.text(seconds: targetDurationSeconds),
+                            goalText,
                             tint: WGJTheme.accentBlue
                         )
 
