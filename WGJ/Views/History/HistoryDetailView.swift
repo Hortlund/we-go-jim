@@ -65,7 +65,9 @@ struct HistoryDetailView: View {
                     personalRecordHighlightsSection
                     workoutMuscleHeatmapCard
                     cardioSection
-                    exercisesSectionHeader
+                    if !sessionExercises.isEmpty || orderedCardioBlocks.isEmpty {
+                        exercisesSectionHeader
+                    }
                 } else if didLoadSnapshot {
                     WGJEmptyStateCard(
                         title: "Workout not found",
@@ -78,7 +80,7 @@ struct HistoryDetailView: View {
                         .padding(.vertical, 32)
                 }
 
-                if sessionExercises.isEmpty {
+                if sessionExercises.isEmpty && orderedCardioBlocks.isEmpty {
                     WGJEmptyStateCard(
                         title: "No exercises logged",
                         message: "Add any exercises that are missing from this workout.",
@@ -89,6 +91,9 @@ struct HistoryDetailView: View {
                         }
                         .buttonStyle(WGJPrimaryButtonStyle())
                     }
+                } else if sessionExercises.isEmpty {
+                    addExerciseButton(title: "Add Strength Exercise")
+                        .disabled(session == nil)
                 }
 
                 ForEach(renderProjection.exerciseRows) { row in
@@ -301,7 +306,7 @@ struct HistoryDetailView: View {
 
     @ViewBuilder
     private var workoutMuscleHeatmapCard: some View {
-        if let muscleHeatmap = snapshot?.muscleHeatmap {
+        if !sessionExercises.isEmpty, let muscleHeatmap = snapshot?.muscleHeatmap {
             WorkoutMuscleHeatmapCard(
                 title: "Muscle Map",
                 subtitle: "Muscles trained in this workout.",

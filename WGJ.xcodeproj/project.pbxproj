@@ -480,7 +480,6 @@
 				);
 				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev.WGJWidgetExtension;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphonesimulator*]" = se.highball.WeGoJim.WGJWidgetExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -491,7 +490,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 			};
 			name = Debug;
 		};
@@ -623,7 +622,7 @@
 		C85A31E92F367BAF00217B62 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "WGJ/WGJ-Debug.entitlements";
 				CODE_SIGN_STYLE = Automatic;
@@ -641,7 +640,6 @@
 				);
 				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphonesimulator*]" = se.highball.WeGoJim;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -653,7 +651,7 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 				WGJ_APP_DISPLAY_NAME = "We Go Jim Dev";
 				WGJ_APP_ENVIRONMENT = development;
-				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
 			};
 			name = Debug;

@@ -1,16 +1,26 @@
 import SwiftUI
 
 /// Receives high-frequency `scrollPosition` writes without participating in view observation.
-/// ActiveWorkoutView reads the latest value only at explicit persistence/restore boundaries.
+/// The binding is intentionally observation-only: restore commands use ScrollViewProxy so
+/// unrelated view updates can never feed the observed target back into the scroll view.
 nonisolated final class ActiveWorkoutScrollPositionTracker {
     @MainActor var currentTarget: ActiveWorkoutScrollTarget?
 
     @MainActor
-    var binding: Binding<ActiveWorkoutScrollTarget?> {
+    func binding(isSuspended: Bool) -> Binding<ActiveWorkoutScrollTarget?> {
         Binding(
-            get: { [weak self] in self?.currentTarget },
-            set: { [weak self] in self?.currentTarget = $0 }
+            get: { nil },
+            set: { [weak self] target in
+                guard !isSuspended else { return }
+                self?.currentTarget = target
+            }
         )
+    }
+
+    @MainActor
+    func prepareForKeyboardVisibilityChange(wasVisible: Bool, isVisible: Bool) {
+        guard isVisible, !wasVisible else { return }
+        currentTarget = nil
     }
 }
 

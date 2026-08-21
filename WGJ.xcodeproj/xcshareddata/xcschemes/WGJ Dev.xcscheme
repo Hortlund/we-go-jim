@@ -97,6 +97,12 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
+      <CommandLineArguments>
+         <CommandLineArgument
+            argument = "DEV_SEED_DEMO_DATA"
+            isEnabled = "YES">
+         </CommandLineArgument>
+      </CommandLineArguments>
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference

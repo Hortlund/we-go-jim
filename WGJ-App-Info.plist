@@ -10,6 +10,8 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>WGJAppEnvironment</key>
 	<string>$(WGJ_APP_ENVIRONMENT)</string>
+	<key>WGJAppGroupIdentifier</key>
+	<string>$(WGJ_APP_GROUP_IDENTIFIER)</string>
 	<key>WGJCloudKitContainerIdentifier</key>
 	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

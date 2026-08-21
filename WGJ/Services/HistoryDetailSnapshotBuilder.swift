@@ -194,8 +194,13 @@ enum HistoryDetailSnapshotBuilder {
         let localState = try localState(for: exercises, repository: repository)
         let requestedHydrationIDs = hydrationExerciseIDs ?? Set(exercises.map(\.id))
         let hydrationExercises = exercises.filter { requestedHydrationIDs.contains($0.id) }
-        let personalRecordAchievements = try WorkoutMetricsService(modelContext: modelContext)
-            .sessionSetPRAchievements(sessionID: session.id)
+        let personalRecordAchievements: [SessionSetPRAchievement]
+        if exercises.isEmpty {
+            personalRecordAchievements = []
+        } else {
+            personalRecordAchievements = try WorkoutMetricsService(modelContext: modelContext)
+                .sessionSetPRAchievements(sessionID: session.id)
+        }
         let hydrationPayloadByExerciseID = try hydrationPayloads(
             modelContext: modelContext,
             session: session,
@@ -203,11 +208,15 @@ enum HistoryDetailSnapshotBuilder {
             draftsByExerciseID: localState.setDraftsByExerciseID,
             personalRecordAchievements: personalRecordAchievements
         )
-        let muscleHeatmap = try muscleHeatmap(
-            modelContext: modelContext,
-            exercises: exercises,
-            repository: repository
-        )
+        let muscleHeatmap: WorkoutMuscleHeatmapSnapshot = if exercises.isEmpty {
+            .empty
+        } else {
+            try muscleHeatmap(
+                modelContext: modelContext,
+                exercises: exercises,
+                repository: repository
+            )
+        }
         let personalRecordHighlights = personalRecordHighlights(
             from: personalRecordAchievements,
             draftsByExerciseID: localState.setDraftsByExerciseID

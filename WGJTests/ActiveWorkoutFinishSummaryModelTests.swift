@@ -133,6 +133,93 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
         )
         XCTAssertEqual(stairsWithoutLevel.metrics.map(\.title), ["Duration"])
     }
+
+    @MainActor
+    func testWorkoutShareCardRendersAtStoryResolution() {
+        let presentation = WorkoutSharePresentation(
+            sessionName: "Push Day",
+            completedAtText: "Aug 21, 9:00 PM",
+            activityLabel: "STRENGTH TRAINING",
+            primaryMetric: .init(title: "TOTAL VOLUME", value: "8,420 kg"),
+            supportingMetrics: [
+                .init(title: "DURATION", value: "1h 4m"),
+                .init(title: "SETS", value: "24"),
+                .init(title: "EXERCISES", value: "8"),
+            ],
+            personalRecordCount: 0,
+            highlightTitle: "Workout complete",
+            highlightDetail: "24 completed sets logged",
+            exercises: [
+                .init(name: "Bench Press", setProgressText: "4 / 4 sets", bestSetText: "100 kg × 5"),
+                .init(name: "Incline Press", setProgressText: "3 / 3 sets", bestSetText: "70 kg × 8"),
+                .init(name: "Triceps Pushdown", setProgressText: "3 / 3 sets", bestSetText: "35 kg × 12"),
+                .init(name: "Cable Fly", setProgressText: "3 / 3 sets", bestSetText: "20 kg × 12"),
+                .init(name: "Overhead Press", setProgressText: "3 / 3 sets", bestSetText: "55 kg × 6"),
+                .init(name: "Lateral Raise", setProgressText: "2 / 2 sets", bestSetText: "12 kg × 15"),
+                .init(name: "Pec Deck", setProgressText: "3 / 3 sets", bestSetText: "50 kg × 10"),
+                .init(name: "Skull Crusher", setProgressText: "3 / 3 sets", bestSetText: "30 kg × 10"),
+            ],
+            remainingExerciseCount: 0
+        )
+
+        let image = WorkoutShareCardRenderer.render(presentation)
+
+        XCTAssertEqual(image?.cgImage?.width, 1_080)
+        XCTAssertEqual(image?.cgImage?.height, 1_920)
+        if let image {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "Workout share story"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testWorkoutSharePresentationUsesCardioMetricsForCardioOnlyWorkout() {
+        let snapshot = WorkoutCompletionSnapshot(
+            sessionID: UUID(),
+            sessionName: "Evening Run",
+            celebrationTitle: "Workout Complete",
+            celebrationSubtitle: "Saved",
+            completedAtText: "Aug 21, 9:00 PM",
+            durationText: "25m",
+            exerciseCount: 0,
+            completedSetCount: 0,
+            totalVolume: 0,
+            totalVolumeText: "0 kg",
+            estimatedActiveCaloriesText: nil,
+            estimatedActiveCaloriesAccessibilityLabel: nil,
+            prHeadline: "No new PRs today",
+            prSupportText: "",
+            personalRecords: [],
+            cardioRecap: [
+                WorkoutCompletionCardioRecap(
+                    id: UUID(),
+                    role: .main,
+                    exerciseName: "Outdoor Run",
+                    descriptor: nil,
+                    summary: WorkoutCardioResultSummary(
+                        metrics: [
+                            .init(kind: .pace, title: "Pace", value: "5:00 /km", systemImage: "figure.run"),
+                            .init(kind: .duration, title: "Duration", value: "25 min", systemImage: "clock"),
+                            .init(kind: .distance, title: "Distance", value: "5 km", systemImage: "ruler"),
+                        ],
+                        notes: nil
+                    ),
+                    isCompleted: true
+                ),
+            ],
+            muscleHeatmap: .empty,
+            exerciseRecap: []
+        )
+
+        let presentation = WorkoutSharePresentation.make(snapshot: snapshot)
+
+        XCTAssertEqual(presentation.activityLabel, "CARDIO")
+        XCTAssertEqual(presentation.primaryMetric, .init(title: "DISTANCE", value: "5 km"))
+        XCTAssertEqual(presentation.highlightTitle, "Outdoor Run")
+        XCTAssertFalse(presentation.supportingMetrics.contains { $0.title == "SETS" })
+        XCTAssertFalse(presentation.supportingMetrics.contains { $0.title == "EXERCISES" })
+    }
 }
 
 private final class FinishSummaryBuildCounter {

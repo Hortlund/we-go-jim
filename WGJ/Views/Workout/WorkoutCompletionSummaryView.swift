@@ -237,6 +237,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var automaticCelebrationTask: Task<Void, Never>?
     @State private var heroCardFrame: CGRect = .zero
+    @State private var sharePreviewItem: WorkoutSharePreviewItem?
 
     private var completionBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -294,6 +295,9 @@ struct WorkoutCompletionSummaryView: View {
         .task {
             await loadSnapshotIfNeeded()
         }
+        .sheet(item: $sharePreviewItem) { item in
+            WorkoutSharePreviewSheet(presentation: item.presentation)
+        }
         .onDisappear {
             automaticCelebrationTask?.cancel()
             automaticCelebrationTask = nil
@@ -326,15 +330,25 @@ struct WorkoutCompletionSummaryView: View {
             Divider()
                 .overlay(WGJTheme.outline.opacity(0.28))
 
-            Button {
-                continueToHistory()
-            } label: {
-                Label("View History", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                    .frame(maxWidth: .infinity)
-                    .accessibilityIdentifier("workout-completion-confirm-button")
+            HStack(spacing: 10) {
+                Button {
+                    continueToHistory()
+                } label: {
+                    Label("View History", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .accessibilityIdentifier("workout-completion-confirm-button")
+
+                Button {
+                    shareWorkout()
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(WGJCompactGhostButtonStyle())
+                .disabled(snapshot == nil)
+                .accessibilityIdentifier("workout-completion-share-button")
             }
-            .buttonStyle(WGJPrimaryButtonStyle())
-            .accessibilityIdentifier("workout-completion-confirm-button")
             .padding(16)
         }
         .background(WGJTheme.bgBase.opacity(0.98))
@@ -721,6 +735,13 @@ struct WorkoutCompletionSummaryView: View {
         workoutCompletionPresentationState.dismiss()
     }
 
+    @MainActor
+    private func shareWorkout() {
+        guard let snapshot else { return }
+        let presentation = WorkoutSharePresentation.make(snapshot: snapshot)
+        sharePreviewItem = WorkoutSharePreviewItem(presentation: presentation)
+    }
+
     private func heroFrameMatches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
         abs(lhs.minX - rhs.minX) < 0.5
             && abs(lhs.minY - rhs.minY) < 0.5
@@ -738,6 +759,7 @@ struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let durationText: String
     let exerciseCount: Int
     let completedSetCount: Int
+    let totalVolume: Double
     let totalVolumeText: String
     let estimatedActiveCaloriesText: String?
     let estimatedActiveCaloriesAccessibilityLabel: String?
@@ -888,6 +910,7 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             exerciseCount: exercises.count,
             completedSetCount: completedSetCount,
+            totalVolume: session.totalVolume,
             totalVolumeText: formattedVolume(session.totalVolume),
             estimatedActiveCaloriesText: calorieMetric?.text,
             estimatedActiveCaloriesAccessibilityLabel: calorieMetric?.accessibilityLabel,

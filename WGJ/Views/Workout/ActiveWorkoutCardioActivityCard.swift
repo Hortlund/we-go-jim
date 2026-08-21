@@ -558,7 +558,10 @@ struct ActiveWorkoutCardioActivityCard: View {
 
     @ViewBuilder
     private func actionButton(_ action: ActiveWorkoutCardioPresentation.Action) -> some View {
-        let button = Button(actionTitle(for: action), action: callback(for: action))
+        let button = Button(action: callback(for: action)) {
+            Label(actionTitle(for: action), systemImage: actionSystemImage(for: action))
+                .frame(maxWidth: .infinity)
+        }
             .accessibilityLabel(
                 WorkoutMetricAccessibilityPolicy.cardioAction(
                     accessibilityAction(for: action),
@@ -568,9 +571,24 @@ struct ActiveWorkoutCardioActivityCard: View {
             .accessibilityIdentifier("active-workout-cardio-\(presentation.id)-\(action.rawValue)-button")
 
         if action == .pause || action == .logResult {
-            button.buttonStyle(WGJGhostButtonStyle())
+            button.buttonStyle(WGJCompactGhostButtonStyle())
         } else {
-            button.buttonStyle(WGJPrimaryButtonStyle())
+            button.buttonStyle(WGJCompactPrimaryButtonStyle())
+        }
+    }
+
+    private func actionSystemImage(for action: ActiveWorkoutCardioPresentation.Action) -> String {
+        switch action {
+        case .start, .resume:
+            return "play.fill"
+        case .pause:
+            return "pause.fill"
+        case .finish:
+            return "checkmark"
+        case .logResult:
+            return "square.and.pencil"
+        case .editResult:
+            return "pencil"
         }
     }
 

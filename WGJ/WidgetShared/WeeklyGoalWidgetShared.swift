@@ -269,7 +269,9 @@ nonisolated enum WeeklyGoalWidgetDescriptor {
 }
 
 nonisolated struct WeeklyGoalWidgetStore {
-    static let appGroupIdentifier = "group.se.highball.WeGoJim"
+    static let appGroupIdentifier = Bundle.main.object(
+        forInfoDictionaryKey: "WGJAppGroupIdentifier"
+    ) as? String ?? "group.se.highball.WeGoJim"
     static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.current"
     static let legacySnapshotDefaultsKeys = [
         "weeklyGoalWidget.snapshot.v1",

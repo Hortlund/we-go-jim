@@ -32,9 +32,34 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
         let tracker = ActiveWorkoutScrollPositionTracker()
         let activityID = UUID()
 
-        tracker.binding.wrappedValue = .cardio(role: .main, activityID: activityID)
+        tracker.binding(isSuspended: false).wrappedValue = .cardio(role: .main, activityID: activityID)
 
         XCTAssertEqual(tracker.currentTarget, .cardio(role: .main, activityID: activityID))
+        XCTAssertNil(tracker.binding(isSuspended: false).wrappedValue)
+    }
+
+    func testSuspendedBindingDoesNotReadOrReplaceTrackedTarget() {
+        let tracker = ActiveWorkoutScrollPositionTracker()
+        let originalTarget = ActiveWorkoutScrollTarget.exercise(UUID())
+        tracker.currentTarget = originalTarget
+
+        let binding = tracker.binding(isSuspended: true)
+        XCTAssertNil(binding.wrappedValue)
+
+        binding.wrappedValue = .header
+        XCTAssertEqual(tracker.currentTarget, originalTarget)
+    }
+
+    func testKeyboardAppearanceClearsStaleScrollTargetOnce() {
+        let tracker = ActiveWorkoutScrollPositionTracker()
+        tracker.currentTarget = .exercise(UUID())
+
+        tracker.prepareForKeyboardVisibilityChange(wasVisible: false, isVisible: true)
+        XCTAssertNil(tracker.currentTarget)
+
+        tracker.currentTarget = .header
+        tracker.prepareForKeyboardVisibilityChange(wasVisible: true, isVisible: true)
+        XCTAssertEqual(tracker.currentTarget, .header)
     }
 
     func testRestorePolicyPrefersFocusedExercise() {

@@ -169,6 +169,20 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         )
     }
 
+    func testHistoryDetailLoadsCardioOnlyWorkoutWithoutStrengthProjection() throws {
+        let container = try makeCompletedCardioOnlyWorkoutContainer()
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: ModelContext(container),
+            sessionID: sessionID,
+            hydrationExerciseIDs: []
+        )
+
+        XCTAssertTrue(snapshot.exercises.isEmpty)
+        XCTAssertEqual(snapshot.cardioBlocks.count, 1)
+        XCTAssertTrue(snapshot.personalRecordHighlights.isEmpty)
+        XCTAssertEqual(snapshot.muscleHeatmap, .empty)
+    }
+
     func testCardioRefreshPreservesDirtyExerciseDraftAndOriginalBaseline() async throws {
         let container = try makeCompletedCardioWorkoutContainer()
         let initialContext = ModelContext(container)
@@ -472,6 +486,47 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         context.insert(exercise)
         context.insert(set)
         activities.forEach(context.insert)
+        try context.save()
+        return container
+    }
+
+    private func makeCompletedCardioOnlyWorkoutContainer() throws -> ModelContainer {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let completedAt = Date(timeIntervalSince1970: 2_000)
+        let session = WorkoutSession(
+            id: sessionID,
+            name: "Cardio Only",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: completedAt,
+            durationSeconds: 1_000,
+            summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion,
+            updatedAt: completedAt
+        )
+        let activity = WorkoutSessionCardioBlock(
+            sessionID: sessionID,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 0,
+            catalogExerciseUUID: "seed-walk",
+            exerciseNameSnapshot: "Outdoor Walk",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Cardio",
+            trackingProfile: .walkRun,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 5_000,
+            actualDurationSeconds: 1_000,
+            actualDistanceMeters: 4_200,
+            preferredDistanceUnit: .kilometers,
+            isCompleted: true,
+            session: session
+        )
+        session.cardioBlocks = [activity]
+        context.insert(session)
+        context.insert(activity)
         try context.save()
         return container
     }

@@ -2006,23 +2006,32 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         debounceCoordinator.cancelCommit()
         let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        if #available(iOS 18.0, *) {
+            transaction.scrollContentOffsetAdjustmentBehavior = .disabled
+        }
 
         if !manualCompletionMode {
             var autoCompletedDrafts = updatedDrafts
             autoCompletedDrafts[index].isCompleted = true
-            setDrafts = autoCompletedDrafts
-            if let retainedFocus {
-                syncInputDraft(for: retainedFocus, using: autoCompletedDrafts[index])
+            withTransaction(transaction) {
+                setDrafts = autoCompletedDrafts
+                if let retainedFocus {
+                    syncInputDraft(for: retainedFocus, using: autoCompletedDrafts[index])
+                }
+                notifyChanged(drafts: autoCompletedDrafts)
             }
-            notifyChanged(drafts: autoCompletedDrafts)
             return
         }
 
-        setDrafts = updatedDrafts
-        if let retainedFocus {
-            syncInputDraft(for: retainedFocus, using: updatedDrafts[index])
+        withTransaction(transaction) {
+            setDrafts = updatedDrafts
+            if let retainedFocus {
+                syncInputDraft(for: retainedFocus, using: updatedDrafts[index])
+            }
+            notifyChanged(drafts: updatedDrafts)
         }
-        notifyChanged(drafts: updatedDrafts)
     }
 
     private func setTitle(for index: Int, in drafts: [WorkoutSessionSetDraft]? = nil) -> String {

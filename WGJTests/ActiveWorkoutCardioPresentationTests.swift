@@ -1,7 +1,37 @@
+import SwiftUI
 import XCTest
 @testable import WGJ
 
 final class ActiveWorkoutCardioPresentationTests: XCTestCase {
+    @MainActor
+    func testRunningCardRendersCompactActions() throws {
+        let card = ActiveWorkoutCardioActivityCard(
+            presentation: .make(activity: .runningFixture()),
+            onStart: {},
+            onPause: {},
+            onResume: {},
+            onFinish: {},
+            onEditResult: {},
+            onEditPlan: {},
+            onChangeExercise: {},
+            onRemove: {}
+        )
+        .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
+        .environment(\.colorScheme, .dark)
+        .environment(\.dynamicTypeSize, .medium)
+
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 2
+        let image = try XCTUnwrap(renderer.uiImage)
+        XCTAssertEqual(image.size.width, 340)
+
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Active cardio compact actions"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testTimerTickChangesOnlyElapsedText() {
         let activity = ActiveWorkoutRuntimeCardioBlock.runningFixture()
 
