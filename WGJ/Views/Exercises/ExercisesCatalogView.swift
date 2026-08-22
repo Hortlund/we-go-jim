@@ -300,6 +300,9 @@ struct ExercisesCatalogView: View {
                     guard let exercise = controller.catalog.exerciseByUUID[detail.remoteUUID] else { return }
                     handleSelection(exercise)
                 },
+                createSessionPromptIsPresented: createSessionPromptBinding(for: detail.remoteUUID),
+                onStartEmptyWorkoutAndAdd: startSessionAndAddPendingExercise,
+                onCancelPendingWorkoutAdd: cancelPendingExerciseAdd,
                 onUpdate: {
                     reloadCatalogAfterExerciseDeletion()
                 },
@@ -310,20 +313,6 @@ struct ExercisesCatalogView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .wgjScreenBackground()
-        .confirmationDialog(
-            "No active workout",
-            isPresented: $showingCreateSessionPrompt,
-            titleVisibility: .visible
-        ) {
-            Button("Start Empty Workout and Add") {
-                startSessionAndAddPendingExercise()
-            }
-            Button("Cancel", role: .cancel) {
-                pendingExerciseForAdd = nil
-            }
-        } message: {
-            Text("Start a workout now and this exercise will be added.")
-        }
         .alert("Exercises Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -795,6 +784,11 @@ struct ExercisesCatalogView: View {
             .frame(width: 48, height: 48)
             .accessibilityLabel(isPickerMode ? "Select \(exercise.displayName)" : "Add \(exercise.displayName)")
             .accessibilityIdentifier(isPickerMode ? "exercise-picker-select-button" : "exercise-catalog-add-button")
+            .modifier(ExerciseCreateSessionPromptModifier(
+                isPresented: createSessionPromptBinding(for: exercise.remoteUUID),
+                onStartEmptyWorkoutAndAdd: startSessionAndAddPendingExercise,
+                onCancel: cancelPendingExerciseAdd
+            ))
         }
         .frame(minHeight: 76, alignment: .center)
         .overlay(alignment: .bottom) {
@@ -949,6 +943,24 @@ struct ExercisesCatalogView: View {
                 showError(error)
             }
         }
+    }
+
+    private func createSessionPromptBinding(for remoteUUID: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                showingCreateSessionPrompt
+                    && pendingExerciseForAdd?.remoteUUID == remoteUUID
+            },
+            set: { isPresented in
+                guard pendingExerciseForAdd?.remoteUUID == remoteUUID else { return }
+                showingCreateSessionPrompt = isPresented
+            }
+        )
+    }
+
+    private func cancelPendingExerciseAdd() {
+        showingCreateSessionPrompt = false
+        pendingExerciseForAdd = nil
     }
 
     private func presentActiveWorkout(sessionID: UUID) {
@@ -1665,6 +1677,30 @@ private struct ExercisesCatalogSearchField: View {
     }
 }
 
+private struct ExerciseCreateSessionPromptModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let onStartEmptyWorkoutAndAdd: () -> Void
+    let onCancel: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "No active workout",
+                isPresented: $isPresented,
+                titleVisibility: .visible
+            ) {
+                Button("Start Empty Workout and Add") {
+                    onStartEmptyWorkoutAndAdd()
+                }
+                Button("Cancel", role: .cancel) {
+                    onCancel()
+                }
+            } message: {
+                Text("Start a workout now and this exercise will be added.")
+            }
+    }
+}
+
 struct ExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
@@ -1676,6 +1712,9 @@ struct ExerciseDetailDestinationView: View {
     let suggestedCategories: [String]
     var actionTitle: String?
     var onSelect: (() -> Void)? = nil
+    var createSessionPromptIsPresented: Binding<Bool>? = nil
+    var onStartEmptyWorkoutAndAdd: (() -> Void)? = nil
+    var onCancelPendingWorkoutAdd: (() -> Void)? = nil
     var onUpdate: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
@@ -1694,6 +1733,9 @@ struct ExerciseDetailDestinationView: View {
         suggestedCategories: [String],
         actionTitle: String? = nil,
         onSelect: (() -> Void)? = nil,
+        createSessionPromptIsPresented: Binding<Bool>? = nil,
+        onStartEmptyWorkoutAndAdd: (() -> Void)? = nil,
+        onCancelPendingWorkoutAdd: (() -> Void)? = nil,
         onUpdate: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil
     ) {
@@ -1703,6 +1745,9 @@ struct ExerciseDetailDestinationView: View {
         self.suggestedCategories = suggestedCategories
         self.actionTitle = actionTitle
         self.onSelect = onSelect
+        self.createSessionPromptIsPresented = createSessionPromptIsPresented
+        self.onStartEmptyWorkoutAndAdd = onStartEmptyWorkoutAndAdd
+        self.onCancelPendingWorkoutAdd = onCancelPendingWorkoutAdd
         self.onUpdate = onUpdate
         self.onDelete = onDelete
         let requestedRemoteUUID = displaySnapshot.remoteUUID
@@ -1856,13 +1901,27 @@ struct ExerciseDetailDestinationView: View {
             }
 
             if let actionTitle, let onSelect {
-                Button {
+                let actionButton = Button {
                     onSelect()
                 } label: {
                     Label(actionTitle, systemImage: "plus.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
+                .accessibilityIdentifier("exercise-detail-add-to-workout-button")
+
+                if let createSessionPromptIsPresented,
+                   let onStartEmptyWorkoutAndAdd,
+                   let onCancelPendingWorkoutAdd {
+                    actionButton
+                        .modifier(ExerciseCreateSessionPromptModifier(
+                            isPresented: createSessionPromptIsPresented,
+                            onStartEmptyWorkoutAndAdd: onStartEmptyWorkoutAndAdd,
+                            onCancel: onCancelPendingWorkoutAdd
+                        ))
+                } else {
+                    actionButton
+                }
             }
         }
         .padding(16)
