@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -208,10 +209,18 @@ struct StartWorkoutHomeView: View {
             .task(id: pendingTemplateFileTaskKey) {
                 importPendingTemplateFileIfNeeded()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .wgjTemplateLibraryDidChange)) { _ in
+            .onReceive(
+                NotificationCenter.default
+                    .publisher(for: .wgjTemplateLibraryDidChange)
+                    .receive(on: RunLoop.main)
+            ) { _ in
                 markHomeDirtyAndReloadIfActive()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .wgjUserDataRestoreDidComplete)) { _ in
+            .onReceive(
+                NotificationCenter.default
+                    .publisher(for: .wgjUserDataRestoreDidComplete)
+                    .receive(on: RunLoop.main)
+            ) { _ in
                 markHomeDirtyAndReloadIfActive()
             }
     }

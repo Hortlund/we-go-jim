@@ -116,7 +116,11 @@ struct ContentView: View {
         .onDisappear {
             workoutIdleTimerController.reset()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .wgjDidDeleteAllUserData)
+                .receive(on: RunLoop.main)
+        ) { _ in
             resetToStartupFlow()
         }
         .onReceive(
