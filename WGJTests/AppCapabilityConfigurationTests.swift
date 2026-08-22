@@ -39,6 +39,11 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         )
 
         XCTAssertNil(info["UIBackgroundModes"])
+        XCTAssertEqual(
+            info["NSPhotoLibraryAddUsageDescription"] as? String,
+            "Save workout images to your photo library."
+        )
+        XCTAssertNil(info["NSPhotoLibraryUsageDescription"])
         for entitlements in [debug, release] {
             XCTAssertNil(entitlements["aps-environment"])
             XCTAssertNotNil(entitlements["com.apple.security.application-groups"])

@@ -58,6 +58,8 @@
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save workout images to your photo library.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
