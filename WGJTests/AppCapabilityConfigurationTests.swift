@@ -37,7 +37,6 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             contentsOf: repository.appendingPathComponent("WGJ.xcodeproj/project.pbxproj"),
             encoding: .utf8
         )
-
         XCTAssertNil(info["UIBackgroundModes"])
         XCTAssertEqual(
             info["NSPhotoLibraryAddUsageDescription"] as? String,
@@ -70,6 +69,18 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         let release = try propertyList(at: repository.appendingPathComponent("WGJ/WGJ-Release.entitlements"))
         let project = try String(
             contentsOf: repository.appendingPathComponent("WGJ.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+        let releaseLikeProject = try String(
+            contentsOf: repository.appendingPathComponent("Configuration/Project-ReleaseLike.xcconfig"),
+            encoding: .utf8
+        )
+        let releaseLikeApp = try String(
+            contentsOf: repository.appendingPathComponent("Configuration/WGJ-App-ReleaseLike.xcconfig"),
+            encoding: .utf8
+        )
+        let releaseLikeWidget = try String(
+            contentsOf: repository.appendingPathComponent("Configuration/WGJ-Widget-ReleaseLike.xcconfig"),
             encoding: .utf8
         )
         let productionScheme = try String(
@@ -109,11 +120,35 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             XCTAssertTrue(project.contains(setting), "Missing isolation setting: \(setting)")
         }
 
-        XCTAssertTrue(developmentScheme.contains("buildConfiguration = \"Debug\""))
+        XCTAssertTrue(developmentScheme.contains("<TestAction\n      buildConfiguration = \"Debug\""))
+        XCTAssertTrue(developmentScheme.contains("<LaunchAction\n      buildConfiguration = \"Dev Preview\""))
+        XCTAssertTrue(developmentScheme.contains("selectedDebuggerIdentifier = \"\""))
+        XCTAssertTrue(developmentScheme.contains("selectedLauncherIdentifier = \"Xcode.IDEFoundation.Launcher.PosixSpawn\""))
+        XCTAssertTrue(developmentScheme.contains("<ProfileAction\n      buildConfiguration = \"Dev Preview\""))
+        XCTAssertTrue(developmentScheme.contains("<ArchiveAction\n      buildConfiguration = \"Dev Preview\""))
+        XCTAssertFalse(developmentScheme.contains("DEV_SEED_DEMO_DATA"))
         XCTAssertTrue(productionScheme.contains("<LaunchAction\n      buildConfiguration = \"Release\""))
         XCTAssertEqual(developmentScheme.components(separatedBy: "buildForAnalyzing = \"YES\"").count - 1, 1)
         XCTAssertEqual(productionScheme.components(separatedBy: "buildForAnalyzing = \"YES\"").count - 1, 1)
-        XCTAssertEqual(project.components(separatedBy: "MARKETING_VERSION = 1.4.0;").count - 1, 4)
+        XCTAssertEqual(project.components(separatedBy: "name = \"Dev Preview\";").count - 1, 5)
+        XCTAssertEqual(
+            project.components(separatedBy: "baseConfigurationReference = A20000000000000000000001").count - 1,
+            2
+        )
+        XCTAssertEqual(
+            project.components(separatedBy: "baseConfigurationReference = A20000000000000000000002").count - 1,
+            2
+        )
+        XCTAssertEqual(
+            project.components(separatedBy: "baseConfigurationReference = A20000000000000000000003").count - 1,
+            2
+        )
+        XCTAssertTrue(releaseLikeProject.contains("SWIFT_OPTIMIZATION_LEVEL = -O"))
+        XCTAssertTrue(releaseLikeProject.contains("SWIFT_COMPILATION_MODE = wholemodule"))
+        XCTAssertTrue(releaseLikeProject.contains("ENABLE_NS_ASSERTIONS = NO"))
+        XCTAssertTrue(releaseLikeProject.contains("VALIDATE_PRODUCT = YES"))
+        XCTAssertTrue(releaseLikeApp.contains("MARKETING_VERSION = 1.4.0"))
+        XCTAssertTrue(releaseLikeWidget.contains("MARKETING_VERSION = 1.4.0"))
     }
 
     private func propertyList(at url: URL) throws -> [String: Any] {
