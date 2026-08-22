@@ -784,13 +784,13 @@ struct ExercisesCatalogView: View {
             .frame(width: 48, height: 48)
             .accessibilityLabel(isPickerMode ? "Select \(exercise.displayName)" : "Add \(exercise.displayName)")
             .accessibilityIdentifier(isPickerMode ? "exercise-picker-select-button" : "exercise-catalog-add-button")
-            .modifier(ExerciseCreateSessionPromptModifier(
-                isPresented: createSessionPromptBinding(for: exercise.remoteUUID),
-                onStartEmptyWorkoutAndAdd: startSessionAndAddPendingExercise,
-                onCancel: cancelPendingExerciseAdd
-            ))
         }
-        .frame(minHeight: 76, alignment: .center)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .center)
+        .modifier(ExerciseCreateSessionPromptModifier(
+            isPresented: createSessionPromptBinding(for: exercise.remoteUUID),
+            onStartEmptyWorkoutAndAdd: startSessionAndAddPendingExercise,
+            onCancel: cancelPendingExerciseAdd
+        ))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(WGJTheme.field)
