@@ -93,6 +93,8 @@ struct HistoryOverviewView: View {
     @State private var lastRefreshAt: Date?
     @State private var isLoadingMoreHistory = false
     @State private var isLoadingCalendarMonth = false
+    @State private var preparingShareSessionID: UUID?
+    @State private var sharePreviewItem: WorkoutSharePreviewItem?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -164,6 +166,9 @@ struct HistoryOverviewView: View {
             .wgjSheetSurface()
             .presentationDetents([.large])
         }
+        .sheet(item: $sharePreviewItem) { item in
+            WorkoutSharePreviewSheet(presentation: item.presentation)
+        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadSnapshotIfNeeded(force: false, requiresActiveTab: true)
@@ -232,9 +237,12 @@ struct HistoryOverviewView: View {
     }
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
-        HistorySessionCardView(card: card) {
-            archiveSession(card.sessionID)
-        }
+        HistorySessionCardView(
+            card: card,
+            isPreparingShare: preparingShareSessionID == card.sessionID,
+            onShare: { shareSession(card.sessionID) },
+            onArchive: { archiveSession(card.sessionID) }
+        )
         .equatable()
     }
 
@@ -296,6 +304,35 @@ struct HistoryOverviewView: View {
                 await reloadSnapshotIfNeeded(force: true)
             } catch {
                 await showError(error)
+            }
+        }
+    }
+
+    private func shareSession(_ id: UUID) {
+        guard preparingShareSessionID == nil else { return }
+        preparingShareSessionID = id
+        let backgroundStore = historyBackgroundStore
+
+        Task { @MainActor in
+            defer { preparingShareSessionID = nil }
+            do {
+                let loadedSnapshot = try await backgroundStore.perform(
+                    "history-overview.share-snapshot"
+                ) { backgroundContext in
+                    try WorkoutCompletionSnapshotBuilder.build(
+                        sessionID: id,
+                        modelContext: backgroundContext
+                    )
+                }
+                guard let snapshot = loadedSnapshot else {
+                    throw WorkoutSessionRepositoryError.sessionNotFound
+                }
+
+                sharePreviewItem = WorkoutSharePreviewItem(
+                    presentation: WorkoutSharePresentation.make(snapshot: snapshot)
+                )
+            } catch {
+                showError(error)
             }
         }
     }
@@ -884,10 +921,13 @@ extension HistoryOverviewSessionSnapshot {
 
 private struct HistorySessionCardView: View, Equatable {
     let card: HistorySessionCardData
+    let isPreparingShare: Bool
+    let onShare: () -> Void
     let onArchive: () -> Void
 
     static func == (lhs: HistorySessionCardView, rhs: HistorySessionCardView) -> Bool {
         lhs.card == rhs.card
+            && lhs.isPreparingShare == rhs.isPreparingShare
     }
 
     var body: some View {
@@ -910,6 +950,15 @@ private struct HistorySessionCardView: View, Equatable {
                     Spacer()
 
                     WGJActionMenuButton("Workout Actions", usesPlainButtonStyle: false) {
+                        Button(action: onShare) {
+                            Label(
+                                isPreparingShare ? "Preparing Story" : "Share Workout",
+                                systemImage: isPreparingShare ? "hourglass" : "square.and.arrow.up"
+                            )
+                        }
+                        .disabled(isPreparingShare)
+                        .accessibilityIdentifier("history-session-share-button")
+
                         Button(action: onArchive) {
                             Label("Hide", systemImage: "archivebox")
                         }
@@ -959,7 +1008,7 @@ private struct HistorySessionCardView: View, Equatable {
 
             ForEach(card.summaryRows) { row in
                 HStack(alignment: .top, spacing: 10) {
-                    summaryExerciseValue(row.exercise)
+                    summaryExerciseValue(row)
                     summaryBestSetValue(row.bestSet)
                         .monospacedDigit()
                 }
@@ -995,13 +1044,22 @@ private struct HistorySessionCardView: View, Equatable {
             .fixedSize(horizontal: true, vertical: false)
     }
 
-    private func summaryExerciseValue(_ value: String) -> some View {
-        Text(value)
-            .font(.body)
-            .foregroundStyle(WGJTheme.textSecondary)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func summaryExerciseValue(_ row: HistorySessionSummaryRow) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(row.exercise)
+                .font(.body)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let supportingText = row.supportingText {
+                Text(supportingText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func summaryBestSetValue(_ value: String) -> some View {
@@ -1020,9 +1078,11 @@ nonisolated enum HistorySessionSummaryBuilder {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let strengthRows = exercises.enumerated().map { index, exercise in
             let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            let setCounts = setCounts(for: sets)
             return HistorySessionSummaryRow(
                 id: index,
-                exercise: "\(sets.count) x \(exercise.exerciseNameSnapshot)",
+                exercise: "\(setCounts.working) x \(exercise.exerciseNameSnapshot)",
+                supportingText: warmupSummary(count: setCounts.warmup),
                 bestSet: WorkoutMetricsService.bestSetText(for: sets)
             )
         }
@@ -1042,9 +1102,11 @@ nonisolated enum HistorySessionSummaryBuilder {
     ) throws -> [HistorySessionSummaryRow] {
         let strengthRows = try exercises.enumerated().map { index, exercise in
             let sets = try repository.sessionSets(sessionExerciseID: exercise.id)
+            let setCounts = setCounts(for: sets)
             return HistorySessionSummaryRow(
                 id: index,
-                exercise: "\(sets.count) x \(exercise.exerciseNameSnapshot)",
+                exercise: "\(setCounts.working) x \(exercise.exerciseNameSnapshot)",
+                supportingText: warmupSummary(count: setCounts.warmup),
                 bestSet: WorkoutMetricsService.bestSetText(for: sets)
             )
         }
@@ -1055,6 +1117,17 @@ nonisolated enum HistorySessionSummaryBuilder {
             startingAt: strengthRows.count
         )
         return strengthRows + mainCardioRows
+    }
+
+    private nonisolated static func setCounts(
+        for sets: [WorkoutSessionSet]
+    ) -> (working: Int, warmup: Int) {
+        let warmupCount = sets.filter(\.isWarmup).count
+        return (sets.count - warmupCount, warmupCount)
+    }
+
+    private nonisolated static func warmupSummary(count: Int) -> String? {
+        count > 0 ? "\(count) warm-up" : nil
     }
 
     private nonisolated static func cardioRows(
@@ -1101,7 +1174,20 @@ nonisolated enum HistorySessionSummaryBuilder {
 nonisolated struct HistorySessionSummaryRow: Identifiable, Equatable, Sendable {
     let id: Int
     let exercise: String
+    let supportingText: String?
     let bestSet: String
+
+    nonisolated init(
+        id: Int,
+        exercise: String,
+        supportingText: String? = nil,
+        bestSet: String
+    ) {
+        self.id = id
+        self.exercise = exercise
+        self.supportingText = supportingText
+        self.bestSet = bestSet
+    }
 }
 
 private struct HistoryArchivedWorkoutsSheet: View {

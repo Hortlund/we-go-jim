@@ -1859,7 +1859,8 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
         let targetRepMin: Int?
         let targetRepMax: Int?
         let restSeconds: Int
-        let plannedSetCount: Int
+        let plannedWorkingSetCount: Int
+        let plannedWarmupSetCount: Int
         let hasDropset: Bool
         let supersetMembership: ExerciseSupersetMembershipDraft?
 
@@ -1900,8 +1901,12 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
             }
             supersetMembership = templateExercise.supersetMembership
 
-            let prescribedSetCount = (templateExercise.prescribedSets ?? []).count
-            plannedSetCount = prescribedSetCount > 0 ? prescribedSetCount : 3
+            let prescribedSets = templateExercise.prescribedSets ?? []
+            let prescribedSetCount = prescribedSets.count
+            plannedWarmupSetCount = prescribedSets.filter(\.isWarmup).count
+            plannedWorkingSetCount = prescribedSetCount > 0
+                ? prescribedSetCount - plannedWarmupSetCount
+                : 3
         }
 
         private static func makeDescriptor(muscleSummary: String, category: String) -> String? {
@@ -1923,7 +1928,8 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
     let cardioBlocks: [CardioBlock]
     let exercises: [Exercise]
     let exerciseCount: Int
-    let totalPlannedSets: Int
+    let totalPlannedWorkingSets: Int
+    let totalPlannedWarmupSets: Int
     let focusAreaSummary: String?
 
     init(
@@ -1954,9 +1960,8 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
                 )
             }
         exerciseCount = exercises.count + cardioBlocks.lazy.filter { $0.role == .main }.count
-        totalPlannedSets = exercises.reduce(0) { partialResult, exercise in
-            partialResult + exercise.plannedSetCount
-        }
+        totalPlannedWorkingSets = exercises.reduce(0) { $0 + $1.plannedWorkingSetCount }
+        totalPlannedWarmupSets = exercises.reduce(0) { $0 + $1.plannedWarmupSetCount }
 
         let focusAreas = Set(exercises.compactMap(\.focusArea).map(Self.normalizedFocusArea))
         if focusAreas.isEmpty {
@@ -1994,8 +1999,12 @@ private struct TemplateStartPreviewSheet: View {
         )
     }
 
-    private var totalPlannedSets: Int {
-        preview.totalPlannedSets
+    private var plannedSetBreakdown: String {
+        let working = "\(preview.totalPlannedWorkingSets) working"
+        guard preview.totalPlannedWarmupSets > 0 else {
+            return "\(working) set\(preview.totalPlannedWorkingSets == 1 ? "" : "s")"
+        }
+        return "\(working) · \(preview.totalPlannedWarmupSets) warm-up"
     }
 
     private var cardioCount: Int {
@@ -2171,7 +2180,7 @@ private struct TemplateStartPreviewSheet: View {
 
         WGJMetricPill(
             systemImage: "number.square",
-            value: "\(totalPlannedSets) sets",
+            value: plannedSetBreakdown,
             tint: WGJTheme.accentCyan
         )
 
@@ -2253,6 +2262,13 @@ private struct TemplateStartPreviewSheet: View {
                         Text(primaryPrescriptionText(for: exercise))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
+
+                        if let warmup = warmupPrescriptionText(for: exercise) {
+                            Text(warmup)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(WGJTheme.accentCyan)
+                                .lineLimit(1)
+                        }
 
                         if let secondary = secondaryPrescriptionText(for: exercise) {
                             Text(secondary)
@@ -2427,12 +2443,17 @@ private struct TemplateStartPreviewSheet: View {
     }
 
     private func primaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String {
-        let setCount = exercise.plannedSetCount
+        let setCount = exercise.plannedWorkingSetCount
         if let repSummary = repRangeSummary(for: exercise) {
             return "\(setCount)x \(repSummary)"
         }
 
-        return "\(setCount) set" + (setCount == 1 ? "" : "s")
+        return "\(setCount) working set" + (setCount == 1 ? "" : "s")
+    }
+
+    private func warmupPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String? {
+        let count = exercise.plannedWarmupSetCount
+        return count > 0 ? "\(count) warm-up" : nil
     }
 
     private func secondaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String? {
