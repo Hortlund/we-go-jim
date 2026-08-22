@@ -1,3 +1,4 @@
+import Photos
 import SwiftUI
 import UIKit
 
@@ -152,6 +153,72 @@ enum WorkoutShareCardRenderer {
         renderer.scale = 3
         renderer.isOpaque = true
         return renderer.uiImage
+    }
+}
+
+private enum WorkoutSharePhotoLibrarySaveError: Error {
+    case encodingFailed
+    case permissionDenied
+    case saveFailed
+}
+
+@MainActor
+private enum WorkoutSharePhotoLibrarySaver {
+    static func save(_ image: UIImage) async throws {
+        guard let imageData = image.pngData() else {
+            throw WorkoutSharePhotoLibrarySaveError.encodingFailed
+        }
+
+        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard authorization == .authorized || authorization == .limited else {
+            throw WorkoutSharePhotoLibrarySaveError.permissionDenied
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: imageData, options: nil)
+            } completionHandler: { didSave, error in
+                if didSave {
+                    continuation.resume()
+                } else {
+                    continuation.resume(
+                        throwing: error ?? WorkoutSharePhotoLibrarySaveError.saveFailed
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum WorkoutShareAlert: String, Identifiable {
+    case renderFailed
+    case saved
+    case photoPermissionDenied
+    case saveFailed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .renderFailed: "Couldn’t Create Workout Image"
+        case .saved: "Saved to Photos"
+        case .photoPermissionDenied: "Photos Access Needed"
+        case .saveFailed: "Couldn’t Save Image"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .renderFailed:
+            "The workout image could not be created. Please try again."
+        case .saved:
+            "Your workout image is now in your photo library."
+        case .photoPermissionDenied:
+            "Allow We Go Jim to add photos in Settings, then try again."
+        case .saveFailed:
+            "The workout image could not be saved. Please try again."
+        }
     }
 }
 
@@ -415,7 +482,8 @@ struct WorkoutSharePreviewSheet: View {
     let presentation: WorkoutSharePresentation
 
     @State private var shareSheetItem: WorkoutShareSheetItem?
-    @State private var showingRenderError = false
+    @State private var alert: WorkoutShareAlert?
+    @State private var isSavingImage = false
 
     var body: some View {
         NavigationStack {
@@ -441,34 +509,80 @@ struct WorkoutSharePreviewSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Button {
-                    shareStory()
-                } label: {
-                    Label("Share Story", systemImage: "square.and.arrow.up")
+                HStack(spacing: 12) {
+                    Button {
+                        saveStoryImage()
+                    } label: {
+                        Group {
+                            if isSavingImage {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                    Text("Saving…")
+                                }
+                            } else {
+                                Label("Save Image", systemImage: "square.and.arrow.down")
+                            }
+                        }
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(isSavingImage)
+                    .accessibilityIdentifier("workout-share-preview-save-image-button")
+
+                    Button {
+                        shareStory()
+                    } label: {
+                        Label("Share Story", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .accessibilityIdentifier("workout-share-preview-share-button")
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
                 .padding(16)
                 .background(.ultraThinMaterial)
-                .accessibilityIdentifier("workout-share-preview-share-button")
             }
         }
         .preferredColorScheme(.dark)
         .sheet(item: $shareSheetItem) { item in
             WGJActivityShareSheet(activityItems: [item.image])
         }
-        .alert("Couldn’t Share Workout", isPresented: $showingRenderError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("The workout story could not be created. Please try again.")
+        .alert(item: $alert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
         .accessibilityIdentifier("workout-share-preview")
     }
 
     @MainActor
+    private func saveStoryImage() {
+        guard !isSavingImage else { return }
+        guard let image = WorkoutShareCardRenderer.render(presentation) else {
+            alert = .renderFailed
+            return
+        }
+
+        isSavingImage = true
+        Task { @MainActor in
+            defer { isSavingImage = false }
+
+            do {
+                try await WorkoutSharePhotoLibrarySaver.save(image)
+                alert = .saved
+            } catch WorkoutSharePhotoLibrarySaveError.permissionDenied {
+                alert = .photoPermissionDenied
+            } catch {
+                alert = .saveFailed
+            }
+        }
+    }
+
+    @MainActor
     private func shareStory() {
         guard let image = WorkoutShareCardRenderer.render(presentation) else {
-            showingRenderError = true
+            alert = .renderFailed
             return
         }
         shareSheetItem = WorkoutShareSheetItem(image: image)
