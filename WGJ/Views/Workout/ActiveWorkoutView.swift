@@ -40,6 +40,7 @@ struct ActiveWorkoutView: View {
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
     @State private var scrollPositionTracker = ActiveWorkoutScrollPositionTracker()
+    @State private var scrollPosition = ScrollPosition(idType: ActiveWorkoutScrollTarget.self)
     @State private var didRestoreInitialScrollTarget = false
     @State private var isBatchingRenderProjectionRefresh = false
     @State private var needsBatchedRenderProjectionRefresh = false
@@ -96,7 +97,7 @@ struct ActiveWorkoutView: View {
     }
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
+        Group {
             ScrollView {
                 // Exercise cards can change height aggressively as set rows update, and a
                 // non-lazy stack keeps the scroll position stable during active logging.
@@ -104,11 +105,21 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            // Observe the nearest restore target without ever feeding it back as a
-            // programmatic scroll command. Explicit restoration uses scrollProxy.
-            .scrollPosition(id: scrollPositionTracker.binding(
-                isSuspended: isMetricInputFocused || isKeyboardVisible
-            ))
+            .scrollPosition($scrollPosition)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.visibleRect.minY)
+            } action: { _, offsetY in
+                scrollPositionTracker.record(
+                    offsetY: offsetY,
+                    isSuspended: isMetricInputFocused || isKeyboardVisible
+                )
+            }
+            .onChange(of: scrollPosition.viewID(type: ActiveWorkoutScrollTarget.self)) { _, target in
+                scrollPositionTracker.record(
+                    target: target,
+                    isSuspended: isMetricInputFocused || isKeyboardVisible
+                )
+            }
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -240,7 +251,7 @@ struct ActiveWorkoutView: View {
                 templateReviewSheet(for: preview)
             }
             .task {
-                await bootstrapIfNeeded(scrollProxy: scrollProxy)
+                await bootstrapIfNeeded()
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
@@ -1040,7 +1051,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func bootstrapIfNeeded(scrollProxy: ScrollViewProxy) async {
+    private func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         guard !isBootstrapping else { return }
         isBootstrapping = true
@@ -1067,12 +1078,23 @@ struct ActiveWorkoutView: View {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
         }
         hasBootstrapped = true
-        restoreInitialScrollTargetIfNeeded(using: scrollProxy)
+        restoreInitialScrollPositionIfNeeded()
     }
 
     @MainActor
-    private func restoreInitialScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
+    private func restoreInitialScrollPositionIfNeeded() {
         guard !didRestoreInitialScrollTarget else { return }
+        if let preparedOffsetY = activeWorkoutPresentationState.preparedScrollOffsetY(for: sessionID) {
+            didRestoreInitialScrollTarget = true
+            activeWorkoutPresentationState.stageScrollOffsetY(nil, for: sessionID)
+            activeWorkoutPresentationState.stageScrollTarget(nil, for: sessionID)
+            Task { @MainActor in
+                await Task.yield()
+                guard hasBootstrapped, !Task.isCancelled else { return }
+                scrollPosition.scrollTo(y: max(0, CGFloat(preparedOffsetY)))
+            }
+            return
+        }
         guard let preparedTarget = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
         guard let target = ActiveWorkoutScrollRestorePolicy.resolvedRestorableTarget(
             preparedTarget,
@@ -1090,7 +1112,7 @@ struct ActiveWorkoutView: View {
         Task { @MainActor in
             await Task.yield()
             guard hasBootstrapped, !Task.isCancelled else { return }
-            scrollToTarget(target, using: scrollProxy, animation: nil)
+            scrollToTarget(target, animation: nil)
         }
     }
 
@@ -2301,6 +2323,7 @@ struct ActiveWorkoutView: View {
             for: sessionID
         )
         activeWorkoutPresentationState.stageScrollTarget(minimizedScrollRestoreTarget(), for: sessionID)
+        activeWorkoutPresentationState.stageScrollOffsetY(currentScrollOffsetY(), for: sessionID)
         scheduleMinimizedDurableSnapshotSave(snapshot)
     }
 
@@ -2312,7 +2335,9 @@ struct ActiveWorkoutView: View {
 
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
         let scrollTarget = minimizedScrollRestoreTarget()
+        let scrollOffsetY = currentScrollOffsetY()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
+        _ = activeWorkoutCoordinator.send(.updateScrollOffsetY(scrollOffsetY), persist: false)
         _ = activeWorkoutCoordinator.send(.synchronize(
             session: snapshot,
             restTimer: restTimerSnapshot,
@@ -2335,6 +2360,11 @@ struct ActiveWorkoutView: View {
             isRestorable: isRestorableScrollTarget,
             hasSession: session != nil
         )
+    }
+
+    @MainActor
+    private func currentScrollOffsetY() -> Double? {
+        scrollPositionTracker.currentOffsetY.map(Double.init)
     }
 
     @MainActor
@@ -2722,14 +2752,17 @@ struct ActiveWorkoutView: View {
             pendingCardioCompletionsByID = [:]
             refreshRenderProjection()
             let scrollTarget = minimizedScrollRestoreTarget()
+            let scrollOffsetY = currentScrollOffsetY()
             let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
             activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+            activeWorkoutPresentationState.stageScrollOffsetY(scrollOffsetY, for: sessionID)
             activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
             return await flushCoordinatorSnapshot(
                 snapshot,
                 presentationMode: .presented,
                 scrollTarget: scrollTarget,
+                scrollOffsetY: scrollOffsetY,
                 expandedExerciseIDs: expandedExerciseIDs
             )
         }
@@ -2750,8 +2783,10 @@ struct ActiveWorkoutView: View {
         pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         let scrollTarget = minimizedScrollRestoreTarget()
+        let scrollOffsetY = currentScrollOffsetY()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+        activeWorkoutPresentationState.stageScrollOffsetY(scrollOffsetY, for: sessionID)
         activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
         guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: checkpoint) else {
             return true
@@ -2761,6 +2796,7 @@ struct ActiveWorkoutView: View {
             snapshot,
             presentationMode: .presented,
             scrollTarget: scrollTarget,
+            scrollOffsetY: scrollOffsetY,
             expandedExerciseIDs: expandedExerciseIDs
         )
     }
@@ -2770,8 +2806,10 @@ struct ActiveWorkoutView: View {
         _ snapshot: ActiveWorkoutRuntimeSession,
         presentationMode: ActiveWorkoutStoredPresentationMode,
         scrollTarget: ActiveWorkoutScrollTarget?,
+        scrollOffsetY: Double?,
         expandedExerciseIDs: Set<UUID>
     ) async -> Bool {
+        _ = activeWorkoutCoordinator.send(.updateScrollOffsetY(scrollOffsetY), persist: false)
         _ = activeWorkoutCoordinator.send(.synchronize(
             session: snapshot,
             restTimer: restTimerState.restTimerSnapshot(),
@@ -2876,10 +2914,13 @@ struct ActiveWorkoutView: View {
         pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         let scrollTarget = minimizedScrollRestoreTarget()
+        let scrollOffsetY = currentScrollOffsetY()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+        activeWorkoutPresentationState.stageScrollOffsetY(scrollOffsetY, for: sessionID)
         activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
+        _ = activeWorkoutCoordinator.send(.updateScrollOffsetY(scrollOffsetY), persist: false)
         let receipt = activeWorkoutCoordinator.send(.synchronize(
             session: snapshot,
             restTimer: restTimerState.restTimerSnapshot(),
@@ -2898,6 +2939,7 @@ struct ActiveWorkoutView: View {
         notes: String
     ) async throws -> ActiveWorkoutFinishResult {
         return try await WGJPerformance.measureAsync("active-workout.finish") {
+            _ = activeWorkoutCoordinator.send(.updateScrollOffsetY(currentScrollOffsetY()), persist: false)
             _ = activeWorkoutCoordinator.send(.synchronize(
                 session: session,
                 restTimer: restTimerState.restTimerSnapshot(),
@@ -2984,16 +3026,15 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func scrollToTarget(
         _ target: ActiveWorkoutScrollTarget,
-        using scrollProxy: ScrollViewProxy,
         anchor: UnitPoint = .top,
         animation: Animation? = nil
     ) {
         if let animation {
             withAnimation(animation) {
-                scrollProxy.scrollTo(target, anchor: anchor)
+                scrollPosition.scrollTo(id: target, anchor: anchor)
             }
         } else {
-            scrollProxy.scrollTo(target, anchor: anchor)
+            scrollPosition.scrollTo(id: target, anchor: anchor)
         }
     }
 

@@ -19,6 +19,7 @@ nonisolated enum ActiveWorkoutCommand: Sendable {
         scrollTarget: ActiveWorkoutScrollTarget?,
         expandedExerciseIDs: Set<UUID>
     )
+    case updateScrollOffsetY(Double?)
     case updateRestTimer(RestTimerSnapshot?)
     case cachePreviousPerformance([UUID: [Int: WorkoutPreviousSetSnapshot]])
     case synchronize(
@@ -361,6 +362,8 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             snapshot.presentationMode = mode
             snapshot.scrollTarget = scrollTarget
             snapshot.expandedExerciseIDs = expandedExerciseIDs
+        case .updateScrollOffsetY(let offsetY):
+            snapshot.scrollOffsetY = offsetY.map { max(0, $0) }
         case .updateRestTimer(let restTimer):
             snapshot.restTimer = restTimer?.isExpired == true ? nil : restTimer
         case .cachePreviousPerformance(let previousSetSnapshotsByExerciseID):

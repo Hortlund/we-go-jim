@@ -58,19 +58,23 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
             4
         )
         XCTAssertEqual(
+            coordinator.send(.updateScrollOffsetY(428.5)).revision,
+            5
+        )
+        XCTAssertEqual(
             coordinator.send(.appendExercise(makeExercise(
                 id: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
                 name: "Row",
                 sortOrder: 99
             ))).revision,
-            5
+            6
         )
 
         await coordinator.flushSnapshot()
 
         let recordedSnapshot = await store.lastSnapshot()
         let persisted = try XCTUnwrap(recordedSnapshot)
-        XCTAssertEqual(persisted.revision, 5)
+        XCTAssertEqual(persisted.revision, 6)
         XCTAssertEqual(persisted.session.name, "Push Updated")
         XCTAssertEqual(persisted.session.notes, "Strong")
         XCTAssertEqual(persisted.session.exercises.count, 2)
@@ -78,6 +82,7 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(persisted.session.exercises.first?.setDrafts, drafts)
         XCTAssertEqual(persisted.presentationMode, .collapsed)
         XCTAssertEqual(persisted.scrollTarget, .exercise(exerciseID))
+        XCTAssertEqual(persisted.scrollOffsetY, 428.5)
         XCTAssertEqual(persisted.expandedExerciseIDs, [exerciseID])
     }
 

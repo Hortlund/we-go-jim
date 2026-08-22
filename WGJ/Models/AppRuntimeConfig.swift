@@ -862,6 +862,7 @@ final class ActiveWorkoutPresentationState {
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
     @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
+    @ObservationIgnored private var preparedScrollOffsetYBySessionID: [UUID: Double] = [:]
     @ObservationIgnored private var preparedExpandedExerciseIDsBySessionID: [UUID: Set<UUID>] = [:]
 
     func present(sessionID: UUID) {
@@ -870,6 +871,7 @@ final class ActiveWorkoutPresentationState {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
                 preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
+                preparedScrollOffsetYBySessionID.removeValue(forKey: activeSessionID)
                 preparedExpandedExerciseIDsBySessionID.removeValue(forKey: activeSessionID)
             }
         }
@@ -906,6 +908,7 @@ final class ActiveWorkoutPresentationState {
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
+            preparedScrollOffsetYBySessionID.removeValue(forKey: activeSessionID)
             preparedExpandedExerciseIDsBySessionID.removeValue(forKey: activeSessionID)
         }
         activeSessionID = nil
@@ -940,6 +943,15 @@ final class ActiveWorkoutPresentationState {
         preparedScrollTargetBySessionID[sessionID] = target
     }
 
+    func stageScrollOffsetY(_ offsetY: Double?, for sessionID: UUID) {
+        guard let offsetY else {
+            preparedScrollOffsetYBySessionID.removeValue(forKey: sessionID)
+            return
+        }
+
+        preparedScrollOffsetYBySessionID[sessionID] = max(0, offsetY)
+    }
+
     func stageExpandedExerciseIDs(_ exerciseIDs: Set<UUID>, for sessionID: UUID) {
         guard !exerciseIDs.isEmpty else {
             preparedExpandedExerciseIDsBySessionID.removeValue(forKey: sessionID)
@@ -965,6 +977,10 @@ final class ActiveWorkoutPresentationState {
 
     func preparedScrollTarget(for sessionID: UUID) -> ActiveWorkoutScrollTarget? {
         preparedScrollTargetBySessionID[sessionID]
+    }
+
+    func preparedScrollOffsetY(for sessionID: UUID) -> Double? {
+        preparedScrollOffsetYBySessionID[sessionID]
     }
 
     func preparedPreviousPerformanceResolution(
@@ -1057,6 +1073,7 @@ final class ActiveWorkoutPresentationState {
             }
             activeSessionID = snapshot.session.id
             stageScrollTarget(snapshot.scrollTarget, for: snapshot.session.id)
+            stageScrollOffsetY(snapshot.scrollOffsetY, for: snapshot.session.id)
             stageExpandedExerciseIDs(
                 snapshot.expandedExerciseIDs,
                 for: snapshot.session.id
@@ -1406,24 +1423,9 @@ final class WorkoutFeedbackCenter {
     }
 }
 
-private struct WGJTabActiveKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-private struct WGJActiveWorkoutOverlayBottomInsetKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 0
-}
-
 extension EnvironmentValues {
-    var isTabActive: Bool {
-        get { self[WGJTabActiveKey.self] }
-        set { self[WGJTabActiveKey.self] = newValue }
-    }
-
-    var activeWorkoutOverlayBottomInset: CGFloat {
-        get { self[WGJActiveWorkoutOverlayBottomInsetKey.self] }
-        set { self[WGJActiveWorkoutOverlayBottomInsetKey.self] = newValue }
-    }
+    @Entry var isTabActive = false
+    @Entry var activeWorkoutOverlayBottomInset: CGFloat = 0
 }
 
 nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
@@ -1751,31 +1753,8 @@ final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDel
     }
 }
 
-private struct CloudSyncEnabledKey: EnvironmentKey {
-    static let defaultValue = true
-}
-
-private struct CloudSyncErrorDescriptionKey: EnvironmentKey {
-    static let defaultValue: String? = nil
-}
-
-private struct UserDataSyncStatusKey: EnvironmentKey {
-    static let defaultValue = UserDataSyncStatusSnapshot.localOnly(reason: nil)
-}
-
 extension EnvironmentValues {
-    var cloudSyncEnabled: Bool {
-        get { self[CloudSyncEnabledKey.self] }
-        set { self[CloudSyncEnabledKey.self] = newValue }
-    }
-
-    var cloudSyncErrorDescription: String? {
-        get { self[CloudSyncErrorDescriptionKey.self] }
-        set { self[CloudSyncErrorDescriptionKey.self] = newValue }
-    }
-
-    var userDataSyncStatus: UserDataSyncStatusSnapshot {
-        get { self[UserDataSyncStatusKey.self] }
-        set { self[UserDataSyncStatusKey.self] = newValue }
-    }
+    @Entry var cloudSyncEnabled = true
+    @Entry var cloudSyncErrorDescription: String? = nil
+    @Entry var userDataSyncStatus = UserDataSyncStatusSnapshot.localOnly(reason: nil)
 }

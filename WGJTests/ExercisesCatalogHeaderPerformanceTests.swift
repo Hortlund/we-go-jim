@@ -71,14 +71,4 @@ final class ExercisesCatalogHeaderPerformanceTests: XCTestCase {
         XCTAssertTrue(model.isCollapsed)
     }
 
-    func testFallbackAndScrollGeometryProduceEqualCollapsedState() {
-        let geometryModel = ExercisesCatalogHeaderPresentationModel()
-        let fallbackModel = ExercisesCatalogHeaderPresentationModel()
-
-        _ = geometryModel.consume(contentOffsetY: 52)
-        _ = fallbackModel.consumeFallback(markerY: 100)
-        _ = fallbackModel.consumeFallback(markerY: 48)
-
-        XCTAssertEqual(geometryModel.isCollapsed, fallbackModel.isCollapsed)
-    }
 }

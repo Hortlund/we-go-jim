@@ -178,7 +178,8 @@ struct ExercisesCatalogView: View {
                     ZStack(alignment: .topTrailing) {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
-                                scrollOffsetReader
+                                Color.clear
+                                    .frame(height: 1)
                                     .id(topAnchorID)
 
                                 if controller.projection.sections.isEmpty {
@@ -213,11 +214,12 @@ struct ExercisesCatalogView: View {
                             .padding(.trailing, contentTrailingPadding)
                             .padding(.bottom, 104)
                         }
-                        .coordinateSpace(name: ExercisesCatalogCoordinateSpace.scroll)
                         .scrollDismissesKeyboard(.interactively)
-                        .modifier(ExercisesCatalogScrollOffsetModifier { offset in
-                            headerPresentation.consume(contentOffsetY: offset)
-                        })
+                        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                            geometry.contentOffset.y + geometry.contentInsets.top
+                        } action: { _, offset in
+                            headerPresentation.consume(contentOffsetY: max(offset, 0))
+                        }
 
                         if activeFilterDropdown != nil {
                             Color.clear
@@ -282,11 +284,6 @@ struct ExercisesCatalogView: View {
             .onChange(of: searchState.sortDescending) { _, _ in
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
-            }
-            .onPreferenceChange(ExercisesCatalogScrollOffsetPreferenceKey.self) { offset in
-                if #unavailable(iOS 18.0) {
-                    headerPresentation.consumeFallback(markerY: offset)
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -433,16 +430,6 @@ struct ExercisesCatalogView: View {
                 createExerciseButton
             }
         }
-    }
-
-    private var scrollOffsetReader: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: ExercisesCatalogScrollOffsetPreferenceKey.self,
-                value: proxy.frame(in: .named(ExercisesCatalogCoordinateSpace.scroll)).minY
-            )
-        }
-        .frame(height: 1)
     }
 
     private var searchField: some View {
@@ -1287,34 +1274,6 @@ struct ExercisesCatalogSearchState: Equatable {
         includeUncurated = false
         sortDescending = false
         resetToken += 1
-    }
-}
-
-private struct ExercisesCatalogScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private enum ExercisesCatalogCoordinateSpace {
-    static let scroll = "ExercisesCatalogScroll"
-}
-
-private struct ExercisesCatalogScrollOffsetModifier: ViewModifier {
-    let onOffsetChange: (CGFloat) -> Void
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top
-            } action: { _, offset in
-                onOffsetChange(max(offset, 0))
-            }
-        } else {
-            content
-        }
     }
 }
 

@@ -19,13 +19,6 @@ nonisolated struct AppStorageRecoveryState: Equatable, Sendable {
     var canMutateUserData: Bool { false }
 }
 
-private struct AppPersistenceModeKey: EnvironmentKey {
-    static let defaultValue: AppPersistenceMode = .durable
-}
-
 extension EnvironmentValues {
-    var appPersistenceMode: AppPersistenceMode {
-        get { self[AppPersistenceModeKey.self] }
-        set { self[AppPersistenceModeKey.self] = newValue }
-    }
+    @Entry var appPersistenceMode: AppPersistenceMode = .durable
 }

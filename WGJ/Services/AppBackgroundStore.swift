@@ -103,13 +103,6 @@ actor AppBackgroundStore {
     }
 }
 
-private struct AppBackgroundStoreKey: EnvironmentKey {
-    static let defaultValue: AppBackgroundStore? = nil
-}
-
 extension EnvironmentValues {
-    var appBackgroundStore: AppBackgroundStore? {
-        get { self[AppBackgroundStoreKey.self] }
-        set { self[AppBackgroundStoreKey.self] = newValue }
-    }
+    @Entry var appBackgroundStore: AppBackgroundStore? = nil
 }

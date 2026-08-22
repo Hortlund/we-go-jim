@@ -100,6 +100,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     var restTimer: RestTimerSnapshot?
     var presentationMode: ActiveWorkoutStoredPresentationMode?
     var scrollTarget: ActiveWorkoutScrollTarget?
+    var scrollOffsetY: Double?
     var expandedExerciseIDs: Set<UUID>
     var previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
 
@@ -109,6 +110,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
+        scrollOffsetY: Double? = nil,
         expandedExerciseIDs: Set<UUID> = [],
         previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     ) {
@@ -117,6 +119,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         self.restTimer = restTimer
         self.presentationMode = presentationMode
         self.scrollTarget = scrollTarget
+        self.scrollOffsetY = scrollOffsetY.map { max(0, $0) }
         self.expandedExerciseIDs = expandedExerciseIDs
         self.previousSetSnapshotsByExerciseID = previousSetSnapshotsByExerciseID
     }
@@ -127,6 +130,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         case restTimer
         case presentationMode
         case scrollTarget
+        case scrollOffsetY
         case expandedExerciseIDs
         case previousSetSnapshotsByExerciseID
     }
@@ -138,6 +142,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         restTimer = try container.decodeIfPresent(RestTimerSnapshot.self, forKey: .restTimer)
         presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
         scrollTarget = try container.decodeIfPresent(ActiveWorkoutScrollTarget.self, forKey: .scrollTarget)
+        scrollOffsetY = try container.decodeIfPresent(Double.self, forKey: .scrollOffsetY).map { max(0, $0) }
         expandedExerciseIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .expandedExerciseIDs) ?? []
         previousSetSnapshotsByExerciseID = try container.decodeIfPresent(
             [UUID: [Int: WorkoutPreviousSetSnapshot]].self,
@@ -771,6 +776,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
                 scrollTarget: storedSnapshot.scrollTarget,
+                scrollOffsetY: storedSnapshot.scrollOffsetY,
                 expandedExerciseIDs: storedSnapshot.expandedExerciseIDs,
                 previousSetSnapshotsByExerciseID: storedSnapshot.previousSetSnapshotsByExerciseID
             )
@@ -797,6 +803,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             restTimer: snapshot.restTimer?.isExpired == true ? nil : snapshot.restTimer,
             presentationMode: snapshot.presentationMode,
             scrollTarget: snapshot.scrollTarget,
+            scrollOffsetY: snapshot.scrollOffsetY,
             expandedExerciseIDs: snapshot.expandedExerciseIDs,
             previousSetSnapshotsByExerciseID: snapshot.previousSetSnapshotsByExerciseID
         )
@@ -835,11 +842,13 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
+        scrollOffsetY: Double? = nil,
         expandedExerciseIDs: Set<UUID>? = nil,
         previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]? = nil,
         preservesExistingRestTimer: Bool = true,
         preservesExistingPresentationMode: Bool = true,
         preservesExistingScrollTarget: Bool = true,
+        preservesExistingScrollOffset: Bool = true,
         preservesExistingExpandedExerciseIDs: Bool = true,
         preservesExistingPreviousSetSnapshots: Bool = true
     ) throws -> ActiveWorkoutSnapshotWriteResult {
@@ -854,6 +863,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         let existingSnapshot = preservesExistingRestTimer
             || preservesExistingPresentationMode
             || preservesExistingScrollTarget
+            || preservesExistingScrollOffset
             || preservesExistingExpandedExerciseIDs
             || preservesExistingPreviousSetSnapshots
             ? (try? loadStoredSnapshot())
@@ -863,6 +873,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             ? existingSnapshot?.presentationMode
             : nil
         let existingScrollTarget = preservesExistingScrollTarget ? existingSnapshot?.scrollTarget : nil
+        let existingScrollOffsetY = preservesExistingScrollOffset ? existingSnapshot?.scrollOffsetY : nil
         let existingExpandedExerciseIDs = preservesExistingExpandedExerciseIDs ? existingSnapshot?.expandedExerciseIDs : nil
         let existingPreviousSetSnapshots = preservesExistingPreviousSetSnapshots
             ? existingSnapshot?.previousSetSnapshotsByExerciseID
@@ -870,6 +881,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         let resolvedRestTimer = restTimer ?? existingRestTimer
         let resolvedPresentationMode = presentationMode ?? existingPresentationMode
         let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
+        let resolvedScrollOffsetY = scrollOffsetY ?? existingScrollOffsetY
         let resolvedExpandedExerciseIDs = expandedExerciseIDs ?? existingExpandedExerciseIDs ?? []
         let resolvedPreviousSetSnapshots = previousSetSnapshotsByExerciseID ?? existingPreviousSetSnapshots ?? [:]
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
@@ -878,6 +890,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
             presentationMode: resolvedPresentationMode,
             scrollTarget: resolvedScrollTarget,
+            scrollOffsetY: resolvedScrollOffsetY,
             expandedExerciseIDs: resolvedExpandedExerciseIDs,
             previousSetSnapshotsByExerciseID: resolvedPreviousSetSnapshots
         )
