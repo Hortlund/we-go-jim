@@ -2,6 +2,11 @@ import Foundation
 import OSLog
 import SwiftData
 
+nonisolated struct WorkoutSessionPageCursor: Equatable, Sendable {
+    let completedAt: Date
+    let sessionID: UUID
+}
+
 nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
     var reps: Int?
     var weight: Double?
@@ -437,6 +442,19 @@ nonisolated final class WorkoutSessionRepository {
             excludingSessionID: nil,
             includeArchived: includeArchived,
             limit: limit
+        )
+    }
+
+    func completedSessions(
+        after cursor: WorkoutSessionPageCursor?,
+        limit: Int,
+        includeArchived: Bool = false
+    ) throws -> [WorkoutSession] {
+        guard limit > 0 else { return [] }
+        return try completedSessionPage(
+            after: cursor,
+            limit: limit,
+            includeArchived: includeArchived
         )
     }
 
@@ -1217,6 +1235,100 @@ nonisolated final class WorkoutSessionRepository {
             return Array(orderedSessions.prefix(limit))
         }
         return orderedSessions
+    }
+
+    private func completedSessionPage(
+        after cursor: WorkoutSessionPageCursor?,
+        limit: Int,
+        includeArchived: Bool
+    ) throws -> [WorkoutSession] {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let endedDescriptor: FetchDescriptor<WorkoutSession>
+        let legacyDescriptor: FetchDescriptor<WorkoutSession>
+
+        if let cursor {
+            let cursorDate = cursor.completedAt
+            let cursorID = cursor.sessionID
+            if includeArchived {
+                endedDescriptor = FetchDescriptor(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.endedAt != nil
+                            && ((session.endedAt ?? session.startedAt) < cursorDate
+                                || ((session.endedAt ?? session.startedAt) == cursorDate && session.id > cursorID))
+                    },
+                    sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+                )
+                legacyDescriptor = FetchDescriptor(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.endedAt == nil
+                            && (session.startedAt < cursorDate
+                                || (session.startedAt == cursorDate && session.id > cursorID))
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+                )
+            } else {
+                endedDescriptor = FetchDescriptor(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                            && session.endedAt != nil
+                            && ((session.endedAt ?? session.startedAt) < cursorDate
+                                || ((session.endedAt ?? session.startedAt) == cursorDate && session.id > cursorID))
+                    },
+                    sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+                )
+                legacyDescriptor = FetchDescriptor(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                            && session.endedAt == nil
+                            && (session.startedAt < cursorDate
+                                || (session.startedAt == cursorDate && session.id > cursorID))
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+                )
+            }
+        } else if includeArchived {
+            endedDescriptor = FetchDescriptor(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus && session.endedAt != nil
+                },
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+            )
+            legacyDescriptor = FetchDescriptor(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus && session.endedAt == nil
+                },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+            )
+        } else {
+            endedDescriptor = FetchDescriptor(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.archivedAt == nil
+                        && session.endedAt != nil
+                },
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+            )
+            legacyDescriptor = FetchDescriptor(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.archivedAt == nil
+                        && session.endedAt == nil
+                },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse), SortDescriptor(\.id, order: .forward)]
+            )
+        }
+
+        var limitedEndedDescriptor = endedDescriptor
+        limitedEndedDescriptor.fetchLimit = limit
+        var limitedLegacyDescriptor = legacyDescriptor
+        limitedLegacyDescriptor.fetchLimit = limit
+        let candidates = try modelContext.fetch(limitedEndedDescriptor)
+            + modelContext.fetch(limitedLegacyDescriptor)
+        return Array(Self.orderedByDisplayedCompletionDate(candidates).prefix(limit))
     }
 
     private static func orderedByDisplayedCompletionDate(_ sessions: [WorkoutSession]) -> [WorkoutSession] {

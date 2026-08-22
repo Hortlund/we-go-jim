@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 
 nonisolated struct UserSettingsDraft: Equatable, Sendable {
     var weeklyWorkoutGoal: Int
@@ -269,6 +270,42 @@ nonisolated struct RevisionedSettingsCommit: Equatable, Sendable {
     let persistedDraft: UserSettingsDraft
 }
 
+nonisolated enum SettingsSaveBoundaryPlan: Equatable, Sendable {
+    case immediateBackup
+    case calorieBackfill
+
+    static func plan(for patch: UserSettingsPatch) -> Self {
+        patch.showsCalorieEstimates == true ? .calorieBackfill : .immediateBackup
+    }
+}
+
+nonisolated struct SettingsSaveBoundaryEffects: Sendable {
+    let didPersist: @Sendable (RevisionedSettingsCommit) async -> Void
+
+    static let none = SettingsSaveBoundaryEffects { _ in }
+
+    static func live(
+        backgroundStore: AppBackgroundStore,
+        container: ModelContainer
+    ) -> Self {
+        SettingsSaveBoundaryEffects { commit in
+            switch SettingsSaveBoundaryPlan.plan(for: commit.write.patch) {
+            case .immediateBackup:
+                BoundaryCloudBackupScheduler.exportBestEffort(
+                    container: container,
+                    reason: .settingsSaved
+                )
+            case .calorieBackfill:
+                WorkoutCalorieBackfillScheduler.schedule(
+                    backgroundStore: backgroundStore,
+                    container: container,
+                    reason: .settingsSaved
+                )
+            }
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class SettingsDraftCoordinator {
@@ -282,12 +319,19 @@ final class SettingsDraftCoordinator {
     @ObservationIgnored private var lastPersistedDraft: UserSettingsDraft?
 
     func configure(
+        boundaryEffects: SettingsSaveBoundaryEffects = .none,
         persist: @escaping OrderedSettingsWriter.Persist
     ) {
         guard writer == nil else { return }
         writer = OrderedSettingsWriter(
             persist: persist,
             onCommit: { [weak self] revision, write, draft in
+                let commit = RevisionedSettingsCommit(
+                    revision: revision,
+                    write: write,
+                    persistedDraft: draft
+                )
+                await boundaryEffects.didPersist(commit)
                 await self?.receiveCommit(revision: revision, write: write, draft: draft)
             },
             onFailure: { [weak self] _, description in

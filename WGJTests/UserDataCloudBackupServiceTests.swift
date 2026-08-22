@@ -1397,6 +1397,77 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(nextPage.map(\.id), [earlierCompletedID])
     }
 
+    func testCompletedSessionCursorDoesNotSkipMatchingCompletionTimestamps() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let completionDate = Date(timeIntervalSince1970: 500)
+        let orderedIDs = [
+            UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
+            UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+        ]
+        for id in orderedIDs {
+            context.insert(WorkoutSession(
+                id: id,
+                name: id.uuidString,
+                status: .completed,
+                startedAt: completionDate.addingTimeInterval(-100),
+                endedAt: completionDate
+            ))
+        }
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let firstPage = try repository.completedSessions(after: nil, limit: 2)
+        let cursor = WorkoutSessionPageCursor(
+            completedAt: try XCTUnwrap(firstPage.last?.endedAt),
+            sessionID: try XCTUnwrap(firstPage.last?.id)
+        )
+        let secondPage = try repository.completedSessions(after: cursor, limit: 2)
+
+        XCTAssertEqual(firstPage.map(\.id), Array(orderedIDs.prefix(2)))
+        XCTAssertEqual(secondPage.map(\.id), [orderedIDs[2]])
+    }
+
+    func testCompletedSessionPageMergesLegacyAndEndedDatesInDisplayOrder() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let expectedIDs = [
+            UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
+            UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+        ]
+        context.insert(WorkoutSession(
+            id: expectedIDs[0],
+            name: "Legacy newest",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 600),
+            endedAt: nil
+        ))
+        context.insert(WorkoutSession(
+            id: expectedIDs[1],
+            name: "Ended middle",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 500)
+        ))
+        context.insert(WorkoutSession(
+            id: expectedIDs[2],
+            name: "Legacy oldest",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 400),
+            endedAt: nil
+        ))
+        try context.save()
+
+        let page = try WorkoutSessionRepository(modelContext: context)
+            .completedSessions(after: nil, limit: 3)
+
+        XCTAssertEqual(page.map(\.id), expectedIDs)
+    }
+
     func testWorkoutHeatmapCatalogMappingsCanBeScopedToWorkoutExercises() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -1890,6 +1961,45 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(comparison.exerciseComparisons.first?.exerciseName, "Leg Press")
         XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .up)
         XCTAssertEqual(comparison.currentWorkout.completedSetCount, 1)
+    }
+
+    func testProgressLoaderReturnsInsufficientHistoryWithNoCompletedWorkouts() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let snapshot = try WorkoutProgressSnapshotLoader.load(
+            modelContext: context,
+            selectedPreviousSessionID: nil,
+            selectedCurrentSessionID: nil
+        )
+
+        XCTAssertEqual(snapshot.state, .insufficientHistory(availableWorkoutCount: 0))
+        XCTAssertTrue(snapshot.workoutOptions.isEmpty)
+    }
+
+    func testProgressLoaderReturnsInsufficientHistoryWithOneCompletedWorkout() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Only Workout",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        try context.save()
+
+        let snapshot = try WorkoutProgressSnapshotLoader.load(
+            modelContext: context,
+            selectedPreviousSessionID: nil,
+            selectedCurrentSessionID: nil
+        )
+
+        XCTAssertEqual(snapshot.state, .insufficientHistory(availableWorkoutCount: 1))
+        XCTAssertEqual(snapshot.workoutOptions.map(\.sessionID), [sessionID])
     }
 
     func testHistoryDetailMuscleHeatmapUsesSessionSetIDs() throws {

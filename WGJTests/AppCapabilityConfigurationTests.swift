@@ -96,6 +96,8 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             "WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;",
             "WGJ_APP_ENVIRONMENT = development;",
             "WGJ_APP_ENVIRONMENT = production;",
+            "WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;",
+            "WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;",
             "WGJ_URL_SCHEME = \"wgj-dev\";",
             "WGJ_URL_SCHEME = wgj;",
         ] {
@@ -104,6 +106,8 @@ final class AppCapabilityConfigurationTests: XCTestCase {
 
         XCTAssertTrue(developmentScheme.contains("buildConfiguration = \"Debug\""))
         XCTAssertTrue(productionScheme.contains("<LaunchAction\n      buildConfiguration = \"Release\""))
+        XCTAssertEqual(developmentScheme.components(separatedBy: "buildForAnalyzing = \"YES\"").count - 1, 1)
+        XCTAssertEqual(productionScheme.components(separatedBy: "buildForAnalyzing = \"YES\"").count - 1, 1)
         XCTAssertEqual(project.components(separatedBy: "MARKETING_VERSION = 1.4.0;").count - 1, 4)
     }
 

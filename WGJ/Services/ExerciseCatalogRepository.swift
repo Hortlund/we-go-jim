@@ -28,15 +28,25 @@ enum ExerciseCatalogRepositoryError: LocalizedError, Equatable {
     }
 }
 
+nonisolated struct ExerciseCatalogSaveBoundaryEffects: Sendable {
+    let scheduleBackup: @Sendable (ModelContainer, BoundaryCloudBackupReason) -> Void
+
+    static let live = ExerciseCatalogSaveBoundaryEffects { container, reason in
+        BoundaryCloudBackupScheduler.exportBestEffort(container: container, reason: reason)
+    }
+}
+
 nonisolated final class ExerciseCatalogRepository {
     private let syncService: ExerciseCatalogSyncService
     private let searchService: ExerciseSearchService
     private let imageCacheService: ExerciseImageCacheService
     private let modelContext: ModelContext
+    private let boundaryEffects: ExerciseCatalogSaveBoundaryEffects
 
     init(
         modelContext: ModelContext,
-        seedLoader: ExerciseSeedLoading
+        seedLoader: ExerciseSeedLoading,
+        boundaryEffects: ExerciseCatalogSaveBoundaryEffects = .live
     ) {
         self.modelContext = modelContext
         self.syncService = ExerciseCatalogSyncService(
@@ -45,17 +55,23 @@ nonisolated final class ExerciseCatalogRepository {
         )
         self.searchService = ExerciseSearchService(modelContext: modelContext)
         self.imageCacheService = ExerciseImageCacheService()
+        self.boundaryEffects = boundaryEffects
     }
 
-    convenience init(modelContext: ModelContext) {
+    convenience init(
+        modelContext: ModelContext,
+        boundaryEffects: ExerciseCatalogSaveBoundaryEffects = .live
+    ) {
         self.init(
             modelContext: modelContext,
-            seedLoader: BundleExerciseSeedLoader()
+            seedLoader: BundleExerciseSeedLoader(),
+            boundaryEffects: boundaryEffects
         )
     }
 
     private func saveUserDataChanges() throws {
         try modelContext.save()
+        boundaryEffects.scheduleBackup(modelContext.container, .customExerciseSaved)
     }
 
     func ensureSeedImportedIfNeeded() throws {

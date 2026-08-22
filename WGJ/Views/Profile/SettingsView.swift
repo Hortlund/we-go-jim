@@ -711,7 +711,13 @@ struct SettingsView: View {
 
     private func configureSettingsPersistenceIfNeeded() {
         let backgroundStore = settingsBackgroundStore
-        settingsPersistenceCoordinator.configure { write in
+        let container = modelContext.container
+        settingsPersistenceCoordinator.configure(
+            boundaryEffects: .live(
+                backgroundStore: backgroundStore,
+                container: container
+            )
+        ) { write in
             try await backgroundStore.perform("settings.patch.save") { backgroundContext in
                 try ProfileRepository(modelContext: backgroundContext)
                     .applySettingsPatch(write.patch)
@@ -729,23 +735,16 @@ struct SettingsView: View {
         if commit.write.patch.weeklyWorkoutGoal != nil {
             applyWeeklyGoalSave(commit.persistedDraft.weeklyWorkoutGoal)
         }
-        if let isEnabled = commit.write.patch.showsCalorieEstimates {
-            applyCalorieEstimatePreferenceCommit(isEnabled: isEnabled)
+        if commit.write.patch.showsCalorieEstimates != nil {
+            invalidateCaloriePresentation()
         }
     }
 
     @MainActor
-    private func applyCalorieEstimatePreferenceCommit(isEnabled: Bool) {
+    private func invalidateCaloriePresentation() {
         let container = modelContext.container
         HistoryAnalyticsCache.shared.invalidate(container: container)
         WorkoutHistoryChangeBroadcaster.post()
-
-        guard isEnabled else { return }
-        WorkoutCalorieBackfillScheduler.schedule(
-            backgroundStore: settingsBackgroundStore,
-            container: container,
-            reason: .settingsSaved
-        )
     }
 
     @MainActor

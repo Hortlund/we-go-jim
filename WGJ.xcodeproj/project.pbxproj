@@ -654,7 +654,7 @@
 				WGJ_APP_DISPLAY_NAME = "We Go Jim Dev";
 				WGJ_APP_ENVIRONMENT = development;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
-				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
+				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;
 				WGJ_URL_SCHEME = "wgj-dev";
 			};
 			name = Debug;
