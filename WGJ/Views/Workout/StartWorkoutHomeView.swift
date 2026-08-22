@@ -217,18 +217,12 @@ struct StartWorkoutHomeView: View {
     }
 
     private var quickStartSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 14) {
-                    quickStartCopy
-                    Spacer(minLength: 0)
-                    startEmptyWorkoutButton
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            quickStartCopy
 
-                VStack(alignment: .leading, spacing: 12) {
-                    quickStartCopy
-                    startEmptyWorkoutButton
-                }
+            HStack {
+                startEmptyWorkoutButton
+                Spacer(minLength: 0)
             }
         }
         .padding(14)
@@ -264,30 +258,16 @@ struct StartWorkoutHomeView: View {
     }
 
     private var templateWorkspaceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 14) {
-                    WGJSectionHeader(
-                        "Template Library",
-                        subtitle: "Create or pick a saved template."
-                    )
+        VStack(alignment: .leading, spacing: 14) {
+            WGJSectionHeader(
+                "Template Library",
+                subtitle: "Create or pick a saved template."
+            )
 
-                    Spacer(minLength: 0)
-
-                    addTemplateButton
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    WGJSectionHeader(
-                        "Template Library",
-                        subtitle: "Create or pick a saved template."
-                    )
-
-                    addTemplateButton
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                addTemplateButton
+                templateLibraryUtilityRow
             }
-
-            templateLibraryUtilityRow
         }
         .padding(14)
         .wgjCardContainer(strong: true)

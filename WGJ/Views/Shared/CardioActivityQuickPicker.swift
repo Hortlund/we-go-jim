@@ -85,7 +85,7 @@ struct CardioActivityQuickPicker: View {
 
     let onSelect: (ExerciseCatalogSelection) -> Void
 
-    @State private var path: [Destination] = []
+    @State private var path = NavigationPath()
 
     private enum Destination: Hashable {
         case catalog
@@ -116,16 +116,16 @@ struct CardioActivityQuickPicker: View {
 
                     VStack(spacing: 10) {
                         Button {
-                            path.append(.catalog)
+                            path.append(Destination.catalog)
                         } label: {
-                            Label("More Cardio", systemImage: "list.bullet.magnifyingglass")
+                            Label("More Cardio", systemImage: "list.bullet")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(WGJPrimaryButtonStyle())
                         .accessibilityIdentifier("cardio-quick-picker-more")
 
                         Button {
-                            path.append(.custom)
+                            path.append(Destination.custom)
                         } label: {
                             Label("Create Custom Cardio", systemImage: "square.and.pencil")
                                 .frame(maxWidth: .infinity)

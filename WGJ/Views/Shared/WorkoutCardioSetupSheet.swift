@@ -310,11 +310,22 @@ struct WorkoutCardioSetupSheet: View {
     @ViewBuilder
     private var presetTimeButtons: some View {
         ForEach([5, 10, 20], id: \.self) { minutes in
+            let isSelected = isSelectedPreset(minutes)
+
             Button("\(minutes) min") {
                 draft.durationMinutesText = String(minutes)
             }
-            .buttonStyle(WGJGhostButtonStyle())
+            .buttonStyle(WGJSelectableButtonStyle(isSelected: isSelected))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityIdentifier("cardio-setup-duration-preset-\(minutes)")
         }
+    }
+
+    private func isSelectedPreset(_ minutes: Int) -> Bool {
+        WorkoutCardioSetupNumericCodec.durationSeconds(
+            fromMinutesText: draft.durationMinutesText,
+            locale: .current
+        ) == minutes * 60
     }
 
     private func save() {
