@@ -91,8 +91,11 @@ struct StartWorkoutHomeView: View {
                     onEdit: {
                         editTemplate(templateID: preview.templateID, folderID: preview.folderID)
                     },
-                    onExport: {
-                        presentExportOptions(for: .template(preview.templateID))
+                    onExport: { format in
+                        try await makeExportFile(
+                            target: .template(preview.templateID),
+                            format: format
+                        )
                     }
                 )
             }
@@ -1209,19 +1212,42 @@ struct StartWorkoutHomeView: View {
         let backgroundStore = startWorkoutBackgroundStore
         Task.detached(priority: .utility) {
             do {
-                let fileURL = try await backgroundStore.performWrite("start-workout.template.export") { backgroundContext in
-                    let transferService = TemplateTransferService(modelContext: backgroundContext)
-
-                    switch target {
-                    case .template(let templateID):
-                        return try transferService.writeExportFile(templateID: templateID, format: format)
-                    case .folder(let folderID):
-                        return try transferService.writeExportFile(folderID: folderID, format: format)
-                    }
-                }
+                let fileURL = try await Self.makeExportFile(
+                    target: target,
+                    format: format,
+                    backgroundStore: backgroundStore
+                )
                 await presentShareSheet(fileURL: fileURL)
             } catch {
                 await showError(error)
+            }
+        }
+    }
+
+    private func makeExportFile(
+        target: TemplateTransferShareTarget,
+        format: TemplateTransferExportFormat
+    ) async throws -> URL {
+        try await Self.makeExportFile(
+            target: target,
+            format: format,
+            backgroundStore: startWorkoutBackgroundStore
+        )
+    }
+
+    nonisolated private static func makeExportFile(
+        target: TemplateTransferShareTarget,
+        format: TemplateTransferExportFormat,
+        backgroundStore: AppBackgroundStore
+    ) async throws -> URL {
+        try await backgroundStore.performWrite("start-workout.template.export") { backgroundContext in
+            let transferService = TemplateTransferService(modelContext: backgroundContext)
+
+            switch target {
+            case .template(let templateID):
+                return try transferService.writeExportFile(templateID: templateID, format: format)
+            case .folder(let folderID):
+                return try transferService.writeExportFile(folderID: folderID, format: format)
             }
         }
     }
@@ -1992,10 +2018,16 @@ private struct TemplateStartPreviewSheet: View {
     let isStarting: Bool
     let onStart: () -> Void
     let onEdit: () -> Void
-    let onExport: () -> Void
+    let onExport: (TemplateTransferExportFormat) async throws -> URL
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var showingExportOptions = false
+    @State private var shareSheetItem: TemplateTransferShareSheetItem?
+    @State private var isExporting = false
+    @State private var exportErrorMessage = ""
+    @State private var showingExportError = false
 
     private var orderedExercises: [StartWorkoutTemplatePreview.Exercise] {
         preview.exercises
@@ -2066,22 +2098,72 @@ private struct TemplateStartPreviewSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
-                    .disabled(isStarting)
+                    .disabled(isStarting || isExporting)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        dismiss()
-                        onExport()
+                        showingExportOptions = true
                     } label: {
                         Label("Export / Share", systemImage: "square.and.arrow.up")
                     }
-                    .disabled(isStarting)
+                    .confirmationDialog(
+                        "Export / Share",
+                        isPresented: $showingExportOptions,
+                        titleVisibility: .visible
+                    ) {
+                        Button("WGJ Template File") {
+                            exportPreview(format: .bundle)
+                        }
+                        Button("JSON") {
+                            exportPreview(format: .json)
+                        }
+                        Button("Text") {
+                            exportPreview(format: .text)
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Choose a format to export or share this item.")
+                    }
+                    .disabled(isStarting || isExporting)
                     .accessibilityIdentifier("template-preview-export-button")
                 }
             }
         }
+        .sheet(item: $shareSheetItem) { sheet in
+            WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
+                cleanupExportedFile(at: sheet.fileURL)
+            }
+        }
+        .alert("Template Export Error", isPresented: $showingExportError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(exportErrorMessage)
+        }
         .presentationDetents([.large])
+        .interactiveDismissDisabled(isStarting || isExporting)
+    }
+
+    private func exportPreview(format: TemplateTransferExportFormat) {
+        guard !isExporting else { return }
+
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            do {
+                let fileURL = try await onExport(format)
+                shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
+            } catch {
+                exportErrorMessage = String(describing: error)
+                showingExportError = true
+            }
+        }
+    }
+
+    private func cleanupExportedFile(at fileURL: URL) {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     @ViewBuilder
