@@ -33,6 +33,8 @@ nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
 }
 
 nonisolated enum ActiveWorkoutKeyboardChromePolicy {
+    static let metricInputClearanceHeight: CGFloat = 56
+
     static func shouldResetKeyboardState(scenePhase: ScenePhase) -> Bool {
         scenePhase != .active
     }
@@ -45,6 +47,10 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         scenePhase: ScenePhase = .active
     ) -> Bool {
         scenePhase == .active && hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
+    }
+
+    static func shouldReserveMetricInputClearance(isMetricInputFocused: Bool) -> Bool {
+        isMetricInputFocused
     }
 
     static func shouldAnimateTimerDockVisibilityChange(

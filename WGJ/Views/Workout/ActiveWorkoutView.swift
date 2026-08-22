@@ -3961,6 +3961,10 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                     onDismissRestTimer: onDismissRestTimer
                 )
                 .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
+            } else if shouldReserveMetricInputClearance {
+                Color.clear
+                    .frame(height: ActiveWorkoutKeyboardChromePolicy.metricInputClearanceHeight)
+                    .accessibilityHidden(true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
@@ -3975,6 +3979,12 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             isKeyboardVisible: isKeyboardVisible,
             isMetricInputFocused: isMetricInputFocused,
             scenePhase: scenePhase
+        )
+    }
+
+    private var shouldReserveMetricInputClearance: Bool {
+        ActiveWorkoutKeyboardChromePolicy.shouldReserveMetricInputClearance(
+            isMetricInputFocused: isMetricInputFocused
         )
     }
 }
