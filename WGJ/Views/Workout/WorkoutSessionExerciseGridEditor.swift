@@ -2020,9 +2020,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
-        if #available(iOS 18.0, *) {
-            transaction.scrollContentOffsetAdjustmentBehavior = .disabled
-        }
+        transaction.scrollContentOffsetAdjustmentBehavior = .disabled
 
         if !manualCompletionMode {
             var autoCompletedDrafts = updatedDrafts

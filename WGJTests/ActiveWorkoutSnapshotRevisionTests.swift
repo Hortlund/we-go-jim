@@ -17,6 +17,7 @@ final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded.revision, 0)
+        XCTAssertNil(decoded.scrollOffsetY)
         XCTAssertTrue(decoded.previousSetSnapshotsByExerciseID.isEmpty)
     }
 
@@ -27,6 +28,7 @@ final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
         let snapshot = ActiveWorkoutStoredSnapshot(
             revision: 3,
             session: ActiveWorkoutRuntimeSession(name: "Push"),
+            scrollOffsetY: 428.5,
             previousSetSnapshotsByExerciseID: [exerciseID: [0: previousSet]]
         )
 
@@ -38,6 +40,7 @@ final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
         let restored = try await coldStore.loadStoredSnapshot()
 
         XCTAssertEqual(restored?.previousSetSnapshotsByExerciseID[exerciseID]?[0], previousSet)
+        XCTAssertEqual(restored?.scrollOffsetY, 428.5)
     }
 
     func testOlderRevisionCannotOverwriteNewerDiskSnapshot() async throws {

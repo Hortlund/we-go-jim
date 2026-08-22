@@ -451,22 +451,9 @@ private struct WGJWidgetBrandBadge: View {
 
     @ViewBuilder
     private var fullColorLogo: some View {
-        if #available(iOS 18.0, *) {
-            Image("WidgetLogo")
-                .resizable()
-                .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.fullColor)
-                .scaledToFit()
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
-                .accessibilityHidden(true)
-        } else {
-            logoImage
-        }
-    }
-
-    private var logoImage: some View {
         Image("WidgetLogo")
             .resizable()
+            .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.fullColor)
             .scaledToFit()
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
@@ -475,17 +462,13 @@ private struct WGJWidgetBrandBadge: View {
 
     @ViewBuilder
     private var adaptedLogo: some View {
-        if #available(iOS 18.0, *) {
-            Image("WidgetLogo")
-                .resizable()
-                .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.desaturated)
-                .scaledToFit()
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
-                .accessibilityHidden(true)
-        } else {
-            logoImage
-        }
+        Image("WidgetLogo")
+            .resizable()
+            .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.desaturated)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

@@ -28,25 +28,24 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
         )
     }
 
-    func testBindingStoresLatestScrollTarget() {
+    func testTargetTrackingStoresLatestScrollTarget() {
         let tracker = ActiveWorkoutScrollPositionTracker()
         let activityID = UUID()
 
-        tracker.binding(isSuspended: false).wrappedValue = .cardio(role: .main, activityID: activityID)
+        tracker.record(
+            target: .cardio(role: .main, activityID: activityID),
+            isSuspended: false
+        )
 
         XCTAssertEqual(tracker.currentTarget, .cardio(role: .main, activityID: activityID))
-        XCTAssertNil(tracker.binding(isSuspended: false).wrappedValue)
     }
 
-    func testSuspendedBindingDoesNotReadOrReplaceTrackedTarget() {
+    func testSuspendedTargetTrackingDoesNotReplaceTrackedTarget() {
         let tracker = ActiveWorkoutScrollPositionTracker()
         let originalTarget = ActiveWorkoutScrollTarget.exercise(UUID())
         tracker.currentTarget = originalTarget
 
-        let binding = tracker.binding(isSuspended: true)
-        XCTAssertNil(binding.wrappedValue)
-
-        binding.wrappedValue = .header
+        tracker.record(target: .header, isSuspended: true)
         XCTAssertEqual(tracker.currentTarget, originalTarget)
     }
 
@@ -60,6 +59,16 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
         tracker.currentTarget = .header
         tracker.prepareForKeyboardVisibilityChange(wasVisible: true, isVisible: true)
         XCTAssertEqual(tracker.currentTarget, .header)
+    }
+
+    func testGeometryTrackingStoresExactOffsetAndIgnoresSuspendedChanges() {
+        let tracker = ActiveWorkoutScrollPositionTracker()
+
+        tracker.record(offsetY: 428.5, isSuspended: false)
+        XCTAssertEqual(tracker.currentOffsetY, 428.5)
+
+        tracker.record(offsetY: 900, isSuspended: true)
+        XCTAssertEqual(tracker.currentOffsetY, 428.5)
     }
 
     func testRestorePolicyPrefersFocusedExercise() {

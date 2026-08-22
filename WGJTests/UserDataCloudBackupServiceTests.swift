@@ -93,8 +93,9 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let sessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
         let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let previousSet = WorkoutPreviousSetSnapshot(reps: 13, weight: 12, unit: .kg)
-        try await snapshotStore.save(ActiveWorkoutStoredSnapshot(
+        _ = try await snapshotStore.save(ActiveWorkoutStoredSnapshot(
             session: ActiveWorkoutRuntimeSession(id: sessionID, name: "Current"),
+            scrollOffsetY: 428.5,
             previousSetSnapshotsByExerciseID: [exerciseID: [0: previousSet]]
         ))
         let coordinator = ActiveWorkoutCoordinator(
@@ -116,6 +117,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             exerciseID: exerciseID
         )
         XCTAssertEqual(restored?.previous(at: 0), previousSet)
+        XCTAssertEqual(presentationState.preparedScrollOffsetY(for: sessionID), 428.5)
     }
 
     func testStageLocalDataDeletionDoesNotCommitUntilCallerSaves() throws {

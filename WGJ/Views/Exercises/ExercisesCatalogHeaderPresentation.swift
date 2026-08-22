@@ -29,7 +29,6 @@ nonisolated enum ExercisesCatalogHeaderCollapsePolicy {
 @Observable
 nonisolated final class ExercisesCatalogHeaderPresentationModel {
     private(set) var collapseProgress: CGFloat = 0
-    @ObservationIgnored private var fallbackBaseline: CGFloat?
     @ObservationIgnored private var isForcedExpanded = false
 
     var isCollapsed: Bool {
@@ -47,18 +46,7 @@ nonisolated final class ExercisesCatalogHeaderPresentationModel {
         return true
     }
 
-    @discardableResult
-    func consumeFallback(markerY: CGFloat) -> Bool {
-        if fallbackBaseline == nil {
-            fallbackBaseline = markerY
-        }
-        return consume(
-            contentOffsetY: max(0, (fallbackBaseline ?? markerY) - markerY)
-        )
-    }
-
     func reset() {
-        fallbackBaseline = nil
         isForcedExpanded = false
         if collapseProgress != 0 {
             collapseProgress = 0

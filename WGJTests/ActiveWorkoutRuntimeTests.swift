@@ -837,6 +837,7 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         let expandedExerciseIDs: Set<UUID> = [
             UUID(uuidString: "99999999-8888-7777-6666-555555555555")!
         ]
+        let scrollOffsetY = 428.5
 
         try await store.save(
             firstSession,
@@ -848,10 +849,12 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
             ),
             presentationMode: .presented,
             scrollTarget: scrollTarget,
+            scrollOffsetY: scrollOffsetY,
             expandedExerciseIDs: expandedExerciseIDs,
             preservesExistingRestTimer: false,
             preservesExistingPresentationMode: false,
             preservesExistingScrollTarget: false,
+            preservesExistingScrollOffset: false,
             preservesExistingExpandedExerciseIDs: false
         )
 
@@ -869,6 +872,7 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(storedSnapshot?.restTimer?.exerciseName, "Bench Press")
         XCTAssertEqual(storedSnapshot?.presentationMode, .presented)
         XCTAssertEqual(storedSnapshot?.scrollTarget, scrollTarget)
+        XCTAssertEqual(storedSnapshot?.scrollOffsetY, scrollOffsetY)
         XCTAssertEqual(storedSnapshot?.expandedExerciseIDs, expandedExerciseIDs)
 
         try await store.delete()
