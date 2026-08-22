@@ -762,7 +762,7 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     func relinkRelationships(in context: ModelContext) throws {
-        try relinkSupersetRelationships(in: context)
+        try relinkDatabaseRelationships(in: context)
     }
 
     private func upsertProfiles(in context: ModelContext) throws {
@@ -896,14 +896,38 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         }
     }
 
-    private func relinkSupersetRelationships(in context: ModelContext) throws {
+    private func relinkDatabaseRelationships(in context: ModelContext) throws {
+        let foldersByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateFolder>()).map { ($0.id, $0) })
         let templatesByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
         let templateGroupsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map { ($0.id, $0) })
+
+        for template in templatesByID.values {
+            template.folder = foldersByID[template.folderID]
+        }
         for group in templateGroupsByID.values {
             group.template = templatesByID[group.templateID]
         }
-        for exercise in try context.fetch(FetchDescriptor<TemplateExercise>()) {
+        for block in try context.fetch(FetchDescriptor<TemplateCardioBlock>()) {
+            block.template = templatesByID[block.templateID]
+        }
+
+        let templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>())
+        let templateExercisesByID = Dictionary(uniqueKeysWithValues: templateExercises.map { ($0.id, $0) })
+        for exercise in templateExercises {
+            exercise.template = templatesByID[exercise.templateID]
             exercise.supersetGroup = exercise.supersetGroupID.flatMap { templateGroupsByID[$0] }
+        }
+        for component in try context.fetch(FetchDescriptor<TemplateExerciseComponent>()) {
+            component.templateExercise = templateExercisesByID[component.templateExerciseID]
+        }
+
+        let templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>())
+        let templateSetsByID = Dictionary(uniqueKeysWithValues: templateSets.map { ($0.id, $0) })
+        for set in templateSets {
+            set.templateExercise = templateExercisesByID[set.templateExerciseID]
+        }
+        for stage in try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()) {
+            stage.templateExerciseSet = templateSetsByID[stage.templateExerciseSetID]
         }
 
         let sessionsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
@@ -911,8 +935,24 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         for group in workoutGroupsByID.values {
             group.session = sessionsByID[group.sessionID]
         }
-        for exercise in try context.fetch(FetchDescriptor<WorkoutSessionExercise>()) {
+        for block in try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()) {
+            block.session = sessionsByID[block.sessionID]
+        }
+
+        let workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>())
+        let workoutExercisesByID = Dictionary(uniqueKeysWithValues: workoutExercises.map { ($0.id, $0) })
+        for exercise in workoutExercises {
+            exercise.session = sessionsByID[exercise.sessionID]
             exercise.supersetGroup = exercise.supersetGroupID.flatMap { workoutGroupsByID[$0] }
+        }
+
+        let workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>())
+        let workoutSetsByID = Dictionary(uniqueKeysWithValues: workoutSets.map { ($0.id, $0) })
+        for set in workoutSets {
+            set.sessionExercise = workoutExercisesByID[set.sessionExerciseID]
+        }
+        for stage in try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()) {
+            stage.sessionSet = workoutSetsByID[stage.sessionSetID]
         }
     }
 }

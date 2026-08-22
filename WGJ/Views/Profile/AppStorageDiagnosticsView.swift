@@ -81,47 +81,8 @@ struct AppStorageDiagnosticsView: View {
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Cleanup", subtitle: "Clear cache, restore CloudKit backup, or schedule a full local reset.")
-
-                    Button {
-                        clearCaches()
-                    } label: {
-                        if isClearing {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Label("Clear Disposable Storage", systemImage: "trash")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(isClearing)
-
-                    Button {
-                        showingCloudRestoreConfirmation = true
-                    } label: {
-                        if isRestoringCloudBackup {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Label("Restore Latest Cloud Backup", systemImage: "icloud.and.arrow.down")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(!cloudSyncEnabled || isRestoringCloudBackup)
-
-                    Button(role: .destructive) {
-                        showingStoreResetConfirmation = true
-                    } label: {
-                        Label("Reset Local Stores on Next Launch", systemImage: "exclamationmark.triangle.fill")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(WGJDestructiveButtonStyle())
-                }
-                .padding(14)
-                .wgjCardContainer()
+                cleanupCard
+                dangerZoneCard
             }
             .padding(.top, 8)
             .padding(16)
@@ -133,38 +94,106 @@ struct AppStorageDiagnosticsView: View {
         .task {
             refresh()
         }
-        .confirmationDialog(
-            "Restore latest CloudKit backup?",
-            isPresented: $showingCloudRestoreConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Restore Backup", role: .destructive) {
-                restoreCloudBackup()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup.")
-        }
-        .confirmationDialog(
-            "Reset local stores on next launch?",
-            isPresented: $showingStoreResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Schedule Reset", role: .destructive) {
-                AppStoreLayout.requestPersistentStoreResetOnNextLaunch()
-                showAlert(
-                    title: "Reset Scheduled",
-                    message: "Fully close and reopen WGJ to delete the local SwiftData store files before the app starts."
-                )
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This removes local profiles, workouts, templates, active drafts, history projections, and catalog stores from this device. It does not delete your CloudKit backup.")
-        }
         .alert(alertTitle, isPresented: $showingAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(alertMessage)
+        }
+    }
+
+    private var cleanupCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader(
+                "Cleanup",
+                subtitle: "Clear disposable files or replace this device's data from CloudKit."
+            )
+
+            Button {
+                clearCaches()
+            } label: {
+                if isClearing {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Label("Clear Disposable Storage", systemImage: "trash")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+            .disabled(isClearing)
+
+            Button {
+                showingCloudRestoreConfirmation = true
+            } label: {
+                if isRestoringCloudBackup {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Label("Restore Latest Cloud Backup", systemImage: "icloud.and.arrow.down")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+            .disabled(!cloudSyncEnabled || isRestoringCloudBackup)
+            .confirmationDialog(
+                "Restore latest CloudKit backup?",
+                isPresented: $showingCloudRestoreConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Restore Backup", role: .destructive) {
+                    restoreCloudBackup()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup.")
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var dangerZoneCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader(
+                "Danger Zone",
+                subtitle: "Schedule a full reset of WGJ data stored on this device."
+            )
+
+            Label("Your CloudKit backup will not be deleted.", systemImage: "icloud.fill")
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(role: .destructive) {
+                showingStoreResetConfirmation = true
+            } label: {
+                Label("Reset Local Stores on Next Launch", systemImage: "exclamationmark.triangle.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(WGJDestructiveButtonStyle())
+            .confirmationDialog(
+                "Reset local stores on next launch?",
+                isPresented: $showingStoreResetConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Schedule Reset", role: .destructive) {
+                    AppStoreLayout.requestPersistentStoreResetOnNextLaunch()
+                    showAlert(
+                        title: "Reset Scheduled",
+                        message: "Fully close and reopen WGJ to delete the local SwiftData store files before the app starts."
+                    )
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes local profiles, workouts, templates, active drafts, history projections, and catalog stores from this device. It does not delete your CloudKit backup.")
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+        .overlay {
+            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                .stroke(WGJTheme.danger.opacity(0.3), lineWidth: 1)
+                .allowsHitTesting(false)
         }
     }
 
