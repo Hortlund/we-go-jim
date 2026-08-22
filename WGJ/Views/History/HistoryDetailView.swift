@@ -59,7 +59,7 @@ struct HistoryDetailView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
                     personalRecordHighlightsSection

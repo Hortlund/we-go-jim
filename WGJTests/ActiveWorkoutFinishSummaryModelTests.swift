@@ -217,8 +217,81 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
         XCTAssertEqual(presentation.activityLabel, "CARDIO")
         XCTAssertEqual(presentation.primaryMetric, .init(title: "DISTANCE", value: "5 km"))
         XCTAssertEqual(presentation.highlightTitle, "Outdoor Run")
+        XCTAssertEqual(presentation.exercises.first?.name, "Outdoor Run")
+        XCTAssertEqual(presentation.exercises.first?.detailTitle, "RESULT")
+        XCTAssertEqual(presentation.exercises.first?.bestSetText, "5:00 /km · 25 min")
         XCTAssertFalse(presentation.supportingMetrics.contains { $0.title == "SETS" })
         XCTAssertFalse(presentation.supportingMetrics.contains { $0.title == "EXERCISES" })
+    }
+
+    func testWorkoutSharePresentationIgnoresPreAndPostCardioForMixedActivityLabel() {
+        let snapshot = workoutShareSnapshot(
+            exerciseCount: 1,
+            cardioRoles: [.warmUp, .finisher]
+        )
+
+        let presentation = WorkoutSharePresentation.make(snapshot: snapshot)
+
+        XCTAssertEqual(presentation.activityLabel, "STRENGTH TRAINING")
+        XCTAssertTrue(presentation.exercises.isEmpty)
+    }
+
+    func testWorkoutSharePresentationUsesMixedActivityLabelForMainCardioAndStrength() {
+        let snapshot = workoutShareSnapshot(
+            exerciseCount: 1,
+            cardioRoles: [.warmUp, .main, .finisher]
+        )
+
+        let presentation = WorkoutSharePresentation.make(snapshot: snapshot)
+
+        XCTAssertEqual(presentation.activityLabel, "STRENGTH + CARDIO")
+        XCTAssertEqual(presentation.exercises.count, 1)
+        XCTAssertEqual(presentation.exercises.first?.setProgressText, "MAIN CARDIO")
+    }
+
+    private func workoutShareSnapshot(
+        exerciseCount: Int,
+        cardioRoles: [WorkoutCardioRole]
+    ) -> WorkoutCompletionSnapshot {
+        WorkoutCompletionSnapshot(
+            sessionID: UUID(),
+            sessionName: "Mixed Workout",
+            celebrationTitle: "Workout Complete",
+            celebrationSubtitle: "Saved",
+            completedAtText: "Aug 22, 11:00 AM",
+            durationText: "45m",
+            exerciseCount: exerciseCount,
+            completedSetCount: exerciseCount > 0 ? 3 : 0,
+            totalVolume: exerciseCount > 0 ? 1_000 : 0,
+            totalVolumeText: exerciseCount > 0 ? "1,000 kg" : "0 kg",
+            estimatedActiveCaloriesText: nil,
+            estimatedActiveCaloriesAccessibilityLabel: nil,
+            prHeadline: "No new PRs today",
+            prSupportText: "",
+            personalRecords: [],
+            cardioRecap: cardioRoles.map { role in
+                WorkoutCompletionCardioRecap(
+                    id: UUID(),
+                    role: role,
+                    exerciseName: "Cardio",
+                    descriptor: nil,
+                    summary: WorkoutCardioResultSummary(
+                        metrics: [
+                            .init(
+                                kind: .duration,
+                                title: "Duration",
+                                value: "10 min",
+                                systemImage: "clock"
+                            ),
+                        ],
+                        notes: nil
+                    ),
+                    isCompleted: true
+                )
+            },
+            muscleHeatmap: .empty,
+            exerciseRecap: []
+        )
     }
 }
 

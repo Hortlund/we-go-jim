@@ -62,6 +62,131 @@ final class WorkoutCardioModelCompatibilityTests: XCTestCase {
         XCTAssertEqual(draft.preferredDistanceUnit, .meters)
     }
 
+    func testTemplatePreviewPreservesMainRoleAndMultipleActivities() {
+        let template = WorkoutTemplate(folderID: UUID(), name: "Mixed Session")
+        let mainBike = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 1,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            goalKind: .time,
+            targetDurationSeconds: 600,
+            template: template
+        )
+        let mainRow = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 0,
+            catalogExerciseUUID: "seed-row",
+            exerciseNameSnapshot: "Row",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Full Body",
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 2_000,
+            preferredDistanceUnit: .meters,
+            template: template
+        )
+        let warmUp = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            role: .warmUp,
+            catalogExerciseUUID: "seed-walk",
+            exerciseNameSnapshot: "Walk",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            targetDurationSeconds: 300,
+            template: template
+        )
+        let finisher = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .postWorkout,
+            role: .finisher,
+            catalogExerciseUUID: "seed-stairs",
+            exerciseNameSnapshot: "Stairs",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            targetDurationSeconds: 300,
+            template: template
+        )
+        template.cardioBlocks = [mainBike, finisher, mainRow, warmUp]
+
+        let preview = StartWorkoutTemplatePreview(template: template)
+
+        XCTAssertEqual(preview.cardioBlocks.map(\.exerciseName), ["Walk", "Row", "Bike", "Stairs"])
+        XCTAssertEqual(preview.cardioBlocks.map(\.role), [.warmUp, .main, .main, .finisher])
+        XCTAssertEqual(preview.exerciseCount, 2)
+        XCTAssertEqual(StartWorkoutTemplateRowSnapshot(template: template).exerciseCount, 2)
+        XCTAssertEqual(preview.cardioBlocks.first { $0.exerciseName == "Bike" }?.goalKind, .time)
+        XCTAssertEqual(
+            preview.cardioBlocks.first { $0.exerciseName == "Row" }?.targetDistanceMeters,
+            2_000
+        )
+    }
+
+    func testHistorySummaryIncludesMainCardioResult() {
+        let session = WorkoutSession(name: "Mixed Session", status: .completed)
+        let exercise = WorkoutSessionExercise(
+            sessionID: session.id,
+            catalogExerciseUUID: "seed-squat",
+            exerciseNameSnapshot: "Squat",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Legs",
+            session: session
+        )
+        let cardio = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            phase: .preWorkout,
+            role: .main,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .timeOnly,
+            goalKind: .time,
+            targetDurationSeconds: 600,
+            actualDurationSeconds: 600,
+            isCompleted: true,
+            session: session
+        )
+        let warmUp = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            phase: .preWorkout,
+            role: .warmUp,
+            catalogExerciseUUID: "seed-walk",
+            exerciseNameSnapshot: "Walk",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            targetDurationSeconds: 300,
+            isCompleted: true,
+            session: session
+        )
+        let finisher = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            phase: .postWorkout,
+            role: .finisher,
+            catalogExerciseUUID: "seed-stairs",
+            exerciseNameSnapshot: "Stairs",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            targetDurationSeconds: 300,
+            isCompleted: true,
+            session: session
+        )
+        session.exercises = [exercise]
+        session.cardioBlocks = [finisher, cardio, warmUp]
+
+        let rows = HistorySessionSummaryBuilder.rows(for: session)
+
+        XCTAssertEqual(rows.map(\.exercise), ["0 x Squat", "Bike"])
+        XCTAssertEqual(rows.last?.bestSet, "10 min")
+    }
+
     func testActiveResultAndTimerFieldsRoundTripThroughDraftAndRuntime() {
         let sourceID = UUID()
         let model = ActiveWorkoutDraftCardioBlock(

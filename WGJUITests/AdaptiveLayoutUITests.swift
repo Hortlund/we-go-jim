@@ -80,6 +80,29 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryMainCardioSummaryOpensDetailWithoutHanging() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_HISTORY_MAIN_CARDIO"])
+
+        let historyTab = app.buttons["History"].firstMatch
+        XCTAssertTrue(historyTab.waitForExistence(timeout: 8))
+        historyTab.tap()
+
+        let historyCard = app.buttons["history-session-card"].firstMatch
+        XCTAssertTrue(historyCard.waitForExistence(timeout: 8))
+        XCTAssertTrue(historyCard.label.contains("Bench Press"))
+        XCTAssertTrue(historyCard.label.contains("Bike"))
+        XCTAssertFalse(historyCard.label.contains("Warm-up Walk"))
+        XCTAssertFalse(historyCard.label.contains("Finisher Stairs"))
+        historyCard.tap()
+
+        XCTAssertTrue(app.staticTexts["Cardio Activities"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Bike"].waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.buttons["history-detail-save-changes-button"].waitForExistence(timeout: 4)
+        )
+    }
+
+    @MainActor
     private func launchLocalApp(additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

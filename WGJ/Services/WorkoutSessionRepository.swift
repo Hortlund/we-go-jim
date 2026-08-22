@@ -619,6 +619,18 @@ nonisolated final class WorkoutSessionRepository {
             .sorted(by: cardioActivityOrder)
     }
 
+    func sessionCardioBlocks(sessionIDs: Set<UUID>) throws -> [WorkoutSessionCardioBlock] {
+        guard !sessionIDs.isEmpty else { return [] }
+        let requestedSessionIDs = Array(sessionIDs)
+        let descriptor = FetchDescriptor<WorkoutSessionCardioBlock>(
+            predicate: #Predicate { cardioBlock in
+                requestedSessionIDs.contains(cardioBlock.sessionID)
+            }
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted(by: cardioActivityOrder)
+    }
+
     func setDrafts(sessionExerciseID: UUID) throws -> [WorkoutSessionSetDraft] {
         guard let exercise = try sessionExercise(id: sessionExerciseID) else {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound

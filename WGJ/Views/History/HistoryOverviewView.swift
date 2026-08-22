@@ -691,10 +691,15 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         repository: WorkoutSessionRepository,
         caloriePresentationPolicy: WorkoutCaloriePresentationPolicy
     ) throws -> [HistoryOverviewSessionSnapshot] {
-        try sessions.map { session in
+        let cardioBlocksBySessionID = Dictionary(
+            grouping: try repository.sessionCardioBlocks(sessionIDs: Set(sessions.map(\.id))),
+            by: \.sessionID
+        )
+        return try sessions.map { session in
             let exercises = try repository.sessionExercises(sessionID: session.id)
             let rows = try HistorySessionSummaryBuilder.rows(
                 for: exercises,
+                cardioBlocks: cardioBlocksBySessionID[session.id, default: []],
                 repository: repository
             )
             return HistoryOverviewSessionSnapshot(
@@ -948,8 +953,8 @@ private struct HistorySessionCardView: View, Equatable {
     private var summarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                summaryExerciseHeader
-                summaryBestSetHeader
+                summaryActivityHeader
+                summaryResultHeader
             }
 
             ForEach(card.summaryRows) { row in
@@ -976,15 +981,15 @@ private struct HistorySessionCardView: View, Equatable {
         }
     }
 
-    private var summaryExerciseHeader: some View {
-        Text("Exercise")
+    private var summaryActivityHeader: some View {
+        Text("Activity")
             .font(.headline.weight(.semibold))
             .foregroundStyle(WGJTheme.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var summaryBestSetHeader: some View {
-        Text("Best Set")
+    private var summaryResultHeader: some View {
+        Text("Result")
             .font(.headline.weight(.semibold))
             .foregroundStyle(WGJTheme.textPrimary)
             .fixedSize(horizontal: true, vertical: false)
@@ -1013,7 +1018,7 @@ private struct HistorySessionCardView: View, Equatable {
 nonisolated enum HistorySessionSummaryBuilder {
     nonisolated static func rows(for session: WorkoutSession) -> [HistorySessionSummaryRow] {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        return exercises.enumerated().map { index, exercise in
+        let strengthRows = exercises.enumerated().map { index, exercise in
             let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             return HistorySessionSummaryRow(
                 id: index,
@@ -1021,13 +1026,21 @@ nonisolated enum HistorySessionSummaryBuilder {
                 bestSet: WorkoutMetricsService.bestSetText(for: sets)
             )
         }
+        let mainCardioRows = cardioRows(
+            (session.cardioBlocks ?? [])
+                .filter { $0.role == .main }
+                .sorted(by: cardioSort),
+            startingAt: strengthRows.count
+        )
+        return strengthRows + mainCardioRows
     }
 
     nonisolated static func rows(
         for exercises: [WorkoutSessionExercise],
+        cardioBlocks: [WorkoutSessionCardioBlock],
         repository: WorkoutSessionRepository
     ) throws -> [HistorySessionSummaryRow] {
-        try exercises.enumerated().map { index, exercise in
+        let strengthRows = try exercises.enumerated().map { index, exercise in
             let sets = try repository.sessionSets(sessionExerciseID: exercise.id)
             return HistorySessionSummaryRow(
                 id: index,
@@ -1035,6 +1048,53 @@ nonisolated enum HistorySessionSummaryBuilder {
                 bestSet: WorkoutMetricsService.bestSetText(for: sets)
             )
         }
+        let mainCardioRows = cardioRows(
+            cardioBlocks
+                .filter { $0.role == .main }
+                .sorted(by: cardioSort),
+            startingAt: strengthRows.count
+        )
+        return strengthRows + mainCardioRows
+    }
+
+    private nonisolated static func cardioRows(
+        _ cardioBlocks: [WorkoutSessionCardioBlock],
+        startingAt offset: Int
+    ) -> [HistorySessionSummaryRow] {
+        cardioBlocks.enumerated().map { index, cardio in
+            let profile = WorkoutCardioTrackingProfileResolver.resolved(
+                storedProfile: cardio.trackingProfile,
+                identity: "\(cardio.catalogExerciseUUID) \(cardio.exerciseNameSnapshot)",
+                hasDistance: cardio.actualDistanceMeters != nil || cardio.targetDistanceMeters != nil
+            )
+            let summary = WorkoutCardioResultSummaryFormatter.summary(
+                durationSeconds: cardio.actualDurationSeconds,
+                distanceMeters: cardio.actualDistanceMeters,
+                displayUnit: cardio.preferredDistanceUnit ?? .kilometers,
+                profile: profile,
+                inclinePercent: cardio.inclinePercent,
+                resistanceLevel: cardio.resistanceLevel,
+                notes: cardio.cardioNotes
+            )
+            let result = summary.metrics.prefix(2).map(\.value).joined(separator: " · ")
+            return HistorySessionSummaryRow(
+                id: offset + index,
+                exercise: cardio.exerciseNameSnapshot,
+                bestSet: cardio.isCompleted
+                    ? (result.isEmpty ? String(localized: "Complete") : result)
+                    : String(localized: "Not finished")
+            )
+        }
+    }
+
+    private nonisolated static func cardioSort(
+        _ lhs: WorkoutSessionCardioBlock,
+        _ rhs: WorkoutSessionCardioBlock
+    ) -> Bool {
+        if lhs.role.sortOrder == rhs.role.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        return lhs.role.sortOrder < rhs.role.sortOrder
     }
 }
 

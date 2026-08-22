@@ -62,6 +62,7 @@ enum HistoryDetailSnapshotBuilder {
         let notes: String
         let isCompleted: Bool
         let updatedAt: Date
+        let resultSummary: WorkoutCardioResultSummary
 
         nonisolated init(model: WorkoutSessionCardioBlock) {
             id = model.id
@@ -72,11 +73,12 @@ enum HistoryDetailSnapshotBuilder {
             exerciseNameSnapshot = model.exerciseNameSnapshot
             categorySnapshot = model.categorySnapshot
             muscleSummarySnapshot = model.muscleSummarySnapshot
-            trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+            let resolvedTrackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
                 storedProfile: model.trackingProfile,
                 identity: "\(model.catalogExerciseUUID) \(model.exerciseNameSnapshot)",
                 hasDistance: model.actualDistanceMeters != nil || model.targetDistanceMeters != nil
             )
+            trackingProfile = resolvedTrackingProfile
             targetDurationSeconds = model.targetDurationSeconds
             actualDurationSeconds = model.actualDurationSeconds
             actualDistanceMeters = model.actualDistanceMeters
@@ -86,6 +88,15 @@ enum HistoryDetailSnapshotBuilder {
             notes = model.cardioNotes
             isCompleted = model.isCompleted
             updatedAt = model.updatedAt
+            resultSummary = WorkoutCardioResultSummaryFormatter.summary(
+                durationSeconds: model.actualDurationSeconds,
+                distanceMeters: model.actualDistanceMeters,
+                displayUnit: model.preferredDistanceUnit ?? .kilometers,
+                profile: resolvedTrackingProfile,
+                inclinePercent: model.inclinePercent,
+                resistanceLevel: model.resistanceLevel,
+                notes: model.cardioNotes
+            )
         }
 
         var resultDraft: WorkoutCardioResultDraft {
@@ -100,17 +111,6 @@ enum HistoryDetailSnapshotBuilder {
             )
         }
 
-        var resultSummary: WorkoutCardioResultSummary {
-            WorkoutCardioResultSummaryFormatter.summary(
-                durationSeconds: actualDurationSeconds,
-                distanceMeters: actualDistanceMeters,
-                displayUnit: preferredDistanceUnit,
-                profile: trackingProfile,
-                inclinePercent: inclinePercent,
-                resistanceLevel: resistanceLevel,
-                notes: notes
-            )
-        }
     }
 
     nonisolated struct ExerciseSnapshot: Identifiable, Equatable, Sendable {

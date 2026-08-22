@@ -404,8 +404,8 @@ struct StartWorkoutHomeView: View {
             onEdit: {
                 editTemplate(template)
             },
-            onExport: {
-                presentExportOptions(for: .template(template.id))
+            onExport: { format in
+                exportTransfer(target: .template(template.id), format: format)
             },
             onMove: { destinationFolderID in
                 moveTemplate(templateID: template.id, toFolderID: destinationFolderID)
@@ -1210,13 +1210,20 @@ struct StartWorkoutHomeView: View {
 
         exportRequest = nil
 
+        exportTransfer(target: request.target, format: format)
+    }
+
+    private func exportTransfer(
+        target: TemplateTransferShareTarget,
+        format: TemplateTransferExportFormat
+    ) {
         let backgroundStore = startWorkoutBackgroundStore
         Task.detached(priority: .utility) {
             do {
                 let fileURL = try await backgroundStore.performWrite("start-workout.template.export") { backgroundContext in
                     let transferService = TemplateTransferService(modelContext: backgroundContext)
 
-                    switch request.target {
+                    switch target {
                     case .template(let templateID):
                         return try transferService.writeExportFile(templateID: templateID, format: format)
                     case .folder(let folderID):
@@ -1311,6 +1318,7 @@ nonisolated struct StartWorkoutTemplateRowSnapshot: Identifiable, Equatable, Sen
         notes = trimmedNotes.isEmpty ? nil : trimmedNotes
         sortOrder = template.sortOrder
         exerciseCount = (template.exercises ?? []).count
+            + (template.cardioBlocks ?? []).lazy.filter { $0.role == .main }.count
     }
 
     init(id: UUID, folderID: UUID, name: String, notes: String?, sortOrder: Int, exerciseCount: Int) {
@@ -1548,9 +1556,11 @@ private struct StartWorkoutTemplateRowView: View, Equatable {
     let lastPerformedAt: Date?
     let onStart: () -> Void
     let onEdit: () -> Void
-    let onExport: () -> Void
+    let onExport: (TemplateTransferExportFormat) -> Void
     let onMove: (UUID?) -> Void
     let onDelete: () -> Void
+
+    @State private var showingExportOptions = false
 
     static func == (
         lhs: StartWorkoutTemplateRowView,
@@ -1591,7 +1601,7 @@ private struct StartWorkoutTemplateRowView: View, Equatable {
                     .accessibilityIdentifier("start-workout-template-edit-menu-button")
 
                     Button {
-                        onExport()
+                        presentExportOptionsAfterActionsDismiss()
                     } label: {
                         Label("Export / Share", systemImage: "square.and.arrow.up")
                     }
@@ -1617,6 +1627,24 @@ private struct StartWorkoutTemplateRowView: View, Equatable {
                 } label: {
                     StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
                 }
+                .confirmationDialog(
+                    "Export / Share",
+                    isPresented: $showingExportOptions,
+                    titleVisibility: .visible
+                ) {
+                    Button("WGJ Template File") {
+                        onExport(.bundle)
+                    }
+                    Button("JSON") {
+                        onExport(.json)
+                    }
+                    Button("Text") {
+                        onExport(.text)
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Choose a format to export or share this item.")
+                }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("start-workout-template-actions-button")
             }
@@ -1634,6 +1662,14 @@ private struct StartWorkoutTemplateRowView: View, Equatable {
             }
         }
         .padding(14)
+    }
+
+    @MainActor
+    private func presentExportOptionsAfterActionsDismiss() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            showingExportOptions = true
+        }
     }
 
     private var templateMetadataRow: some View {
@@ -1800,14 +1836,19 @@ private struct StartWorkoutInlineActionLabel: View {
 nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendable {
     struct CardioBlock: Identifiable, Equatable, Sendable {
         let id: UUID
-        let phase: WorkoutCardioPhase
+        let role: WorkoutCardioRole
+        let sortOrder: Int
         let exerciseName: String
         let descriptor: String?
+        let goalKind: WorkoutCardioGoalKind
         let targetDurationSeconds: Int
+        let targetDistanceMeters: Double?
+        let preferredDistanceUnit: WorkoutDistanceUnit
 
         init(templateCardioBlock: TemplateCardioBlock) {
             id = templateCardioBlock.id
-            phase = templateCardioBlock.phase
+            role = templateCardioBlock.role
+            sortOrder = templateCardioBlock.sortOrder
             exerciseName = templateCardioBlock.exerciseNameSnapshot
             let trimmedMuscleSummary = templateCardioBlock.muscleSummarySnapshot
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1818,7 +1859,10 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 descriptor = trimmedCategory.isEmpty ? nil : trimmedCategory
             }
+            goalKind = templateCardioBlock.goalKind
             targetDurationSeconds = templateCardioBlock.targetDurationSeconds
+            targetDistanceMeters = templateCardioBlock.targetDistanceMeters
+            preferredDistanceUnit = templateCardioBlock.preferredDistanceUnit ?? .kilometers
         }
     }
 
@@ -1896,9 +1940,9 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
     let folderID: UUID
     let name: String
     let notes: String?
-    let preWorkoutCardio: CardioBlock?
-    let postWorkoutCardio: CardioBlock?
+    let cardioBlocks: [CardioBlock]
     let exercises: [Exercise]
+    let exerciseCount: Int
     let totalPlannedSets: Int
     let focusAreaSummary: String?
 
@@ -1913,12 +1957,14 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
 
         let trimmedNotes = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         notes = trimmedNotes.isEmpty ? nil : trimmedNotes
-        let cardioByPhase = Dictionary(
-            (template.cardioBlocks ?? []).map { ($0.phase, $0) },
-            uniquingKeysWith: { existing, _ in existing }
-        )
-        preWorkoutCardio = cardioByPhase[.preWorkout].map(CardioBlock.init(templateCardioBlock:))
-        postWorkoutCardio = cardioByPhase[.postWorkout].map(CardioBlock.init(templateCardioBlock:))
+        cardioBlocks = (template.cardioBlocks ?? [])
+            .map(CardioBlock.init(templateCardioBlock:))
+            .sorted {
+                if $0.role.sortOrder == $1.role.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.role.sortOrder < $1.role.sortOrder
+            }
         exercises = (template.exercises ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
             .map { exercise in
@@ -1927,6 +1973,7 @@ nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendabl
                     componentResolution: componentResolutionByExerciseID[exercise.id]
                 )
             }
+        exerciseCount = exercises.count + cardioBlocks.lazy.filter { $0.role == .main }.count
         totalPlannedSets = exercises.reduce(0) { partialResult, exercise in
             partialResult + exercise.plannedSetCount
         }
@@ -1972,7 +2019,7 @@ private struct TemplateStartPreviewSheet: View {
     }
 
     private var cardioCount: Int {
-        [preview.preWorkoutCardio, preview.postWorkoutCardio].compactMap { $0 }.count
+        preview.cardioBlocks.count
     }
 
     var body: some View {
@@ -1981,15 +2028,13 @@ private struct TemplateStartPreviewSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     summaryCard
 
-                    if let preWorkoutCardio = preview.preWorkoutCardio {
-                        cardioSection(preWorkoutCardio)
-                    }
+                    cardioSection(for: .warmUp)
+
+                    cardioSection(for: .main)
 
                     exerciseSection
 
-                    if let postWorkoutCardio = preview.postWorkoutCardio {
-                        cardioSection(postWorkoutCardio)
-                    }
+                    cardioSection(for: .finisher)
 
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) {
@@ -2132,7 +2177,7 @@ private struct TemplateStartPreviewSheet: View {
     }
 
     private var exerciseSummary: String {
-        let count = orderedExercises.count
+        let count = preview.exerciseCount
         return "\(count) exercise" + (count == 1 ? "" : "s")
     }
 
@@ -2373,22 +2418,31 @@ private struct TemplateStartPreviewSheet: View {
             )
     }
 
-    private func cardioSection(_ cardioBlock: StartWorkoutTemplatePreview.CardioBlock) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader(
-                cardioBlock.phase.title,
-                subtitle: cardioBlock.phase == .preWorkout
-                    ? "Warmup cardio before the main workout."
-                    : "Cooldown cardio after the main exercises."
-            )
+    @ViewBuilder
+    private func cardioSection(for role: WorkoutCardioRole) -> some View {
+        let cardioBlocks = preview.cardioBlocks.filter { $0.role == role }
+        if !cardioBlocks.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    role.title,
+                    subtitle: CardioLocalizedCopy.roleSubtitle(role)
+                )
 
-            WorkoutCardioPhaseCard(
-                phase: cardioBlock.phase,
-                exerciseName: cardioBlock.exerciseName,
-                descriptor: cardioBlock.descriptor,
-                targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                accessibilityIdentifier: "template-preview-\(cardioBlock.phase.rawValue)-card"
-            )
+                ForEach(cardioBlocks) { cardioBlock in
+                    WorkoutCardioActivityPlanCard(
+                        activityName: cardioBlock.exerciseName,
+                        role: cardioBlock.role,
+                        descriptor: cardioBlock.descriptor,
+                        goalKind: cardioBlock.goalKind,
+                        targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                        targetDistanceMeters: cardioBlock.targetDistanceMeters,
+                        preferredDistanceUnit: cardioBlock.preferredDistanceUnit,
+                        accessibilityIdentifier: "template-preview-\(cardioBlock.role.rawValue)-\(cardioBlock.id)-card"
+                    ) {
+                        EmptyView()
+                    }
+                }
+            }
         }
     }
 
