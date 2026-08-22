@@ -715,6 +715,20 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         )
     }
 
+    func testMetricInputKeyboardClearanceAppearsAsSoonAsInputGainsFocus() {
+        XCTAssertEqual(ActiveWorkoutKeyboardChromePolicy.metricInputClearanceHeight, 56)
+        XCTAssertTrue(
+            ActiveWorkoutKeyboardChromePolicy.shouldReserveMetricInputClearance(
+                isMetricInputFocused: true
+            )
+        )
+        XCTAssertFalse(
+            ActiveWorkoutKeyboardChromePolicy.shouldReserveMetricInputClearance(
+                isMetricInputFocused: false
+            )
+        )
+    }
+
     func testMetricInputDraftBufferCommitsDropStagePendingValues() {
         let setID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let stageID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
