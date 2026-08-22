@@ -414,7 +414,7 @@ struct HistoryOverviewView: View {
             return
         }
 
-        guard let oldestLoadedDate = controller.oldestLoadedDate else { return }
+        guard let pageCursor = controller.pageCursor else { return }
         let loadGeneration = pageLoadGeneration.next()
         isLoadingMoreHistory = true
         defer {
@@ -428,7 +428,7 @@ struct HistoryOverviewView: View {
             let loaded = try await backgroundStore.perform("history-overview.snapshot.load-more") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.loadPage(
                     modelContext: backgroundContext,
-                    before: oldestLoadedDate,
+                    after: pageCursor,
                     pageSize: Self.historyPageSize
                 )
             }
@@ -557,8 +557,10 @@ final class HistoryOverviewController {
     private var preparedSnapshots = HistoryOverviewPreparedSnapshots.empty
     private var loadedCalendarMonths: Set<Date> = []
 
-    var oldestLoadedDate: Date? {
-        completedSessions.last?.displayDate
+    var pageCursor: WorkoutSessionPageCursor? {
+        completedSessions.last.map {
+            WorkoutSessionPageCursor(completedAt: $0.displayDate, sessionID: $0.id)
+        }
     }
 
     func apply(_ loaded: HistoryOverviewLoadedSnapshot) {
@@ -621,7 +623,7 @@ nonisolated enum HistoryOverviewSnapshotLoader {
             )
             hasMorePages = false
         } else {
-            let page = try repository.completedSessions(before: nil, limit: pageSize + 1)
+            let page = try repository.completedSessions(after: nil, limit: pageSize + 1)
             completedSessions = try snapshots(
                 from: Array(page.prefix(pageSize)),
                 repository: repository,
@@ -647,12 +649,12 @@ nonisolated enum HistoryOverviewSnapshotLoader {
 
     nonisolated static func loadPage(
         modelContext: ModelContext,
-        before date: Date,
+        after cursor: WorkoutSessionPageCursor,
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
         let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
-        let page = try repository.completedSessions(before: date, limit: pageSize + 1)
+        let page = try repository.completedSessions(after: cursor, limit: pageSize + 1)
         let completedSessions = try snapshots(
             from: Array(page.prefix(pageSize)),
             repository: repository,

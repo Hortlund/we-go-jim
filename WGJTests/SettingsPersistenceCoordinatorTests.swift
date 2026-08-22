@@ -2,6 +2,57 @@ import XCTest
 @testable import WGJ
 
 final class SettingsPersistenceCoordinatorTests: XCTestCase {
+    @MainActor
+    func testSuccessfulCoordinatorWriteRunsBoundaryWithoutViewObservation() async {
+        let store = SettingsTestStore(draft: .default)
+        let boundaries = SettingsBoundaryRecorder()
+        let coordinator = SettingsDraftCoordinator()
+        coordinator.configure(
+            boundaryEffects: SettingsSaveBoundaryEffects { commit in
+                await boundaries.record(commit)
+            }
+        ) { try await store.persist($0) }
+
+        coordinator.submit(.init(keepsScreenAwake: true))
+        await coordinator.flush()
+
+        let commits = await boundaries.commits()
+        XCTAssertEqual(commits.map(\.write.patch.keepsScreenAwake), [true])
+    }
+
+    @MainActor
+    func testFailedCoordinatorWriteDoesNotRunBoundary() async {
+        let store = SettingsTestStore(draft: .default, failingRevisions: [1])
+        let boundaries = SettingsBoundaryRecorder()
+        let coordinator = SettingsDraftCoordinator()
+        coordinator.configure(
+            boundaryEffects: SettingsSaveBoundaryEffects { commit in
+                await boundaries.record(commit)
+            }
+        ) { try await store.persist($0) }
+
+        coordinator.submit(.init(keepsScreenAwake: true))
+        await coordinator.flush()
+
+        let commits = await boundaries.commits()
+        XCTAssertTrue(commits.isEmpty)
+    }
+
+    func testSettingsSaveBoundaryBacksUpEveryPersistedPatch() {
+        XCTAssertEqual(
+            SettingsSaveBoundaryPlan.plan(for: .init(keepsScreenAwake: false)),
+            .immediateBackup
+        )
+        XCTAssertEqual(
+            SettingsSaveBoundaryPlan.plan(for: .init(showsCalorieEstimates: false)),
+            .immediateBackup
+        )
+        XCTAssertEqual(
+            SettingsSaveBoundaryPlan.plan(for: .init(showsCalorieEstimates: true)),
+            .calorieBackfill
+        )
+    }
+
     func testPreferredDistanceUnitDefaultsFromLocaleAndCopiesProfile() {
         let fallback = WorkoutDistanceUnit.regionalDefault(locale: .current)
         XCTAssertEqual(UserSettingsDraft.default.preferredDistanceUnit, fallback)
@@ -460,5 +511,17 @@ private actor SettingsCommitRecorder {
 
     func deliveryOrder() -> [String] {
         orderedDeliveries
+    }
+}
+
+private actor SettingsBoundaryRecorder {
+    private var recordedCommits: [RevisionedSettingsCommit] = []
+
+    func record(_ commit: RevisionedSettingsCommit) {
+        recordedCommits.append(commit)
+    }
+
+    func commits() -> [RevisionedSettingsCommit] {
+        recordedCommits
     }
 }

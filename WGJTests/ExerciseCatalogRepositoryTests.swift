@@ -1,9 +1,43 @@
 import SwiftData
+import os
 import XCTest
 @testable import WGJ
 
 @MainActor
 final class ExerciseCatalogRepositoryTests: XCTestCase {
+    func testCustomExerciseMutationsScheduleCloudBackupAfterSave() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: "ExerciseCatalogBackupBoundaryTests")
+        let context = ModelContext(container)
+        let recorder = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            boundaryEffects: ExerciseCatalogSaveBoundaryEffects { _, reason in
+                recorder.withLock { $0.append(reason) }
+            }
+        )
+        let draft = CustomExerciseDraft(
+            name: "Incline Walk",
+            categoryName: "Cardio",
+            equipmentSummary: "Treadmill",
+            aliases: [],
+            primaryMuscleIDs: [],
+            secondaryMuscleIDs: [],
+            instructionText: "",
+            cardioTrackingProfile: .treadmill
+        )
+
+        let created = try repository.createCustomExercise(draft: draft)
+        var updatedDraft = draft
+        updatedDraft.name = "Incline Treadmill Walk"
+        try repository.updateCustomExercise(created, draft: updatedDraft)
+        try repository.deleteCustomExercise(created)
+
+        XCTAssertEqual(
+            recorder.withLock { $0 },
+            [.customExerciseSaved, .customExerciseSaved, .customExerciseSaved]
+        )
+    }
+
     func testCustomCardioDoesNotRequirePrimaryMuscle() throws {
         let repository = try makeRepository()
 

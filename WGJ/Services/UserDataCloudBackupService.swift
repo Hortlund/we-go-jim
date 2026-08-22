@@ -64,6 +64,7 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     case workoutCompletionTemplateSaved
     case workoutDeleted
     case templateSaved
+    case customExerciseSaved
     case profileSaved
     case settingsSaved
 
@@ -77,6 +78,8 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
             return "workout delete"
         case .templateSaved:
             return "template save"
+        case .customExerciseSaved:
+            return "custom exercise save"
         case .profileSaved:
             return "profile save"
         case .settingsSaved:
@@ -90,7 +93,7 @@ nonisolated enum BoundaryCloudBackupScheduler {
         switch reason {
         case .workoutCompleted, .workoutCompletionTemplateSaved:
             return WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        case .workoutDeleted, .templateSaved, .profileSaved, .settingsSaved:
+        case .workoutDeleted, .templateSaved, .customExerciseSaved, .profileSaved, .settingsSaved:
             return .zero
         }
     }

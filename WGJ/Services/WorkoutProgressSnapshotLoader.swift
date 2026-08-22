@@ -224,7 +224,7 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         )
     }
 
-    private static func selection(
+    static func selection(
         from sessions: [WorkoutProgressSessionInput],
         selectedPreviousSessionID: UUID?,
         selectedCurrentSessionID: UUID?
@@ -776,11 +776,36 @@ nonisolated enum WorkoutProgressSnapshotLoader {
         selectedCurrentSessionID: UUID?
     ) throws -> WorkoutProgressDashboardSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
-        let sessions = try repository
-            .completedSessions(includeArchived: false)
-            .map { session in
-                try WorkoutProgressSessionInput(session: session, repository: repository)
-            }
+        let storedSessions = try repository.completedSessions(includeArchived: false)
+        let metadataSessions = storedSessions.map(WorkoutProgressSessionInput.init(metadataFor:))
+        guard metadataSessions.count >= 2 else {
+            return WorkoutProgressSnapshotBuilder.build(
+                sessions: metadataSessions,
+                selectedPreviousSessionID: selectedPreviousSessionID,
+                selectedCurrentSessionID: selectedCurrentSessionID
+            )
+        }
+        guard let selection = WorkoutProgressSnapshotBuilder.selection(
+            from: metadataSessions,
+            selectedPreviousSessionID: selectedPreviousSessionID,
+            selectedCurrentSessionID: selectedCurrentSessionID
+        ) else {
+            return WorkoutProgressSnapshotBuilder.build(
+                sessions: metadataSessions,
+                selectedPreviousSessionID: selectedPreviousSessionID,
+                selectedCurrentSessionID: selectedCurrentSessionID
+            )
+        }
+
+        let selectedIDs: Set<UUID> = [selection.previous.id, selection.current.id]
+        var hydratedSessions: [UUID: WorkoutProgressSessionInput] = [:]
+        for session in storedSessions where selectedIDs.contains(session.id) {
+            hydratedSessions[session.id] = try WorkoutProgressSessionInput(
+                session: session,
+                repository: repository
+            )
+        }
+        let sessions = metadataSessions.map { hydratedSessions[$0.id] ?? $0 }
         return WorkoutProgressSnapshotBuilder.build(
             sessions: sessions,
             selectedPreviousSessionID: selectedPreviousSessionID,
@@ -790,6 +815,20 @@ nonisolated enum WorkoutProgressSnapshotLoader {
 }
 
 extension WorkoutProgressSessionInput {
+    nonisolated init(metadataFor session: WorkoutSession) {
+        self.init(
+            id: session.id,
+            templateID: session.templateID,
+            name: session.name,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            durationSeconds: session.durationSeconds,
+            prHitsCount: session.prHitsCount,
+            archivedAt: session.archivedAt,
+            exercises: []
+        )
+    }
+
     nonisolated init(session: WorkoutSession, repository: WorkoutSessionRepository) throws {
         self.init(
             id: session.id,
