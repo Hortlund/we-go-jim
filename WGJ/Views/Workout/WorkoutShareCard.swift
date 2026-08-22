@@ -88,7 +88,7 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         let strengthActivities = snapshot.exerciseRecap.map { recap in
             Exercise(
                 name: recap.exerciseName,
-                setProgressText: "\(recap.completedSetCount) / \(recap.totalSetCount) sets",
+                setProgressText: recap.shareSetBreakdownText,
                 bestSetText: recap.bestSetText
             )
         }
@@ -120,7 +120,7 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         } else if snapshot.totalVolume > 0 {
             primaryMetric = Metric(title: "TOTAL VOLUME", value: snapshot.totalVolumeText)
         } else if snapshot.completedSetCount > 0 {
-            primaryMetric = Metric(title: "COMPLETED SETS", value: "\(snapshot.completedSetCount)")
+            primaryMetric = Metric(title: "WORKING SETS", value: "\(snapshot.completedSetCount)")
         } else {
             primaryMetric = Metric(title: "DURATION", value: snapshot.durationText)
         }
@@ -141,13 +141,13 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         } else if hasCardio {
             supportingMetrics = [
                 Metric(title: "DURATION", value: snapshot.durationText),
-                Metric(title: "SETS", value: "\(snapshot.completedSetCount)"),
+                Metric(title: "WORKING SETS", value: "\(snapshot.completedSetCount)"),
                 Metric(title: "CARDIO", value: "\(completedCardio.count)"),
             ]
         } else if snapshot.totalVolume > 0 {
             supportingMetrics = [
                 Metric(title: "DURATION", value: snapshot.durationText),
-                Metric(title: "SETS", value: "\(snapshot.completedSetCount)"),
+                Metric(title: "WORKING SETS", value: "\(snapshot.completedSetCount)"),
                 Metric(title: "EXERCISES", value: "\(snapshot.exerciseCount)"),
             ]
         } else {
@@ -178,10 +178,32 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
                 ?? "Workout complete",
             highlightDetail: firstRecord.map { "\($0.performanceText) · \($0.detailText)" }
                 ?? cardioHighlightDetail
-                ?? "\(snapshot.completedSetCount) completed sets logged",
+                ?? snapshot.shareSetBreakdownText,
             exercises: visibleExercises,
             remainingExerciseCount: remainingExerciseCount
         )
+    }
+}
+
+private extension WorkoutCompletionSnapshot {
+    nonisolated var shareSetBreakdownText: String {
+        guard completedWarmupSetCount > 0 else {
+            return "\(completedSetCount) working set\(completedSetCount == 1 ? "" : "s") logged"
+        }
+        return "\(completedSetCount) working · \(completedWarmupSetCount) warm-up"
+    }
+}
+
+private extension WorkoutCompletionExerciseRecap {
+    nonisolated var shareSetBreakdownText: String {
+        let working = completedSetCount == totalSetCount
+            ? "\(completedSetCount) working"
+            : "\(completedSetCount)/\(totalSetCount) working"
+        guard totalWarmupSetCount > 0 else { return working }
+        let warmups = completedWarmupSetCount == totalWarmupSetCount
+            ? "\(completedWarmupSetCount) warm-up"
+            : "\(completedWarmupSetCount)/\(totalWarmupSetCount) warm-up"
+        return "\(working) · \(warmups)"
     }
 }
 
@@ -255,8 +277,8 @@ struct WorkoutShareCard: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 brand
-                Spacer(minLength: 28)
                 title
+                    .padding(.top, 16)
                     .padding(.bottom, 26)
                 primaryMetric
                     .padding(.bottom, 24)

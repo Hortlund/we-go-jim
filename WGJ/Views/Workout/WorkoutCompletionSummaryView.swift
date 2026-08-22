@@ -513,7 +513,7 @@ struct WorkoutCompletionSummaryView: View {
                 tint: WGJTheme.accentBlue
             )
             WorkoutCompletionStatCard(
-                title: "Completed Sets",
+                title: "Working Sets",
                 value: "\(snapshot.completedSetCount)",
                 systemImage: "checkmark.circle.fill",
                 tint: WGJTheme.success
@@ -759,6 +759,7 @@ struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let durationText: String
     let exerciseCount: Int
     let completedSetCount: Int
+    let completedWarmupSetCount: Int
     let totalVolume: Double
     let totalVolumeText: String
     let estimatedActiveCaloriesText: String?
@@ -828,6 +829,8 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable, Sendable {
     let exerciseName: String
     let completedSetCount: Int
     let totalSetCount: Int
+    let completedWarmupSetCount: Int
+    let totalWarmupSetCount: Int
     let bestSetText: String
     let structure: WorkoutExerciseStructurePresentation
 }
@@ -843,6 +846,7 @@ struct WorkoutCompletionCardioRecap: Identifiable, Equatable, Sendable {
 
 private struct WorkoutCompletionExerciseData: Sendable {
     let completedSetCount: Int
+    let completedWarmupSetCount: Int
     let recap: WorkoutCompletionExerciseRecap
 }
 
@@ -868,6 +872,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         let completedSetCount = exerciseData.reduce(0) { partialResult, data in
             partialResult + data.completedSetCount
         }
+        let completedWarmupSetCount = exerciseData.reduce(0) { partialResult, data in
+            partialResult + data.completedWarmupSetCount
+        }
         let catalogMuscleMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(
             modelContext: modelContext,
             catalogExerciseUUIDs: Set(exercises.map(\.catalogExerciseUUID))
@@ -890,7 +897,10 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         switch personalRecords.count {
         case 0:
             prHeadline = "No new PRs today"
-            prSupportText = "You logged \(completedSetCount) completed sets across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
+            let warmupSummary = completedWarmupSetCount > 0
+                ? " plus \(completedWarmupSetCount) warm-up set\(completedWarmupSetCount == 1 ? "" : "s")"
+                : ""
+            prSupportText = "You logged \(completedSetCount) working sets\(warmupSummary) across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
         case 1:
             prHeadline = "1 new PR today"
             prSupportText = "Your new PR from this session is listed below."
@@ -910,6 +920,7 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             exerciseCount: exercises.count,
             completedSetCount: completedSetCount,
+            completedWarmupSetCount: completedWarmupSetCount,
             totalVolume: session.totalVolume,
             totalVolumeText: formattedVolume(session.totalVolume),
             estimatedActiveCaloriesText: calorieMetric?.text,
@@ -928,14 +939,21 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         let completedSets = sets.filter {
             WorkoutSessionSetDraft(model: $0).isCycleCompleted
         }
+        let workingSets = sets.filter { !$0.isWarmup }
+        let warmupSets = sets.filter(\.isWarmup)
+        let completedWorkingSets = completedSets.filter { !$0.isWarmup }
+        let completedWarmupSets = completedSets.filter(\.isWarmup)
 
         return WorkoutCompletionExerciseData(
-            completedSetCount: completedSets.count,
+            completedSetCount: completedWorkingSets.count,
+            completedWarmupSetCount: completedWarmupSets.count,
             recap: WorkoutCompletionExerciseRecap(
                 id: exercise.id,
                 exerciseName: exercise.exerciseNameSnapshot,
-                completedSetCount: completedSets.count,
-                totalSetCount: sets.count,
+                completedSetCount: completedWorkingSets.count,
+                totalSetCount: workingSets.count,
+                completedWarmupSetCount: completedWarmupSets.count,
+                totalWarmupSetCount: warmupSets.count,
                 bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged"),
                 structure: WorkoutExerciseStructurePresentation(
                     supersetMembership: exercise.supersetMembership,
@@ -1134,7 +1152,7 @@ private struct WorkoutCompletionExerciseRecapCard: View {
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
 
-                    Text("\(recap.completedSetCount) / \(recap.totalSetCount) sets completed")
+                    Text(recap.setBreakdownText)
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
@@ -1195,6 +1213,21 @@ private struct WorkoutCompletionExerciseRecapCard: View {
                             .stroke(tint.opacity(0.24), lineWidth: 1)
                     )
             )
+    }
+}
+
+private extension WorkoutCompletionExerciseRecap {
+    var setBreakdownText: String {
+        let working = completedSetCount == totalSetCount
+            ? "\(completedSetCount) working"
+            : "\(completedSetCount)/\(totalSetCount) working"
+        guard totalWarmupSetCount > 0 else {
+            return "\(working) set\(totalSetCount == 1 ? "" : "s")"
+        }
+        let warmups = completedWarmupSetCount == totalWarmupSetCount
+            ? "\(completedWarmupSetCount) warm-up"
+            : "\(completedWarmupSetCount)/\(totalWarmupSetCount) warm-up"
+        return "\(working) · \(warmups)"
     }
 }
 

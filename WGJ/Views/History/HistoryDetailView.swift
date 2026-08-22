@@ -555,8 +555,10 @@ struct HistoryDetailView: View {
                 let collapsedSummary = HistoryExerciseCollapsedSummary(
                     targetRepMin: exercise.targetRepMin,
                     targetRepMax: exercise.targetRepMax,
-                    completedSetCount: exercise.totalSetCount > 0 ? exercise.completedSetCount : nil,
-                    totalSetCount: exercise.totalSetCount > 0 ? exercise.totalSetCount : nil,
+                    completedWorkingSetCount: drafts?.filter { !$0.isWarmup && $0.isCycleCompleted }.count,
+                    totalWorkingSetCount: drafts?.filter { !$0.isWarmup }.count,
+                    completedWarmupSetCount: drafts?.filter { $0.isWarmup && $0.isCycleCompleted }.count,
+                    totalWarmupSetCount: drafts?.filter(\.isWarmup).count,
                     restSeconds: restSeconds,
                     notes: draftStateStore.notes(for: exercise.id) ?? exercise.notes
                 )
@@ -1220,8 +1222,10 @@ private struct HistorySessionHeaderDraftFields: View {
 private struct HistoryExerciseCollapsedSummary: Equatable {
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let completedSetCount: Int?
-    let totalSetCount: Int?
+    let completedWorkingSetCount: Int?
+    let totalWorkingSetCount: Int?
+    let completedWarmupSetCount: Int?
+    let totalWarmupSetCount: Int?
     let restSeconds: Int
     let notes: String
 
@@ -1239,11 +1243,21 @@ private struct HistoryExerciseCollapsedSummary: Equatable {
     }
 
     var setProgressText: String {
-        guard let completedSetCount, let totalSetCount else {
+        guard let completedWorkingSetCount, let totalWorkingSetCount else {
             return "Loading sets"
         }
-
-        return "\(completedSetCount)/\(totalSetCount) sets"
+        let working = completedWorkingSetCount == totalWorkingSetCount
+            ? "\(completedWorkingSetCount) working"
+            : "\(completedWorkingSetCount)/\(totalWorkingSetCount) working"
+        guard let completedWarmupSetCount,
+              let totalWarmupSetCount,
+              totalWarmupSetCount > 0 else {
+            return "\(working) set\(totalWorkingSetCount == 1 ? "" : "s")"
+        }
+        let warmups = completedWarmupSetCount == totalWarmupSetCount
+            ? "\(completedWarmupSetCount) warm-up"
+            : "\(completedWarmupSetCount)/\(totalWarmupSetCount) warm-up"
+        return "\(working) · \(warmups)"
     }
 
     var restText: String {

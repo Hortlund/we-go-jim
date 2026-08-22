@@ -122,11 +122,14 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
                 return nil
             }
 
+            let sets = orderedSets(for: sessionExercise)
+
             return WorkoutTemplateSyncAddedExercise(
                 catalogExerciseUUID: sessionExercise.catalogExerciseUUID,
                 exerciseName: sessionExercise.exerciseNameSnapshot,
                 summary: exerciseSummary(
-                    setCount: orderedSets(for: sessionExercise).count,
+                    workingSetCount: sets.filter { !$0.isWarmup }.count,
+                    warmupSetCount: sets.filter(\.isWarmup).count,
                     targetRepMin: sessionExercise.targetRepMin,
                     targetRepMax: sessionExercise.targetRepMax,
                     restSeconds: sessionExercise.restSeconds
@@ -142,11 +145,14 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
                 return nil
             }
 
+            let sets = orderedSets(for: templateExercise)
+
             return WorkoutTemplateSyncRemovedExercise(
                 catalogExerciseUUID: templateExercise.catalogExerciseUUID,
                 exerciseName: templateExercise.exerciseNameSnapshot,
                 summary: exerciseSummary(
-                    setCount: orderedSets(for: templateExercise).count,
+                    workingSetCount: sets.filter { !$0.isWarmup }.count,
+                    warmupSetCount: sets.filter(\.isWarmup).count,
                     targetRepMin: templateExercise.targetRepMin,
                     targetRepMax: templateExercise.targetRepMax,
                     restSeconds: templateExercise.restSeconds
@@ -586,13 +592,17 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
     }
 
     private static func exerciseSummary(
-        setCount: Int,
+        workingSetCount: Int,
+        warmupSetCount: Int,
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int
     ) -> String {
-        [
-            "\(setCount) set" + (setCount == 1 ? "" : "s"),
+        let setSummary = warmupSetCount > 0
+            ? "\(workingSetCount) working · \(warmupSetCount) warm-up"
+            : "\(workingSetCount) working set" + (workingSetCount == 1 ? "" : "s")
+        return [
+            setSummary,
             repRangeText(min: targetRepMin, max: targetRepMax),
             "Rest \(formattedRest(normalizedRest(restSeconds)))",
         ]

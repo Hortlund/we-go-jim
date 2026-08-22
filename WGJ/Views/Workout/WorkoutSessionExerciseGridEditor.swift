@@ -1392,7 +1392,19 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var setProgressSummary: String {
-        "\(completedSetCount)/\(setDrafts.count) sets done"
+        let completedWarmups = setDrafts.filter { $0.isWarmup && $0.isCycleCompleted }.count
+        let completedWorking = setDrafts.filter { !$0.isWarmup && $0.isCycleCompleted }.count
+        let totalWarmups = setDrafts.filter(\.isWarmup).count
+        let totalWorking = setDrafts.count - totalWarmups
+        let logged = "\(completedSetCount)/\(setDrafts.count) logged"
+        guard totalWarmups > 0 else { return "\(completedSetCount)/\(setDrafts.count) sets logged" }
+        let working = completedWorking == totalWorking
+            ? "\(completedWorking) working"
+            : "\(completedWorking)/\(totalWorking) working"
+        let warmups = completedWarmups == totalWarmups
+            ? "\(completedWarmups) warm-up"
+            : "\(completedWarmups)/\(totalWarmups) warm-up"
+        return "\(logged) · \(working) · \(warmups)"
     }
 
     private var completedExerciseCardFill: LinearGradient {

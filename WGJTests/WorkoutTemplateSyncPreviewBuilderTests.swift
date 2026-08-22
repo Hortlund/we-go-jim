@@ -4,6 +4,84 @@ import XCTest
 
 @MainActor
 final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
+    func testAddedAndRemovedExerciseSummariesSeparateWarmupsFromWorkingSets() throws {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
+        let template = WorkoutTemplate(folderID: UUID(), name: "Push")
+        let removedExercise = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "incline-press",
+            exerciseNameSnapshot: "Incline Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Chest",
+            targetRepMin: 6,
+            targetRepMax: 10,
+            template: template
+        )
+        let removedWarmup = TemplateExerciseSet(
+            templateExerciseID: removedExercise.id,
+            sortOrder: 0,
+            isWarmup: true,
+            templateExercise: removedExercise
+        )
+        let removedWorkingSets = (1...2).map { index in
+            TemplateExerciseSet(
+                templateExerciseID: removedExercise.id,
+                sortOrder: index,
+                templateExercise: removedExercise
+            )
+        }
+        removedExercise.prescribedSets = [removedWarmup] + removedWorkingSets
+        template.exercises = [removedExercise]
+        let session = WorkoutSession(templateID: template.id, name: template.name)
+        let exercise = WorkoutSessionExercise(
+            sessionID: session.id,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Chest",
+            targetRepMin: 8,
+            targetRepMax: 12,
+            session: session
+        )
+        let warmup = WorkoutSessionSet(
+            sessionExerciseID: exercise.id,
+            sortOrder: 0,
+            isWarmup: true,
+            sessionExercise: exercise
+        )
+        let workingSets = (1...3).map { index in
+            WorkoutSessionSet(
+                sessionExerciseID: exercise.id,
+                sortOrder: index,
+                sessionExercise: exercise
+            )
+        }
+        exercise.sets = [warmup] + workingSets
+        session.exercises = [exercise]
+        context.insert(template)
+        context.insert(removedExercise)
+        ([removedWarmup] + removedWorkingSets).forEach(context.insert)
+        context.insert(session)
+        context.insert(exercise)
+        ([warmup] + workingSets).forEach(context.insert)
+
+        let preview = try XCTUnwrap(
+            WorkoutTemplateSyncPreviewBuilder.buildPreview(
+                template: template,
+                session: session
+            )
+        )
+
+        XCTAssertEqual(
+            preview.addedExercises.first?.summary,
+            "3 working · 1 warm-up • 8-12 reps • Rest 2:00"
+        )
+        XCTAssertEqual(
+            preview.removedExercises.first?.summary,
+            "2 working · 1 warm-up • 6-10 reps • Rest 2:00"
+        )
+    }
+
     func testDetectsOtherwiseIdenticalSecondMainActivityAsAdded() throws {
         let fixture = try makeMatchedFixture()
         let added = makeSessionActivity(
