@@ -1011,7 +1011,12 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         let kindsText = achievement.kinds.map(\.title).joined(separator: " + ") + " PR"
 
         if achievement.kinds.contains(.strength), let estimatedOneRepMax = achievement.estimatedOneRepMax {
-            return "\(kindsText) · \(WGJFormatters.oneDecimalString(estimatedOneRepMax)) \(achievement.loadUnit.shortLabel) e1RM"
+            let estimatedStrength = [
+                WGJFormatters.oneDecimalString(estimatedOneRepMax),
+                achievement.loadUnit.shortLabel,
+                "e1RM",
+            ].joined(separator: "\u{00A0}")
+            return "\(kindsText) · \(estimatedStrength)"
         }
 
         if achievement.kinds.contains(.volume), let volume = achievement.volume {
@@ -1132,9 +1137,10 @@ private struct WorkoutCompletionPersonalRecordCard: View {
                 Text(record.detailText)
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
         }
         .padding(16)
         .wgjCardContainer(strong: true)

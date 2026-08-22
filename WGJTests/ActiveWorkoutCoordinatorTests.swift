@@ -101,6 +101,77 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(maximumConcurrentWrites, 1)
     }
 
+    func testPreviousPerformanceCachePersistsAndInvalidatesWithExerciseIdentity() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store,
+            persistence: StubActiveWorkoutPersistence()
+        )
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Push",
+            exercises: [makeExercise(id: exerciseID, name: "Bench", sortOrder: 0)]
+        )
+        let previousSet = WorkoutPreviousSetSnapshot(reps: 8, weight: 100, unit: .kg)
+
+        _ = coordinator.send(.start(session))
+        _ = coordinator.send(.cachePreviousPerformance([exerciseID: [0: previousSet]]))
+        XCTAssertEqual(
+            coordinator.storedSnapshot?.previousSetSnapshotsByExerciseID[exerciseID]?[0],
+            previousSet
+        )
+
+        _ = coordinator.send(.replaceExercise(
+            exerciseID: exerciseID,
+            replacement: makeExercise(id: exerciseID, name: "Row", sortOrder: 0)
+        ))
+
+        XCTAssertNil(coordinator.storedSnapshot?.previousSetSnapshotsByExerciseID[exerciseID])
+    }
+
+    func testSynchronizeInvalidatesPreviousPerformanceOnlyWhenExerciseIdentityChanges() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store,
+            persistence: StubActiveWorkoutPersistence()
+        )
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Push",
+            exercises: [makeExercise(id: exerciseID, name: "Bench", sortOrder: 0)]
+        )
+        let previousSet = WorkoutPreviousSetSnapshot(reps: 8, weight: 100, unit: .kg)
+
+        _ = coordinator.send(.start(session))
+        _ = coordinator.send(.cachePreviousPerformance([exerciseID: [0: previousSet]]))
+        _ = coordinator.send(.synchronize(
+            session: session,
+            restTimer: nil,
+            presentationMode: .presented,
+            scrollTarget: nil,
+            expandedExerciseIDs: [exerciseID]
+        ))
+        XCTAssertEqual(
+            coordinator.storedSnapshot?.previousSetSnapshotsByExerciseID[exerciseID]?[0],
+            previousSet
+        )
+
+        let replacementSession = ActiveWorkoutRuntimeSession(
+            id: session.id,
+            name: session.name,
+            exercises: [makeExercise(id: exerciseID, name: "Row", sortOrder: 0)]
+        )
+        _ = coordinator.send(.synchronize(
+            session: replacementSession,
+            restTimer: nil,
+            presentationMode: .presented,
+            scrollTarget: nil,
+            expandedExerciseIDs: [exerciseID]
+        ))
+
+        XCTAssertNil(coordinator.storedSnapshot?.previousSetSnapshotsByExerciseID[exerciseID])
+    }
+
     func testRestoreRejectsCompletedSnapshotBeforePublishing() async throws {
         let session = ActiveWorkoutRuntimeSession(
             id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,

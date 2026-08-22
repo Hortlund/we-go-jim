@@ -411,8 +411,9 @@ struct WorkoutShareCard: View {
                 Text(presentation.highlightDetail)
                     .font(.system(size: 9, weight: .regular, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.55))
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.72)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let remainingPersonalRecordText = presentation.remainingPersonalRecordText {
                     Text(remainingPersonalRecordText)
                         .font(.system(size: 8, weight: .semibold, design: .rounded))

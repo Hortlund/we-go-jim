@@ -17,6 +17,27 @@ final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded.revision, 0)
+        XCTAssertTrue(decoded.previousSetSnapshotsByExerciseID.isEmpty)
+    }
+
+    func testPreviousPerformanceCacheSurvivesColdSnapshotLoad() async throws {
+        let directory = try makeTemporaryDirectory()
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let previousSet = WorkoutPreviousSetSnapshot(reps: 13, weight: 12, unit: .kg)
+        let snapshot = ActiveWorkoutStoredSnapshot(
+            revision: 3,
+            session: ActiveWorkoutRuntimeSession(name: "Push"),
+            previousSetSnapshotsByExerciseID: [exerciseID: [0: previousSet]]
+        )
+
+        let firstStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let writeResult = try await firstStore.save(snapshot)
+        XCTAssertEqual(writeResult, .written)
+
+        let coldStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let restored = try await coldStore.loadStoredSnapshot()
+
+        XCTAssertEqual(restored?.previousSetSnapshotsByExerciseID[exerciseID]?[0], previousSet)
     }
 
     func testOlderRevisionCannotOverwriteNewerDiskSnapshot() async throws {

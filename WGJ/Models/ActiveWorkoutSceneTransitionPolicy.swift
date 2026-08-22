@@ -75,7 +75,7 @@ nonisolated enum ActiveWorkoutBottomDockPlacementPolicy {
 
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {
     static let defaultPreviousPerformanceHydrationDelay: Duration = .milliseconds(0)
-    static let foregroundResumeGraceDelay: Duration = .milliseconds(2_500)
+    static let foregroundResumeGraceDelay: Duration = .milliseconds(100)
 
     static func shouldCancelNonCriticalInteractionWork(scenePhase: ScenePhase) -> Bool {
         scenePhase != .active

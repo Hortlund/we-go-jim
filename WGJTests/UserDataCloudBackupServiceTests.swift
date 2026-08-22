@@ -77,6 +77,47 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(retainedSnapshot)
     }
 
+    func testPresentationRestoreStagesCachedPreviousPerformanceWithoutHistoryQuery() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WGJPresentationRestoreTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let backgroundStore = AppBackgroundStore(container: container)
+        let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let sessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let previousSet = WorkoutPreviousSetSnapshot(reps: 13, weight: 12, unit: .kg)
+        try await snapshotStore.save(ActiveWorkoutStoredSnapshot(
+            session: ActiveWorkoutRuntimeSession(id: sessionID, name: "Current"),
+            previousSetSnapshotsByExerciseID: [exerciseID: [0: previousSet]]
+        ))
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: snapshotStore,
+            persistence: ModelContainerActiveWorkoutPersistence(backgroundStore: backgroundStore)
+        )
+        let presentationState = ActiveWorkoutPresentationState()
+
+        await presentationState.restoreActiveSessionIfNeeded(
+            coordinator: coordinator,
+            modelContext: context,
+            backgroundStore: backgroundStore,
+            allowsLegacyDraftImport: false,
+            presentationPolicy: .present
+        )
+
+        let restored = presentationState.preparedPreviousPerformanceResolution(
+            for: sessionID,
+            exerciseID: exerciseID
+        )
+        XCTAssertEqual(restored?.previous(at: 0), previousSet)
+    }
+
     func testStageLocalDataDeletionDoesNotCommitUntilCallerSaves() throws {
         let container = try makeInMemoryContainer()
         let seedContext = ModelContext(container)

@@ -752,6 +752,9 @@ struct StartWorkoutHomeView: View {
 
         if let runtimeSession = preparation.runtimeSession,
            let firstRenderSnapshot = preparation.firstRenderSnapshot {
+            _ = activeWorkoutCoordinator.send(.cachePreviousPerformance(
+                firstRenderSnapshot.previousResolutionByExerciseID.mapValues(\.previousBySetIndex)
+            ))
             _ = activeWorkoutCoordinator.send(.updatePresentation(
                 mode: .presented,
                 scrollTarget: nil,

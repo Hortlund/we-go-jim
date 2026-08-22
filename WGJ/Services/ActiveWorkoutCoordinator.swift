@@ -20,6 +20,7 @@ nonisolated enum ActiveWorkoutCommand: Sendable {
         expandedExerciseIDs: Set<UUID>
     )
     case updateRestTimer(RestTimerSnapshot?)
+    case cachePreviousPerformance([UUID: [Int: WorkoutPreviousSetSnapshot]])
     case synchronize(
         session: ActiveWorkoutRuntimeSession,
         restTimer: RestTimerSnapshot?,
@@ -303,10 +304,12 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             }
             replacement.sortOrder = snapshot.session.exercises[index].sortOrder
             snapshot.session.exercises[index] = replacement
+            snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
             snapshot.session.normalizeExerciseSortOrder()
             snapshot.session.touch()
         case .removeExercise(let exerciseID):
             snapshot.session.exercises.removeAll { $0.id == exerciseID }
+            snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
             snapshot.session.normalizeExerciseSortOrder()
             snapshot.session.touch()
         case .moveExercise(let exerciseID, let destinationIndex):
@@ -353,12 +356,19 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 exercise.muscleSummarySnapshot = component.muscleSummarySnapshot
                 exercise.updatedAt = .now
             }
+            snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
         case .updatePresentation(let mode, let scrollTarget, let expandedExerciseIDs):
             snapshot.presentationMode = mode
             snapshot.scrollTarget = scrollTarget
             snapshot.expandedExerciseIDs = expandedExerciseIDs
         case .updateRestTimer(let restTimer):
             snapshot.restTimer = restTimer?.isExpired == true ? nil : restTimer
+        case .cachePreviousPerformance(let previousSetSnapshotsByExerciseID):
+            let activeExerciseIDs = Set(snapshot.session.exercises.map(\.id))
+            for (exerciseID, previousSetSnapshots) in previousSetSnapshotsByExerciseID
+            where activeExerciseIDs.contains(exerciseID) {
+                snapshot.previousSetSnapshotsByExerciseID[exerciseID] = previousSetSnapshots
+            }
         case .synchronize(
             let session,
             let restTimer,
@@ -367,11 +377,22 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             let expandedExerciseIDs
         ):
             guard session.id == snapshot.session.id else { break }
+            let previousCatalogExerciseUUIDByID = Dictionary(
+                snapshot.session.exercises.map { ($0.id, $0.catalogExerciseUUID) },
+                uniquingKeysWith: { existing, _ in existing }
+            )
             snapshot.session = session
             snapshot.restTimer = restTimer?.isExpired == true ? nil : restTimer
             snapshot.presentationMode = presentationMode
             snapshot.scrollTarget = scrollTarget
             snapshot.expandedExerciseIDs = expandedExerciseIDs
+            let activeCatalogExerciseUUIDByID = Dictionary(
+                session.exercises.map { ($0.id, $0.catalogExerciseUUID) },
+                uniquingKeysWith: { existing, _ in existing }
+            )
+            snapshot.previousSetSnapshotsByExerciseID = snapshot.previousSetSnapshotsByExerciseID.filter {
+                previousCatalogExerciseUUIDByID[$0.key] == activeCatalogExerciseUUIDByID[$0.key]
+            }
         }
     }
 
