@@ -95,6 +95,9 @@
     "%lld" : {
 
     },
+    "%lld NEW PERSONAL RECORDS" : {
+      "comment" : "A pluralized count label displayed in a workout share card."
+    },
     "%lld / %lld sets completed" : {
       "localizations" : {
         "en" : {
@@ -209,6 +212,12 @@
     },
     "+ %lld more activities" : {
 
+    },
+    "+ %lld more PRs" : {
+      "comment" : "The number of additional personal records omitted from a workout share card."
+    },
+    "+ 1 more PR" : {
+      "comment" : "Indicates that one additional personal record is omitted from a workout share card."
     },
     "<5 kcal" : {
       "comment" : "A compact workout calorie estimate below the conservative display floor."

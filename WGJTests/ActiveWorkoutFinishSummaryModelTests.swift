@@ -249,6 +249,107 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
         XCTAssertEqual(presentation.exercises.first?.setProgressText, "MAIN CARDIO")
     }
 
+    func testWorkoutSharePresentationSummarizesMultiplePersonalRecords() {
+        let basePresentation = WorkoutSharePresentation(
+            sessionName: "Push Day",
+            completedAtText: "Aug 22, 4:00 PM",
+            activityLabel: "STRENGTH TRAINING",
+            primaryMetric: .init(title: "TOTAL VOLUME", value: "8,420 kg"),
+            supportingMetrics: [],
+            personalRecordCount: 1,
+            highlightTitle: "Bench Press",
+            highlightDetail: "100 kg x 8",
+            exercises: [],
+            remainingExerciseCount: 0
+        )
+
+        XCTAssertEqual(basePresentation.highlightEyebrowText, "NEW PERSONAL RECORD")
+        XCTAssertNil(basePresentation.remainingPersonalRecordText)
+
+        let twoRecords = WorkoutSharePresentation(
+            sessionName: basePresentation.sessionName,
+            completedAtText: basePresentation.completedAtText,
+            activityLabel: basePresentation.activityLabel,
+            primaryMetric: basePresentation.primaryMetric,
+            supportingMetrics: basePresentation.supportingMetrics,
+            personalRecordCount: 2,
+            highlightTitle: basePresentation.highlightTitle,
+            highlightDetail: basePresentation.highlightDetail,
+            exercises: basePresentation.exercises,
+            remainingExerciseCount: basePresentation.remainingExerciseCount
+        )
+
+        XCTAssertEqual(twoRecords.highlightEyebrowText, "2 NEW PERSONAL RECORDS")
+        XCTAssertEqual(twoRecords.remainingPersonalRecordText, "+ 1 more PR")
+
+        let multipleRecords = WorkoutSharePresentation(
+            sessionName: basePresentation.sessionName,
+            completedAtText: basePresentation.completedAtText,
+            activityLabel: basePresentation.activityLabel,
+            primaryMetric: basePresentation.primaryMetric,
+            supportingMetrics: basePresentation.supportingMetrics,
+            personalRecordCount: 3,
+            highlightTitle: basePresentation.highlightTitle,
+            highlightDetail: basePresentation.highlightDetail,
+            exercises: basePresentation.exercises,
+            remainingExerciseCount: basePresentation.remainingExerciseCount
+        )
+
+        XCTAssertEqual(multipleRecords.highlightEyebrowText, "3 NEW PERSONAL RECORDS")
+        XCTAssertEqual(multipleRecords.remainingPersonalRecordText, "+ 2 more PRs")
+    }
+
+    func testWorkoutSharePresentationReservesSpaceForMultiplePersonalRecords() {
+        let exercises = (1...10).map { index in
+            WorkoutCompletionExerciseRecap(
+                id: UUID(),
+                exerciseName: "Exercise \(index)",
+                completedSetCount: 3,
+                totalSetCount: 3,
+                bestSetText: "12 kg x 12",
+                structure: WorkoutExerciseStructurePresentation(
+                    supersetMembership: nil,
+                    hasDropset: false
+                )
+            )
+        }
+        let personalRecords = (1...3).map { index in
+            WorkoutCompletionPersonalRecord(
+                id: "record-\(index)",
+                exerciseName: "Exercise \(index)",
+                performanceText: "12 kg x 12",
+                detailText: "Volume PR"
+            )
+        }
+        let snapshot = WorkoutCompletionSnapshot(
+            sessionID: UUID(),
+            sessionName: "Ten Exercise Test",
+            celebrationTitle: "New PRs Logged",
+            celebrationSubtitle: "Saved",
+            completedAtText: "Aug 22, 4:00 PM",
+            durationText: "1h 15m",
+            exerciseCount: exercises.count,
+            completedSetCount: 30,
+            totalVolume: 4_320,
+            totalVolumeText: "4,320 kg",
+            estimatedActiveCaloriesText: nil,
+            estimatedActiveCaloriesAccessibilityLabel: nil,
+            prHeadline: "3 new PRs today",
+            prSupportText: "",
+            personalRecords: personalRecords,
+            cardioRecap: [],
+            muscleHeatmap: .empty,
+            exerciseRecap: exercises
+        )
+
+        let presentation = WorkoutSharePresentation.make(snapshot: snapshot)
+
+        XCTAssertEqual(presentation.exercises.count, 4)
+        XCTAssertEqual(presentation.remainingExerciseCount, 6)
+        XCTAssertEqual(presentation.personalRecordCount, 3)
+        XCTAssertEqual(presentation.remainingPersonalRecordText, "+ 2 more PRs")
+    }
+
     private func workoutShareSnapshot(
         exerciseCount: Int,
         cardioRoles: [WorkoutCardioRole]
