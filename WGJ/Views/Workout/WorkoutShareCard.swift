@@ -37,6 +37,27 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
     let exercises: [Exercise]
     let remainingExerciseCount: Int
 
+    var highlightEyebrowText: String {
+        switch personalRecordCount {
+        case 0:
+            String(localized: "SESSION COMPLETE")
+        case 1:
+            String(localized: "NEW PERSONAL RECORD")
+        default:
+            String(localized: "\(personalRecordCount) NEW PERSONAL RECORDS")
+        }
+    }
+
+    var remainingPersonalRecordText: String? {
+        let remainingCount = personalRecordCount - 1
+        guard remainingCount > 0 else { return nil }
+
+        if remainingCount == 1 {
+            return String(localized: "+ 1 more PR")
+        }
+        return String(localized: "+ \(remainingCount) more PRs")
+    }
+
     static func make(snapshot: WorkoutCompletionSnapshot) -> Self {
         let prCount = snapshot.personalRecords.count
         let firstRecord = snapshot.personalRecords.first
@@ -72,7 +93,15 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
             )
         }
         let allActivities = mainCardioActivities + strengthActivities
-        let visibleExerciseLimit = prCount > 0 ? 6 : 8
+        let visibleExerciseLimit: Int
+        switch prCount {
+        case 0:
+            visibleExerciseLimit = 8
+        case 1:
+            visibleExerciseLimit = 6
+        default:
+            visibleExerciseLimit = 4
+        }
         let visibleExercises = Array(allActivities.prefix(visibleExerciseLimit))
         let remainingExerciseCount = max(0, allActivities.count - visibleExercises.count)
         let activityLabel: String
@@ -349,7 +378,7 @@ struct WorkoutShareCard: View {
                 .background(Circle().fill(Color.white.opacity(0.10)))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(presentation.personalRecordCount > 0 ? "NEW PERSONAL RECORD" : "SESSION COMPLETE")
+                Text(presentation.highlightEyebrowText)
                     .font(.system(size: 8, weight: .bold, design: .rounded))
                     .tracking(0.7)
                     .foregroundStyle(Color(red: 0.35, green: 0.76, blue: 1.0))
@@ -362,6 +391,12 @@ struct WorkoutShareCard: View {
                     .foregroundStyle(Color.white.opacity(0.55))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
+                if let remainingPersonalRecordText = presentation.remainingPersonalRecordText {
+                    Text(remainingPersonalRecordText)
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.42))
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
         }
