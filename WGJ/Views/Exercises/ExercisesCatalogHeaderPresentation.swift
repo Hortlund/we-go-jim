@@ -87,31 +87,62 @@ struct ExercisesCatalogCollapsibleHeaderSection<Content: View>: View {
     let reduceMotion: Bool
     @ViewBuilder let content: () -> Content
 
-    @State private var expandedHeight: CGFloat?
-
     private var visibility: CGFloat {
         1 - min(max(progress, 0), 1)
     }
 
     var body: some View {
-        content()
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { geometry in
-                geometry.size.height
-            } action: { height in
-                guard height > 0,
-                      expandedHeight == nil || abs((expandedHeight ?? 0) - height) > 0.5
-                else { return }
-                expandedHeight = height
-            }
+        ExercisesCatalogCollapsibleHeaderLayout(
+            progress: progress,
+            reduceMotion: reduceMotion
+        ) {
+            content()
+                .fixedSize(horizontal: false, vertical: true)
+        }
             .opacity(visibility)
-            .offset(y: reduceMotion ? 0 : -8 * progress)
-            .frame(
-                height: expandedHeight.map { $0 * visibility },
-                alignment: .top
-            )
             .clipped()
             .allowsHitTesting(visibility > 0.01)
             .accessibilityHidden(visibility <= 0.01)
+    }
+}
+
+private struct ExercisesCatalogCollapsibleHeaderLayout: Layout {
+    let progress: CGFloat
+    let reduceMotion: Bool
+
+    private var normalizedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let contentSize = subview.sizeThatFits(
+            ProposedViewSize(width: proposal.width, height: nil)
+        )
+        return CGSize(
+            width: proposal.width ?? contentSize.width,
+            height: contentSize.height * (1 - normalizedProgress)
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        subview.place(
+            at: CGPoint(
+                x: bounds.minX,
+                y: bounds.minY - (reduceMotion ? 0 : 8 * normalizedProgress)
+            ),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: nil)
+        )
     }
 }
