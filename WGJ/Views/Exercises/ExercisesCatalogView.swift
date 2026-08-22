@@ -67,8 +67,6 @@ struct ExercisesCatalogView: View {
     @State private var activeFilterDropdown: ExerciseFilterDropdown?
     @State private var showingMuscleMapFilterSheet = false
     @State private var isSearchFieldFocused = false
-    @State private var visibleRowID: String?
-
     private let topAnchorID = "exercises-catalog-top"
 
     private enum ExerciseFilterDropdown {
@@ -209,7 +207,6 @@ struct ExercisesCatalogView: View {
                                             }
                                         }
                                     }
-                                    .scrollTargetLayout()
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -218,7 +215,6 @@ struct ExercisesCatalogView: View {
                         }
                         .coordinateSpace(name: ExercisesCatalogCoordinateSpace.scroll)
                         .scrollDismissesKeyboard(.interactively)
-                        .scrollPosition(id: $visibleRowID, anchor: .top)
                         .modifier(ExercisesCatalogScrollOffsetModifier { offset in
                             headerPresentation.consume(contentOffsetY: offset)
                         })
@@ -781,8 +777,11 @@ struct ExercisesCatalogView: View {
                     exercise: exercise,
                     matchedNameTokens: matchedNameTokens
                 )
+                .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("exercise-catalog-detail-\(exercise.remoteUUID)")
 
             Button {
                 handleSelection(exercise)
