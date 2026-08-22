@@ -189,7 +189,8 @@ struct TemplateEditorView: View {
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
+                .buttonStyle(WGJCompactGhostButtonStyle())
+                .accessibilityLabel("Add \(role.title)")
                 .accessibilityIdentifier("template-editor-\(role.rawValue)-add-button")
             }
 
@@ -198,12 +199,7 @@ struct TemplateEditorView: View {
                     title: cardioEmptyStateTitle(for: role),
                     message: cardioEmptyStateMessage(for: role),
                     icon: role.systemImage
-                ) {
-                    Button(String(localized: "Add \(role.title)")) {
-                        cardioPickerRequest = TemplateCardioPickerRequest(role: role)
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                }
+                )
             } else {
                 ForEach(Array(roleDrafts.enumerated()), id: \.element.id) { index, cardioDraft in
                     WorkoutCardioActivityPlanCard(
@@ -261,23 +257,20 @@ struct TemplateEditorView: View {
     private var exercisesSection: some View {
         let rows = exerciseRows
 
-        if exerciseDrafts.isEmpty {
-            WGJActionHeader(
-                "Exercises",
-                subtitle: "Add exercises and set targets."
-            )
-        } else {
-            WGJActionHeader(
-                "Exercises",
-                subtitle: "Add, reorder, or remove exercises in this template."
-            ) {
-                Button {
-                    pickerTarget = .exercise
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-                .buttonStyle(WGJPrimaryButtonStyle())
+        WGJActionHeader(
+            "Exercises",
+            subtitle: exerciseDrafts.isEmpty
+                ? "Add exercises and set targets."
+                : "Add, reorder, or remove exercises in this template."
+        ) {
+            Button {
+                pickerTarget = .exercise
+            } label: {
+                Label("Add", systemImage: "plus")
             }
+            .buttonStyle(WGJCompactGhostButtonStyle())
+            .accessibilityLabel("Add Exercise")
+            .accessibilityIdentifier("template-editor-exercise-add-button")
         }
 
         if exerciseDrafts.isEmpty {
@@ -285,12 +278,7 @@ struct TemplateEditorView: View {
                 title: "No exercises selected",
                 message: "Add exercises, then plan sets and rest.",
                 icon: "list.bullet.rectangle"
-            ) {
-                Button("Add Exercise") {
-                    pickerTarget = .exercise
-                }
-                .buttonStyle(WGJPrimaryButtonStyle())
-            }
+            )
         }
 
         ForEach(rows) { row in

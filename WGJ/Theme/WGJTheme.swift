@@ -332,6 +332,27 @@ struct WGJGhostButtonStyle: ButtonStyle {
     }
 }
 
+struct WGJSelectableButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
+            .modifier(WGJAdaptiveControlLabelModifier())
+            .frame(minHeight: 44)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                WGJGlassButtonBackground(
+                    tone: isSelected ? .primary : .secondary,
+                    isPressed: configuration.isPressed
+                )
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
 struct WGJDestructiveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
