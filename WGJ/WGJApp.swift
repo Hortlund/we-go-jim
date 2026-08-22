@@ -108,6 +108,7 @@ struct WGJApp: App {
         let container = try ModelContainer(for: appSchema, configurations: [inMemory])
         try seedUITestCatalogIfNeeded(container: container)
         try seedUITestExerciseProgressIfRequested(container: container)
+        try seedUITestHistoryMainCardioIfRequested(container: container)
         return container
     }
 
@@ -357,6 +358,104 @@ struct WGJApp: App {
             exercise.sets = sets
         }
 
+        try context.save()
+        HistoryAnalyticsCache.shared.invalidate(container: container)
+    }
+
+    nonisolated private static func seedUITestHistoryMainCardioIfRequested(container: ModelContainer) throws {
+        guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_HISTORY_MAIN_CARDIO") else { return }
+
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let completedAt = Date()
+        let sessionID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
+        let session = WorkoutSession(
+            id: sessionID,
+            name: "Mixed Cardio Fixture",
+            status: .completed,
+            startedAt: completedAt.addingTimeInterval(-1_800),
+            endedAt: completedAt,
+            durationSeconds: 1_800,
+            totalVolume: 800,
+            summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion,
+            createdAt: completedAt,
+            updatedAt: completedAt
+        )
+        let exerciseID = UUID(uuidString: "20000000-0000-0000-0000-000000000002")!
+        let exercise = WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "seed-bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            totalSetCount: 1,
+            completedSetCount: 1,
+            session: session
+        )
+        let set = WorkoutSessionSet(
+            sessionExerciseID: exerciseID,
+            actualReps: 8,
+            actualWeight: 100,
+            actualLoadUnit: .kg,
+            isCompleted: true,
+            sessionExercise: exercise
+        )
+        let cardioBlocks = [
+            WorkoutSessionCardioBlock(
+                sessionID: sessionID,
+                phase: .preWorkout,
+                role: .warmUp,
+                catalogExerciseUUID: "seed-walk",
+                exerciseNameSnapshot: "Warm-up Walk",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .timeOnly,
+                goalKind: .time,
+                targetDurationSeconds: 300,
+                actualDurationSeconds: 300,
+                isCompleted: true,
+                session: session
+            ),
+            WorkoutSessionCardioBlock(
+                sessionID: sessionID,
+                phase: .preWorkout,
+                role: .main,
+                catalogExerciseUUID: "seed-bike",
+                exerciseNameSnapshot: "Bike",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .timeOnly,
+                goalKind: .time,
+                targetDurationSeconds: 600,
+                actualDurationSeconds: 600,
+                isCompleted: true,
+                session: session
+            ),
+            WorkoutSessionCardioBlock(
+                sessionID: sessionID,
+                phase: .postWorkout,
+                role: .finisher,
+                catalogExerciseUUID: "seed-stairs",
+                exerciseNameSnapshot: "Finisher Stairs",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .timeOnly,
+                goalKind: .time,
+                targetDurationSeconds: 300,
+                actualDurationSeconds: 300,
+                isCompleted: true,
+                session: session
+            ),
+        ]
+
+        context.insert(session)
+        context.insert(exercise)
+        context.insert(set)
+        cardioBlocks.forEach(context.insert)
+        session.exercises = [exercise]
+        session.cardioBlocks = cardioBlocks
+        exercise.sets = [set]
         try context.save()
         HistoryAnalyticsCache.shared.invalidate(container: container)
     }

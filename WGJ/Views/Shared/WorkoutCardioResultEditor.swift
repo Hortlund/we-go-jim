@@ -384,24 +384,27 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 130), spacing: 8)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(summary.metrics) { metric in
-                        WGJMetricPill(
-                            systemImage: metric.systemImage,
-                            value: metric.value,
-                            tint: metricTint(metric)
-                        )
-                        .accessibilityLabel(
-                            WorkoutMetricAccessibilityPolicy.cardioMetric(
-                                label: metric.title,
-                                value: metric.accessibilityValue,
-                                semantic: metric.accessibilitySemantic
-                            )
-                        )
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(metricRows.enumerated()), id: \.offset) { _, row in
+                        if row.count == 2 {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 8) {
+                                    ForEach(row) { metric in
+                                        metricPill(metric)
+                                    }
+                                }
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(row) { metric in
+                                        metricPill(metric)
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(row) { metric in
+                                metricPill(metric)
+                            }
+                        }
                     }
                 }
             }
@@ -447,6 +450,27 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
         case .duration, .distance:
             return WGJTheme.textSecondary
         }
+    }
+
+    private var metricRows: [[WorkoutCardioResultSummary.Metric]] {
+        stride(from: 0, to: summary.metrics.count, by: 2).map { startIndex in
+            Array(summary.metrics[startIndex..<min(startIndex + 2, summary.metrics.count)])
+        }
+    }
+
+    private func metricPill(_ metric: WorkoutCardioResultSummary.Metric) -> some View {
+        WGJMetricPill(
+            systemImage: metric.systemImage,
+            value: metric.value,
+            tint: metricTint(metric)
+        )
+        .accessibilityLabel(
+            WorkoutMetricAccessibilityPolicy.cardioMetric(
+                label: metric.title,
+                value: metric.accessibilityValue,
+                semantic: metric.accessibilitySemantic
+            )
+        )
     }
 }
 

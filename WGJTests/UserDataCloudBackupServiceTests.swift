@@ -1271,6 +1271,20 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             actualWeight: 60,
             isCompleted: true
         ))
+        context.insert(WorkoutSessionCardioBlock(
+            sessionID: sessionID,
+            phase: .preWorkout,
+            role: .main,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .timeOnly,
+            goalKind: .time,
+            targetDurationSeconds: 600,
+            actualDurationSeconds: 600,
+            isCompleted: true
+        ))
         try context.save()
 
         let loaded = try HistoryOverviewSnapshotLoader.load(
@@ -1279,9 +1293,10 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             pageSize: 10
         )
 
-        let row = try XCTUnwrap(loaded.completedSessions.first?.summaryRows.first)
-        XCTAssertEqual(row.exercise, "1 x Lat Pulldown")
-        XCTAssertNotEqual(row.bestSet, "-")
+        let rows = try XCTUnwrap(loaded.completedSessions.first?.summaryRows)
+        XCTAssertEqual(rows.map(\.exercise), ["1 x Lat Pulldown", "Bike"])
+        XCTAssertNotEqual(rows.first?.bestSet, "-")
+        XCTAssertEqual(rows.last?.bestSet, "10 min")
     }
 
     func testHistoryQueriesUseDisplayedCompletionDayForOvernightWorkouts() throws {

@@ -1,4 +1,3 @@
-import Photos
 import SwiftUI
 import UIKit
 
@@ -11,7 +10,20 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
     struct Exercise: Equatable, Sendable {
         let name: String
         let setProgressText: String
+        let detailTitle: LocalizedStringResource
         let bestSetText: String
+
+        init(
+            name: String,
+            setProgressText: String,
+            detailTitle: LocalizedStringResource = "BEST SET",
+            bestSetText: String
+        ) {
+            self.name = name
+            self.setProgressText = setProgressText
+            self.detailTitle = detailTitle
+            self.bestSetText = bestSetText
+        }
     }
 
     let sessionName: String
@@ -31,6 +43,7 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         let completedCardio = snapshot.cardioRecap.filter(\.isCompleted)
         let hasStrength = snapshot.exerciseCount > 0
         let hasCardio = !completedCardio.isEmpty
+        let hasMainCardio = completedCardio.contains { $0.role == .main }
         let cardioMetrics = completedCardio.flatMap(\.summary.metrics)
         let preferredCardioMetric = cardioMetrics.first { $0.kind == .distance }
             ?? cardioMetrics.first { $0.kind == .duration }
@@ -38,21 +51,35 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         let secondaryCardioMetric = cardioMetrics.first {
             $0.kind != preferredCardioMetric?.kind && $0.kind != .duration
         }
-        let visibleExerciseLimit = prCount > 0 ? 6 : 8
-        let visibleExercises = snapshot.exerciseRecap.prefix(visibleExerciseLimit).map { recap in
+        let mainCardioActivities = completedCardio
+            .filter { $0.role == .main }
+            .map { cardio in
+                let resultText = cardio.summary.metrics.prefix(2)
+                    .map(\.value)
+                    .joined(separator: " · ")
+                return Exercise(
+                    name: cardio.exerciseName,
+                    setProgressText: cardio.role.title.uppercased(),
+                    detailTitle: "RESULT",
+                    bestSetText: resultText.isEmpty ? "Complete" : resultText
+                )
+            }
+        let strengthActivities = snapshot.exerciseRecap.map { recap in
             Exercise(
                 name: recap.exerciseName,
                 setProgressText: "\(recap.completedSetCount) / \(recap.totalSetCount) sets",
                 bestSetText: recap.bestSetText
             )
         }
-        let remainingExerciseCount = max(0, snapshot.exerciseRecap.count - visibleExercises.count)
+        let allActivities = mainCardioActivities + strengthActivities
+        let visibleExerciseLimit = prCount > 0 ? 6 : 8
+        let visibleExercises = Array(allActivities.prefix(visibleExerciseLimit))
+        let remainingExerciseCount = max(0, allActivities.count - visibleExercises.count)
         let activityLabel: String
-        switch (hasStrength, hasCardio) {
+        switch (hasStrength, hasMainCardio) {
         case (true, true): activityLabel = "STRENGTH + CARDIO"
         case (true, false): activityLabel = "STRENGTH TRAINING"
-        case (false, true): activityLabel = "CARDIO"
-        case (false, false): activityLabel = "WORKOUT"
+        case (false, _): activityLabel = hasCardio ? "CARDIO" : "WORKOUT"
         }
 
         let primaryMetric: Metric
@@ -156,69 +183,17 @@ enum WorkoutShareCardRenderer {
     }
 }
 
-private enum WorkoutSharePhotoLibrarySaveError: Error {
-    case encodingFailed
-    case permissionDenied
-    case saveFailed
-}
-
-@MainActor
-private enum WorkoutSharePhotoLibrarySaver {
-    static func save(_ image: UIImage) async throws {
-        guard let imageData = image.pngData() else {
-            throw WorkoutSharePhotoLibrarySaveError.encodingFailed
-        }
-
-        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard authorization == .authorized || authorization == .limited else {
-            throw WorkoutSharePhotoLibrarySaveError.permissionDenied
-        }
-
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetCreationRequest.forAsset()
-                request.addResource(with: .photo, data: imageData, options: nil)
-            } completionHandler: { didSave, error in
-                if didSave {
-                    continuation.resume()
-                } else {
-                    continuation.resume(
-                        throwing: error ?? WorkoutSharePhotoLibrarySaveError.saveFailed
-                    )
-                }
-            }
-        }
-    }
-}
-
 private enum WorkoutShareAlert: String, Identifiable {
     case renderFailed
-    case saved
-    case photoPermissionDenied
-    case saveFailed
 
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .renderFailed: "Couldn’t Create Workout Image"
-        case .saved: "Saved to Photos"
-        case .photoPermissionDenied: "Photos Access Needed"
-        case .saveFailed: "Couldn’t Save Image"
-        }
+        "Couldn’t Create Workout Image"
     }
 
     var message: String {
-        switch self {
-        case .renderFailed:
-            "The workout image could not be created. Please try again."
-        case .saved:
-            "Your workout image is now in your photo library."
-        case .photoPermissionDenied:
-            "Allow We Go Jim to add photos in Settings, then try again."
-        case .saveFailed:
-            "The workout image could not be saved. Please try again."
-        }
+        "The workout image could not be created. Please try again."
     }
 }
 
@@ -439,7 +414,7 @@ struct WorkoutShareCard: View {
                             Spacer(minLength: 8)
 
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text("BEST SET")
+                                Text(exercise.detailTitle)
                                     .font(.system(size: 6.5, weight: .bold, design: .rounded))
                                     .tracking(0.5)
                                     .foregroundStyle(Color.white.opacity(0.34))
@@ -454,7 +429,7 @@ struct WorkoutShareCard: View {
                     }
 
                     if presentation.remainingExerciseCount > 0 {
-                        Text("+ \(presentation.remainingExerciseCount) more exercises")
+                        Text("+ \(presentation.remainingExerciseCount) more activities")
                             .font(.system(size: 8, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.white.opacity(0.42))
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -483,7 +458,6 @@ struct WorkoutSharePreviewSheet: View {
 
     @State private var shareSheetItem: WorkoutShareSheetItem?
     @State private var alert: WorkoutShareAlert?
-    @State private var isSavingImage = false
 
     var body: some View {
         NavigationStack {
@@ -509,35 +483,14 @@ struct WorkoutSharePreviewSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack(spacing: 12) {
-                    Button {
-                        saveStoryImage()
-                    } label: {
-                        Group {
-                            if isSavingImage {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                    Text("Saving…")
-                                }
-                            } else {
-                                Label("Save Image", systemImage: "square.and.arrow.down")
-                            }
-                        }
+                Button {
+                    shareStory()
+                } label: {
+                    Label("Share Story", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(isSavingImage)
-                    .accessibilityIdentifier("workout-share-preview-save-image-button")
-
-                    Button {
-                        shareStory()
-                    } label: {
-                        Label("Share Story", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .accessibilityIdentifier("workout-share-preview-share-button")
                 }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .accessibilityIdentifier("workout-share-preview-share-button")
                 .padding(16)
                 .background(.ultraThinMaterial)
             }
@@ -554,29 +507,6 @@ struct WorkoutSharePreviewSheet: View {
             )
         }
         .accessibilityIdentifier("workout-share-preview")
-    }
-
-    @MainActor
-    private func saveStoryImage() {
-        guard !isSavingImage else { return }
-        guard let image = WorkoutShareCardRenderer.render(presentation) else {
-            alert = .renderFailed
-            return
-        }
-
-        isSavingImage = true
-        Task { @MainActor in
-            defer { isSavingImage = false }
-
-            do {
-                try await WorkoutSharePhotoLibrarySaver.save(image)
-                alert = .saved
-            } catch WorkoutSharePhotoLibrarySaveError.permissionDenied {
-                alert = .photoPermissionDenied
-            } catch {
-                alert = .saveFailed
-            }
-        }
     }
 
     @MainActor
