@@ -381,9 +381,12 @@ struct ExercisesCatalogView: View {
             }
         }
         .onDisappear {
-            isSearchFieldFocused = false
-            activeFilterDropdown = nil
-            WGJKeyboard.dismiss()
+            Task { @MainActor in
+                await Task.yield()
+                isSearchFieldFocused = false
+                isSearchToolbarExpanded = false
+                activeFilterDropdown = nil
+            }
         }
     }
 
