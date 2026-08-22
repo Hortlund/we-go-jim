@@ -694,6 +694,25 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertFalse(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
         XCTAssertTrue(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
         XCTAssertTrue(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .background))
+
+        XCTAssertFalse(
+            ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .active)
+        )
+        XCTAssertTrue(
+            ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .inactive)
+        )
+        XCTAssertTrue(
+            ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .background)
+        )
+        XCTAssertTrue(
+            ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .active)
+        )
+        XCTAssertFalse(
+            ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .inactive)
+        )
+        XCTAssertFalse(
+            ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .background)
+        )
     }
 
     func testMetricInputDraftBufferCommitsDropStagePendingValues() {

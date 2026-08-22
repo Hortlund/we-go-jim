@@ -1328,6 +1328,12 @@ struct ActiveWorkoutView: View {
         previousResolutionByExerciseID.merge(
             loadedHydration.previousResolutionByExerciseID.filter { previousExerciseIDs.contains($0.key) }
         ) { _, new in new }
+        let previousSetSnapshotsByExerciseID = loadedHydration.previousResolutionByExerciseID
+            .filter { previousExerciseIDs.contains($0.key) }
+            .mapValues(\.previousBySetIndex)
+        if !previousSetSnapshotsByExerciseID.isEmpty {
+            _ = activeWorkoutCoordinator.send(.cachePreviousPerformance(previousSetSnapshotsByExerciseID))
+        }
         componentResolutionByExerciseID.merge(
             loadedHydration.componentResolutionByExerciseID.filter { componentExerciseIDs.contains($0.key) }
         ) { _, new in new }
@@ -2789,9 +2795,10 @@ struct ActiveWorkoutView: View {
             focusedMetricInputExerciseID = nil
         }
 
-        // Foreground return must stay memory-only; non-critical work resumes from explicit user interactions.
         if ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: newPhase) {
             cancelNonCriticalInteractionWorkForSceneTransition()
+        } else {
+            scheduleForegroundNonCriticalInteractionWorkResume()
         }
 
         guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else {

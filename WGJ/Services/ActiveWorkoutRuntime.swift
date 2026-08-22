@@ -101,6 +101,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     var presentationMode: ActiveWorkoutStoredPresentationMode?
     var scrollTarget: ActiveWorkoutScrollTarget?
     var expandedExerciseIDs: Set<UUID>
+    var previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
 
     init(
         revision: UInt64 = 0,
@@ -108,7 +109,8 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
-        expandedExerciseIDs: Set<UUID> = []
+        expandedExerciseIDs: Set<UUID> = [],
+        previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     ) {
         self.revision = revision
         self.session = session
@@ -116,6 +118,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         self.presentationMode = presentationMode
         self.scrollTarget = scrollTarget
         self.expandedExerciseIDs = expandedExerciseIDs
+        self.previousSetSnapshotsByExerciseID = previousSetSnapshotsByExerciseID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -125,6 +128,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         case presentationMode
         case scrollTarget
         case expandedExerciseIDs
+        case previousSetSnapshotsByExerciseID
     }
 
     init(from decoder: Decoder) throws {
@@ -135,6 +139,10 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
         scrollTarget = try container.decodeIfPresent(ActiveWorkoutScrollTarget.self, forKey: .scrollTarget)
         expandedExerciseIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .expandedExerciseIDs) ?? []
+        previousSetSnapshotsByExerciseID = try container.decodeIfPresent(
+            [UUID: [Int: WorkoutPreviousSetSnapshot]].self,
+            forKey: .previousSetSnapshotsByExerciseID
+        ) ?? [:]
     }
 }
 
@@ -763,7 +771,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
                 scrollTarget: storedSnapshot.scrollTarget,
-                expandedExerciseIDs: storedSnapshot.expandedExerciseIDs
+                expandedExerciseIDs: storedSnapshot.expandedExerciseIDs,
+                previousSetSnapshotsByExerciseID: storedSnapshot.previousSetSnapshotsByExerciseID
             )
         }
 
@@ -788,7 +797,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             restTimer: snapshot.restTimer?.isExpired == true ? nil : snapshot.restTimer,
             presentationMode: snapshot.presentationMode,
             scrollTarget: snapshot.scrollTarget,
-            expandedExerciseIDs: snapshot.expandedExerciseIDs
+            expandedExerciseIDs: snapshot.expandedExerciseIDs,
+            previousSetSnapshotsByExerciseID: snapshot.previousSetSnapshotsByExerciseID
         )
         let currentSnapshot = try loadStoredSnapshot()
         if let currentRevision = currentSnapshot?.revision,
@@ -826,10 +836,12 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
         expandedExerciseIDs: Set<UUID>? = nil,
+        previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]? = nil,
         preservesExistingRestTimer: Bool = true,
         preservesExistingPresentationMode: Bool = true,
         preservesExistingScrollTarget: Bool = true,
-        preservesExistingExpandedExerciseIDs: Bool = true
+        preservesExistingExpandedExerciseIDs: Bool = true,
+        preservesExistingPreviousSetSnapshots: Bool = true
     ) throws -> ActiveWorkoutSnapshotWriteResult {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
@@ -843,6 +855,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             || preservesExistingPresentationMode
             || preservesExistingScrollTarget
             || preservesExistingExpandedExerciseIDs
+            || preservesExistingPreviousSetSnapshots
             ? (try? loadStoredSnapshot())
             : nil
         let existingRestTimer = preservesExistingRestTimer ? existingSnapshot?.restTimer : nil
@@ -851,17 +864,22 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             : nil
         let existingScrollTarget = preservesExistingScrollTarget ? existingSnapshot?.scrollTarget : nil
         let existingExpandedExerciseIDs = preservesExistingExpandedExerciseIDs ? existingSnapshot?.expandedExerciseIDs : nil
+        let existingPreviousSetSnapshots = preservesExistingPreviousSetSnapshots
+            ? existingSnapshot?.previousSetSnapshotsByExerciseID
+            : nil
         let resolvedRestTimer = restTimer ?? existingRestTimer
         let resolvedPresentationMode = presentationMode ?? existingPresentationMode
         let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
         let resolvedExpandedExerciseIDs = expandedExerciseIDs ?? existingExpandedExerciseIDs ?? []
+        let resolvedPreviousSetSnapshots = previousSetSnapshotsByExerciseID ?? existingPreviousSetSnapshots ?? [:]
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
             revision: revision ?? existingSnapshot?.revision ?? 0,
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
             presentationMode: resolvedPresentationMode,
             scrollTarget: resolvedScrollTarget,
-            expandedExerciseIDs: resolvedExpandedExerciseIDs
+            expandedExerciseIDs: resolvedExpandedExerciseIDs,
+            previousSetSnapshotsByExerciseID: resolvedPreviousSetSnapshots
         )
         return try save(storedSnapshot)
     }

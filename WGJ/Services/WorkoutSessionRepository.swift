@@ -7,7 +7,7 @@ nonisolated struct WorkoutSessionPageCursor: Equatable, Sendable {
     let sessionID: UUID
 }
 
-nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
+nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Codable, Sendable {
     var reps: Int?
     var weight: Double?
     var unit: TemplateLoadUnit
