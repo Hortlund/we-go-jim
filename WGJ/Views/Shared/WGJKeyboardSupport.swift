@@ -148,17 +148,18 @@ struct WGJAccessoryTextField: UIViewRepresentable {
             textField.reloadInputViews()
         }
 
-        if isFocused, isEnabled, !textField.isFirstResponder {
-            textField.becomeFirstResponder()
-        } else if !isFocused, textField.isFirstResponder {
-            textField.resignFirstResponder()
-        }
+        context.coordinator.reconcileFocus(
+            shouldFocus: isFocused && isEnabled,
+            textField: textField
+        )
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         @Binding private var text: String
         @Binding private var isFocused: Bool
         private let onDismiss: () -> Void
+        private var focusReconciliationGeneration = 0
+        private var focusPublicationGeneration = 0
         weak var textField: UITextField?
 
         init(
@@ -176,22 +177,61 @@ struct WGJAccessoryTextField: UIViewRepresentable {
         }
 
         @objc private func dismissKeyboard() {
-            isFocused = false
             textField?.resignFirstResponder()
-            onDismiss()
+            publishFocus(false)
+            Task { @MainActor [onDismiss] in
+                await Task.yield()
+                onDismiss()
+            }
         }
 
         func textFieldDidBeginEditing(_ textField: UITextField) {
-            isFocused = true
+            publishFocus(true)
         }
 
         func textFieldDidEndEditing(_ textField: UITextField) {
-            isFocused = false
+            publishFocus(false)
         }
 
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             dismissKeyboard()
             return false
+        }
+
+        func reconcileFocus(shouldFocus: Bool, textField: UITextField) {
+            focusReconciliationGeneration += 1
+            let generation = focusReconciliationGeneration
+            guard textField.isFirstResponder != shouldFocus else { return }
+
+            Task { @MainActor [weak self, weak textField] in
+                await Task.yield()
+                guard let self,
+                      let textField,
+                      self.textField === textField,
+                      self.focusReconciliationGeneration == generation
+                else { return }
+
+                if shouldFocus {
+                    guard textField.isEnabled, !textField.isFirstResponder else { return }
+                    textField.becomeFirstResponder()
+                } else if textField.isFirstResponder {
+                    textField.resignFirstResponder()
+                }
+            }
+        }
+
+        private func publishFocus(_ value: Bool) {
+            focusPublicationGeneration += 1
+            let generation = focusPublicationGeneration
+
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self,
+                      self.focusPublicationGeneration == generation,
+                      self.isFocused != value
+                else { return }
+                self.isFocused = value
+            }
         }
     }
 }
