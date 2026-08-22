@@ -1128,10 +1128,15 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let restoredContext = ModelContext(brokenContainer)
         let restoredTemplates = try restoredContext.fetch(FetchDescriptor<WorkoutTemplate>())
         let restoredExercises = try restoredContext.fetch(FetchDescriptor<TemplateExercise>())
+        let restoredTemplate = try XCTUnwrap(restoredTemplates.first)
+        let restoredExercise = try XCTUnwrap(restoredExercises.first)
         XCTAssertNotNil(restoreResult)
         XCTAssertEqual(restoredTemplates.count, 1)
         XCTAssertEqual(restoredExercises.count, 1)
-        XCTAssertEqual(restoredExercises.first?.exerciseNameSnapshot, "Lat Pulldown")
+        XCTAssertEqual(restoredExercise.exerciseNameSnapshot, "Lat Pulldown")
+        XCTAssertEqual(restoredTemplate.folder?.id, folderID)
+        XCTAssertEqual(restoredTemplate.exercises?.map(\.id), [exerciseID])
+        XCTAssertEqual(restoredExercise.template?.id, templateID)
     }
 
     func testRestoreLatestBackupReplacingLocalDataClearsActiveWorkoutSnapshot() async throws {
