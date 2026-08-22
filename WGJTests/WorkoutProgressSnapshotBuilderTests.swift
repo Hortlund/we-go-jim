@@ -224,6 +224,7 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.volume }?.direction, .up)
         XCTAssertEqual(comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.duration }?.direction, .up)
         XCTAssertEqual(comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.prs }?.deltaText, "+2")
+        XCTAssertEqual(comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.sets }?.title, "Working Sets")
         XCTAssertEqual(comparison.exerciseComparisons.count, 1)
         XCTAssertEqual(comparison.exerciseComparisons.first?.exerciseName, "Bench Press")
         XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .up)
@@ -429,6 +430,14 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(
             comparison.metricDeltas.first { $0.kind == .volume }?.direction,
             .flat
+        )
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == .sets }?.direction,
+            .flat
+        )
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == .sets }?.currentText,
+            "1"
         )
         XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .flat)
         XCTAssertEqual(comparison.exerciseComparisons.first?.deltaText, "0 kg e1RM")

@@ -358,7 +358,7 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
             ),
             metricDelta(
                 kind: .sets,
-                title: "Sets",
+                title: "Working Sets",
                 systemImage: "checklist",
                 previousValue: Double(previous.completedSetCount),
                 currentValue: Double(current.completedSetCount),

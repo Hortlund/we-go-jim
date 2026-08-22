@@ -5,6 +5,7 @@ struct ProgressDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var snapshot = WorkoutProgressDashboardSnapshot.empty
     @State private var selectedPreviousSessionID: UUID?
@@ -228,16 +229,18 @@ struct ProgressDashboardView: View {
 
     private func metricGrid(_ metricDeltas: [WorkoutProgressMetricDelta]) -> some View {
         LazyVGrid(
-            columns: [
-                GridItem(.flexible(), spacing: 12),
-                GridItem(.flexible(), spacing: 12),
-            ],
+            columns: metricGridColumns,
             spacing: 12
         ) {
             ForEach(metricDeltas) { metric in
                 ProgressMetricDeltaCard(metric: metric)
             }
         }
+    }
+
+    private var metricGridColumns: [GridItem] {
+        let columnCount = dynamicTypeSize.isAccessibilitySize ? 1 : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: columnCount)
     }
 
     private func highlightSection(_ highlights: [WorkoutProgressHighlightCard]) -> some View {
@@ -254,7 +257,7 @@ struct ProgressDashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader(
                 "Template Exercise Progress",
-                subtitle: "Weight, reps, and volume movement on repeated exercises."
+                subtitle: "Best sets and volume from completed working sets."
             )
 
             if comparisons.isEmpty {
@@ -401,7 +404,8 @@ private struct ProgressMetricDeltaCard: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(WGJTheme.textSecondary)
                     .textCase(.uppercase)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
             }
 
             Text(metric.currentText)
