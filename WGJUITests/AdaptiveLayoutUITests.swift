@@ -58,6 +58,31 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testExerciseSearchRefocusesAfterOpeningFilter() {
+        let app = launchLocalApp()
+        openExercisesTab(in: app)
+
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("bench")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+
+        app.buttons["exercises-body-part-filter"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+        app.buttons
+            .matching(identifier: "exercises-body-part-dropdown")
+            .matching(NSPredicate(format: "label == %@", "Any Body Part"))
+            .firstMatch
+            .tap()
+
+        search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        search.typeText(" press")
+        XCTAssertEqual(search.value as? String, "bench press")
+    }
+
+    @MainActor
     func testExerciseProgressSelectors() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
         openExercisesTab(in: app)

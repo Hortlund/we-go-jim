@@ -66,7 +66,7 @@ struct ExercisesCatalogView: View {
     @State private var isSearchToolbarExpanded = false
     @State private var activeFilterDropdown: ExerciseFilterDropdown?
     @State private var showingMuscleMapFilterSheet = false
-    @State private var isSearchFieldFocused = false
+    @FocusState private var isSearchFieldFocused: Bool
     private let topAnchorID = "exercises-catalog-top"
 
     private enum ExerciseFilterDropdown {
@@ -374,6 +374,11 @@ struct ExercisesCatalogView: View {
                 activeFilterDropdown = nil
             }
         }
+        .onChange(of: isSearchFieldFocused) { _, isFocused in
+            let shouldExpand = isFocused || activeFilterDropdown != nil
+            isSearchToolbarExpanded = shouldExpand
+            headerPresentation.forceExpanded(shouldExpand)
+        }
     }
 
     private var pinnedSearchControls: some View {
@@ -443,7 +448,7 @@ struct ExercisesCatalogView: View {
                     set: { searchState.updateDebouncedQuery($0) }
                 ),
                 resetToken: searchState.resetToken,
-                isFocused: searchFocusBinding
+                isFocused: $isSearchFieldFocused
             )
             .frame(height: 22)
         }
@@ -453,17 +458,6 @@ struct ExercisesCatalogView: View {
             isSearchToolbarExpanded = true
             isSearchFieldFocused = true
         }
-    }
-
-    private var searchFocusBinding: Binding<Bool> {
-        Binding(
-            get: { isSearchFieldFocused },
-            set: { isFocused in
-                isSearchFieldFocused = isFocused
-                isSearchToolbarExpanded = isFocused || activeFilterDropdown != nil
-                headerPresentation.forceExpanded(isSearchToolbarExpanded)
-            }
-        )
     }
 
     private var filterRow: some View {
@@ -634,12 +628,11 @@ struct ExercisesCatalogView: View {
 
     private func toggleFilterDropdown(_ dropdown: ExerciseFilterDropdown) {
         let nextDropdown: ExerciseFilterDropdown? = activeFilterDropdown == dropdown ? nil : dropdown
-        WGJKeyboard.dismiss()
+        isSearchFieldFocused = false
         withAnimation(.easeInOut(duration: 0.16)) {
             activeFilterDropdown = nextDropdown
         }
         isSearchToolbarExpanded = nextDropdown != nil
-        isSearchFieldFocused = false
         headerPresentation.forceExpanded(nextDropdown != nil)
     }
 
@@ -862,7 +855,6 @@ struct ExercisesCatalogView: View {
         isSearchFieldFocused = false
         isSearchToolbarExpanded = false
         activeFilterDropdown = nil
-        WGJKeyboard.dismiss()
         applyCurrentFilters()
     }
 
@@ -870,7 +862,6 @@ struct ExercisesCatalogView: View {
         isSearchFieldFocused = false
         isSearchToolbarExpanded = false
         activeFilterDropdown = nil
-        WGJKeyboard.dismiss()
 
         if let pickerSelectAction {
             pickerSelectAction(exercise.selection)
@@ -892,7 +883,6 @@ struct ExercisesCatalogView: View {
                     }
                     isSearchFieldFocused = false
                     isSearchToolbarExpanded = false
-                    WGJKeyboard.dismiss()
                     return
                 }
 
@@ -912,7 +902,6 @@ struct ExercisesCatalogView: View {
             self.pendingExerciseForAdd = nil
             isSearchFieldFocused = false
             isSearchToolbarExpanded = false
-            WGJKeyboard.dismiss()
 
             do {
                 if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
@@ -1572,51 +1561,53 @@ nonisolated struct ExercisesSectionSnapshot: Identifiable, Equatable, Sendable {
 private struct ExercisesCatalogSearchField: View {
     @Binding var committedQuery: String
     let resetToken: Int
-    @Binding var isFocused: Bool
+    let isFocused: FocusState<Bool>.Binding
 
     @State private var liveQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var observedResetToken: Int?
 
     var body: some View {
-        WGJAccessoryTextField(
-            "Search",
-            text: $liveQuery,
-            isFocused: $isFocused,
-            onDismiss: {
-                isFocused = false
-                WGJKeyboard.dismiss()
+        TextField("Search", text: $liveQuery)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .foregroundStyle(WGJTheme.textPrimary)
+            .tint(WGJTheme.accentBlue)
+            .submitLabel(.search)
+            .focused(isFocused)
+            .accessibilityIdentifier("exercises-search-field")
+            .onSubmit {
+                isFocused.wrappedValue = false
             }
-        )
-        .onAppear {
-            observedResetToken = resetToken
-            if liveQuery != committedQuery {
-                liveQuery = committedQuery
+            .onAppear {
+                observedResetToken = resetToken
+                if liveQuery != committedQuery {
+                    liveQuery = committedQuery
+                }
             }
-        }
-        .onChange(of: liveQuery) { _, newValue in
-            debounceQuery(newValue)
-        }
-        .onChange(of: committedQuery) { _, newValue in
-            guard liveQuery != newValue else { return }
-            liveQuery = newValue
-        }
-        .onChange(of: resetToken) { _, newValue in
-            guard observedResetToken != newValue else { return }
-            observedResetToken = newValue
-            debounceTask?.cancel()
-            debounceTask = nil
-            if liveQuery != "" {
-                liveQuery = ""
+            .onChange(of: liveQuery) { _, newValue in
+                debounceQuery(newValue)
             }
-            if committedQuery != "" {
-                committedQuery = ""
+            .onChange(of: committedQuery) { _, newValue in
+                guard liveQuery != newValue else { return }
+                liveQuery = newValue
             }
-        }
-        .onDisappear {
-            debounceTask?.cancel()
-            debounceTask = nil
-        }
+            .onChange(of: resetToken) { _, newValue in
+                guard observedResetToken != newValue else { return }
+                observedResetToken = newValue
+                debounceTask?.cancel()
+                debounceTask = nil
+                if liveQuery != "" {
+                    liveQuery = ""
+                }
+                if committedQuery != "" {
+                    committedQuery = ""
+                }
+            }
+            .onDisappear {
+                debounceTask?.cancel()
+                debounceTask = nil
+            }
     }
 
     private func debounceQuery(_ value: String) {
@@ -2110,7 +2101,6 @@ private struct CustomExerciseEditorView: View {
         }
         .wgjScreenBackground()
         .wgjNavigationChrome()
-        .wgjMinimalKeyboardToolbar()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -98,10 +98,6 @@ struct TemplateEditorView: View {
                 }
 
             }
-            .wgjMinimalKeyboardToolbar {
-                keyboardDismissToken.requestDismiss()
-                WGJKeyboard.dismiss()
-            }
             .sheet(item: $pickerTarget) { target in
                 ExercisePickerView(
                     title: target.pickerTitle,

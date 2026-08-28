@@ -762,7 +762,6 @@ struct TemplateFolderEditorSheet: View {
                 }
                 .background(WGJTheme.bgBase.opacity(0.97))
             }
-            .wgjMinimalKeyboardToolbar()
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)

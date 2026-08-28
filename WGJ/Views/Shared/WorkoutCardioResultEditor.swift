@@ -52,7 +52,6 @@ struct WorkoutCardioResultEditor: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
-            .wgjMinimalKeyboardToolbar()
             .navigationTitle("Cardio Result")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
