@@ -64,7 +64,10 @@ final class AdaptiveLayoutUITests: XCTestCase {
 
         let search = app.textFields["exercises-search-field"]
         XCTAssertTrue(search.waitForExistence(timeout: 8))
-        search.tap()
+        search
+            .coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+            .withOffset(CGVector(dx: -22, dy: 0))
+            .tap()
         search.typeText("bench")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
 
