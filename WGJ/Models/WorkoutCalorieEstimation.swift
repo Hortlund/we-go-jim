@@ -86,10 +86,64 @@ nonisolated struct ValidatedWorkoutCalorieProfile: Equatable, Sendable {
     let bodyWeightKilograms: Double
 }
 
+nonisolated struct WorkoutCalorieCardioFact: Equatable, Sendable {
+    let durationSeconds: Int
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let trackingProfile: WorkoutCardioTrackingProfile?
+    let distanceMeters: Double?
+    let inclinePercent: Double?
+
+    init(
+        durationSeconds: Int,
+        catalogExerciseUUID: String = "",
+        exerciseName: String = "",
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        distanceMeters: Double? = nil,
+        inclinePercent: Double? = nil
+    ) {
+        self.durationSeconds = durationSeconds
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseName = exerciseName
+        self.trackingProfile = trackingProfile
+        self.distanceMeters = distanceMeters
+        self.inclinePercent = inclinePercent
+    }
+}
+
 nonisolated struct WorkoutCalorieFacts: Equatable, Sendable {
     let durationSeconds: Int
     let completedWorkingSetCount: Int
-    let completedCardioDurationsSeconds: [Int]
+    let completedWarmupSetCount: Int
+    let completedCardioActivities: [WorkoutCalorieCardioFact]
+
+    init(
+        durationSeconds: Int,
+        completedWorkingSetCount: Int,
+        completedWarmupSetCount: Int = 0,
+        completedCardioActivities: [WorkoutCalorieCardioFact]
+    ) {
+        self.durationSeconds = durationSeconds
+        self.completedWorkingSetCount = completedWorkingSetCount
+        self.completedWarmupSetCount = completedWarmupSetCount
+        self.completedCardioActivities = completedCardioActivities
+    }
+
+    init(
+        durationSeconds: Int,
+        completedWorkingSetCount: Int,
+        completedWarmupSetCount: Int = 0,
+        completedCardioDurationsSeconds: [Int]
+    ) {
+        self.init(
+            durationSeconds: durationSeconds,
+            completedWorkingSetCount: completedWorkingSetCount,
+            completedWarmupSetCount: completedWarmupSetCount,
+            completedCardioActivities: completedCardioDurationsSeconds.map {
+                WorkoutCalorieCardioFact(durationSeconds: $0)
+            }
+        )
+    }
 }
 
 nonisolated enum WorkoutCalorieEstimateResult: Equatable, Sendable {
