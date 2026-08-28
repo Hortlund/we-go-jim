@@ -90,6 +90,10 @@ nonisolated enum WeeklyGoalWeekPolicy {
             ?? date.addingTimeInterval(7 * 24 * 3_600)
     }
 
+    static func nextTimelineRefresh(after date: Date = .now, calendar: Calendar = calendar()) -> Date {
+        nextWeekStart(after: date, calendar: calendar)
+    }
+
     static func weekStart(for date: Date, calendar: Calendar = calendar()) -> Date {
         var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         components.weekday = calendar.firstWeekday

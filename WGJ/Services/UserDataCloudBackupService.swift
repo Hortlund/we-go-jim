@@ -39,6 +39,41 @@ struct UserDataCloudBackupContentSummary: Equatable, Sendable {
     var workoutDropStageCount: Int
 }
 
+extension UserDataCloudBackupContentSummary {
+    nonisolated static func loadLocal(context: ModelContext) throws -> UserDataCloudBackupContentSummary {
+        let customSourceName = "custom"
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let customExerciseDescriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                exercise.sourceName == customSourceName
+            }
+        )
+        let completedWorkoutDescriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.statusRaw == completedStatus
+            }
+        )
+
+        return UserDataCloudBackupContentSummary(
+            profileCount: try context.fetchCount(FetchDescriptor<UserProfile>()),
+            profileWidgetCount: try context.fetchCount(FetchDescriptor<ProfileWidgetConfig>()),
+            customExerciseCount: try context.fetchCount(customExerciseDescriptor),
+            templateFolderCount: try context.fetchCount(FetchDescriptor<TemplateFolder>()),
+            workoutTemplateCount: try context.fetchCount(FetchDescriptor<WorkoutTemplate>()),
+            templateCardioBlockCount: try context.fetchCount(FetchDescriptor<TemplateCardioBlock>()),
+            templateExerciseCount: try context.fetchCount(FetchDescriptor<TemplateExercise>()),
+            templateComponentCount: try context.fetchCount(FetchDescriptor<TemplateExerciseComponent>()),
+            templateSetCount: try context.fetchCount(FetchDescriptor<TemplateExerciseSet>()),
+            templateDropStageCount: try context.fetchCount(FetchDescriptor<TemplateExerciseDropStage>()),
+            completedWorkoutCount: try context.fetchCount(completedWorkoutDescriptor),
+            workoutCardioBlockCount: try context.fetchCount(FetchDescriptor<WorkoutSessionCardioBlock>()),
+            workoutExerciseCount: try context.fetchCount(FetchDescriptor<WorkoutSessionExercise>()),
+            workoutSetCount: try context.fetchCount(FetchDescriptor<WorkoutSessionSet>()),
+            workoutDropStageCount: try context.fetchCount(FetchDescriptor<WorkoutSessionDropStage>())
+        )
+    }
+}
+
 protocol UserDataCloudBackupStoring: Sendable {
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws
     func deleteBackup() async throws
@@ -331,12 +366,16 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     private static func isLocalUserDataEmpty(context: ModelContext) throws -> Bool {
-        let customExercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-            .filter(\.isCustomExercise)
-        return try context.fetch(FetchDescriptor<UserProfile>()).isEmpty
-            && context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
-            && context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
-            && customExercises.isEmpty
+        let customSourceName = "custom"
+        let customExerciseDescriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                exercise.sourceName == customSourceName
+            }
+        )
+        return try context.fetchCount(FetchDescriptor<UserProfile>()) == 0
+            && context.fetchCount(FetchDescriptor<WorkoutTemplate>()) == 0
+            && context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0
+            && context.fetchCount(customExerciseDescriptor) == 0
     }
 }
 

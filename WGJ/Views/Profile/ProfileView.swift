@@ -1947,28 +1947,6 @@ private extension UserDataCloudBackupContentSummary {
             + workoutDropStageCount
     }
 
-    nonisolated static func loadLocal(context: ModelContext) throws -> UserDataCloudBackupContentSummary {
-        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        let workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
-
-        return UserDataCloudBackupContentSummary(
-            profileCount: try context.fetch(FetchDescriptor<UserProfile>()).count,
-            profileWidgetCount: try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).count,
-            customExerciseCount: exercises.filter(\.isCustomExercise).count,
-            templateFolderCount: try context.fetch(FetchDescriptor<TemplateFolder>()).count,
-            workoutTemplateCount: try context.fetch(FetchDescriptor<WorkoutTemplate>()).count,
-            templateCardioBlockCount: try context.fetch(FetchDescriptor<TemplateCardioBlock>()).count,
-            templateExerciseCount: try context.fetch(FetchDescriptor<TemplateExercise>()).count,
-            templateComponentCount: try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).count,
-            templateSetCount: try context.fetch(FetchDescriptor<TemplateExerciseSet>()).count,
-            templateDropStageCount: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).count,
-            completedWorkoutCount: workoutSessions.filter { $0.status == .completed }.count,
-            workoutCardioBlockCount: try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).count,
-            workoutExerciseCount: try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).count,
-            workoutSetCount: try context.fetch(FetchDescriptor<WorkoutSessionSet>()).count,
-            workoutDropStageCount: try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).count
-        )
-    }
 }
 
 private struct ProfileCloudBackupComparisonRow: Identifiable, Equatable {

@@ -114,6 +114,15 @@ nonisolated enum FirstRunLocalBootstrapProgress {
         defaults.set(currentVersion, forKey: defaultsKey)
     }
 
+    static func performAndMarkCompleted<T>(
+        defaults: UserDefaults = .standard,
+        _ operation: () async throws -> T
+    ) async rethrows -> T {
+        let result = try await operation()
+        markCompleted(defaults: defaults)
+        return result
+    }
+
     static func reset(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: defaultsKey)
     }

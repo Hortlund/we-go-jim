@@ -157,6 +157,36 @@ final class AppLaunchBootstrapTests: XCTestCase {
         XCTAssertEqual(resetCount, 1)
     }
 
+    func testFirstRunBootstrapProgressRemainsPendingAfterFailure() async throws {
+        let suiteName = "AppLaunchBootstrapTests.bootstrap-failure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        do {
+            let _: Void = try await FirstRunLocalBootstrapProgress.performAndMarkCompleted(defaults: defaults) {
+                throw TestError.storeOpen
+            }
+            XCTFail("Expected bootstrap failure")
+        } catch TestError.storeOpen {
+            // Expected. A later launch must be able to retry.
+        }
+
+        XCTAssertFalse(FirstRunLocalBootstrapProgress.isCompleted(defaults: defaults))
+    }
+
+    func testFirstRunBootstrapProgressMarksOnlySuccessfulWork() async throws {
+        let suiteName = "AppLaunchBootstrapTests.bootstrap-success.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let value = try await FirstRunLocalBootstrapProgress.performAndMarkCompleted(defaults: defaults) {
+            "ready"
+        }
+
+        XCTAssertEqual(value, "ready")
+        XCTAssertTrue(FirstRunLocalBootstrapProgress.isCompleted(defaults: defaults))
+    }
+
     private func makeState() -> AppLaunchBootstrapState {
         AppLaunchBootstrapState(runtimeStateUpdater: { _ in })
     }

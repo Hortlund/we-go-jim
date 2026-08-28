@@ -728,16 +728,22 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         repository: WorkoutSessionRepository,
         caloriePresentationPolicy: WorkoutCaloriePresentationPolicy
     ) throws -> [HistoryOverviewSessionSnapshot] {
+        let sessionIDs = Set(sessions.map(\.id))
+        let exercises = try repository.sessionExercises(sessionIDs: sessionIDs)
+        let exercisesBySessionID = Dictionary(grouping: exercises, by: \.sessionID)
+        let setsBySessionExerciseID = Dictionary(
+            grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
+            by: \.sessionExerciseID
+        )
         let cardioBlocksBySessionID = Dictionary(
-            grouping: try repository.sessionCardioBlocks(sessionIDs: Set(sessions.map(\.id))),
+            grouping: try repository.sessionCardioBlocks(sessionIDs: sessionIDs),
             by: \.sessionID
         )
-        return try sessions.map { session in
-            let exercises = try repository.sessionExercises(sessionID: session.id)
-            let rows = try HistorySessionSummaryBuilder.rows(
-                for: exercises,
+        return sessions.map { session in
+            let rows = HistorySessionSummaryBuilder.rows(
+                for: exercisesBySessionID[session.id, default: []],
                 cardioBlocks: cardioBlocksBySessionID[session.id, default: []],
-                repository: repository
+                setsBySessionExerciseID: setsBySessionExerciseID
             )
             return HistoryOverviewSessionSnapshot(
                 session: session,
@@ -1100,8 +1106,24 @@ nonisolated enum HistorySessionSummaryBuilder {
         cardioBlocks: [WorkoutSessionCardioBlock],
         repository: WorkoutSessionRepository
     ) throws -> [HistorySessionSummaryRow] {
-        let strengthRows = try exercises.enumerated().map { index, exercise in
-            let sets = try repository.sessionSets(sessionExerciseID: exercise.id)
+        let setsBySessionExerciseID = Dictionary(
+            grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
+            by: \.sessionExerciseID
+        )
+        return rows(
+            for: exercises,
+            cardioBlocks: cardioBlocks,
+            setsBySessionExerciseID: setsBySessionExerciseID
+        )
+    }
+
+    nonisolated static func rows(
+        for exercises: [WorkoutSessionExercise],
+        cardioBlocks: [WorkoutSessionCardioBlock],
+        setsBySessionExerciseID: [UUID: [WorkoutSessionSet]]
+    ) -> [HistorySessionSummaryRow] {
+        let strengthRows = exercises.enumerated().map { index, exercise in
+            let sets = setsBySessionExerciseID[exercise.id, default: []]
             let setCounts = setCounts(for: sets)
             return HistorySessionSummaryRow(
                 id: index,

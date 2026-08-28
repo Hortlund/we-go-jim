@@ -582,10 +582,34 @@ nonisolated final class WorkoutSessionRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func sessionExercises(sessionIDs: Set<UUID>) throws -> [WorkoutSessionExercise] {
+        guard !sessionIDs.isEmpty else { return [] }
+        let requestedSessionIDs = Array(sessionIDs)
+        let descriptor = FetchDescriptor<WorkoutSessionExercise>(
+            predicate: #Predicate { exercise in
+                requestedSessionIDs.contains(exercise.sessionID)
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
     func sessionSets(sessionExerciseID: UUID) throws -> [WorkoutSessionSet] {
         let descriptor = FetchDescriptor<WorkoutSessionSet>(
             predicate: #Predicate { set in
                 set.sessionExerciseID == sessionExerciseID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    func sessionSets(sessionExerciseIDs: Set<UUID>) throws -> [WorkoutSessionSet] {
+        guard !sessionExerciseIDs.isEmpty else { return [] }
+        let requestedExerciseIDs = Array(sessionExerciseIDs)
+        let descriptor = FetchDescriptor<WorkoutSessionSet>(
+            predicate: #Predicate { set in
+                requestedExerciseIDs.contains(set.sessionExerciseID)
             },
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )
