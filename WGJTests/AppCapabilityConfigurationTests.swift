@@ -147,8 +147,8 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         XCTAssertTrue(releaseLikeProject.contains("SWIFT_COMPILATION_MODE = wholemodule"))
         XCTAssertTrue(releaseLikeProject.contains("ENABLE_NS_ASSERTIONS = NO"))
         XCTAssertTrue(releaseLikeProject.contains("VALIDATE_PRODUCT = YES"))
-        XCTAssertTrue(releaseLikeApp.contains("MARKETING_VERSION = 1.4.0"))
-        XCTAssertTrue(releaseLikeWidget.contains("MARKETING_VERSION = 1.4.0"))
+        XCTAssertTrue(releaseLikeApp.contains("MARKETING_VERSION = 1.4.1"))
+        XCTAssertTrue(releaseLikeWidget.contains("MARKETING_VERSION = 1.4.1"))
     }
 
     private func propertyList(at url: URL) throws -> [String: Any] {
