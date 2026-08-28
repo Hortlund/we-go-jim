@@ -57,6 +57,8 @@ nonisolated enum UserDataCloudBackupDescriptor {
         static let payloadData = "payloadData"
         static let payloadCompression = "payloadCompression"
     }
+
+    static let metadataFieldKeys: [CKRecord.FieldKey] = [Field.updatedAt]
 }
 
 nonisolated enum BoundaryCloudBackupReason: String, Sendable {
@@ -108,6 +110,74 @@ nonisolated enum BoundaryCloudBackupScheduler {
             }
             await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason)
         }
+    }
+}
+
+nonisolated enum CloudBackupStatusCheckScheduler {
+    static func checkMetadataBestEffort(container: ModelContainer) -> Task<Void, Never>? {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return nil }
+
+        return Task.detached(priority: .utility) {
+            guard !Task.isCancelled else { return }
+            let statusCheck = await MainActor.run { () -> (
+                revision: Int?,
+                previousStatus: UserDataSyncStatusSnapshot
+            ) in
+                let previousStatus = AppRuntimeState.shared.userDataSyncStatus
+                guard let revision = AppRuntimeState.shared.beginUserDataSyncStatusCheck(.checkingStatus()) else {
+                    return (revision: nil, previousStatus: previousStatus)
+                }
+                return (revision: revision, previousStatus: previousStatus)
+            }
+            guard let revision = statusCheck.revision else { return }
+
+            do {
+                let metadata = try await UserDataCloudBackupService(
+                    localContainer: container,
+                    backupStore: CloudKitUserDataCloudBackupStore()
+                ).latestBackupMetadata()
+                guard !Task.isCancelled else {
+                    await MainActor.run {
+                        AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                            statusCheck.previousStatus,
+                            matching: revision
+                        )
+                    }
+                    return
+                }
+                await MainActor.run {
+                    AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                        .statusChecked(at: metadata?.updatedAt),
+                        matching: revision
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                        CloudBackupOperationErrorPolicy.isCancellation(
+                            error,
+                            taskWasCancelled: Task.isCancelled
+                        ) ? statusCheck.previousStatus : .checkFailed(error.localizedDescription),
+                        matching: revision
+                    )
+                }
+            }
+        }
+    }
+}
+
+nonisolated enum CloudBackupOperationErrorPolicy {
+    static func isCancellation(_ error: Error, taskWasCancelled: Bool) -> Bool {
+        if taskWasCancelled || error is CancellationError {
+            return true
+        }
+        if let cloudError = error as? CKError {
+            return cloudError.code == .operationCancelled
+        }
+
+        let nsError = error as NSError
+        return nsError.domain == CKErrorDomain
+            && nsError.code == CKError.Code.operationCancelled.rawValue
     }
 }
 
@@ -377,7 +447,10 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
 
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
         let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
-        guard let record = try await existingRecord(recordID: recordID) else {
+        guard let record = try await existingRecord(
+            recordID: recordID,
+            desiredKeys: UserDataCloudBackupDescriptor.metadataFieldKeys
+        ) else {
             return nil
         }
 
@@ -409,10 +482,13 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         return try? (payloadData as NSData).decompressed(using: .lzfse) as Data
     }
 
-    private func existingRecord(recordID: CKRecord.ID) async throws -> CKRecord? {
+    private func existingRecord(
+        recordID: CKRecord.ID,
+        desiredKeys: [CKRecord.FieldKey]? = nil
+    ) async throws -> CKRecord? {
         let database = try requireDatabase()
         do {
-            let results = try await database.records(for: [recordID])
+            let results = try await database.records(for: [recordID], desiredKeys: desiredKeys)
             guard let result = results[recordID] else {
                 return nil
             }
@@ -897,6 +973,8 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     private func relinkDatabaseRelationships(in context: ModelContext) throws {
+        try relinkCustomExerciseRelationships(in: context)
+
         let foldersByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateFolder>()).map { ($0.id, $0) })
         let templatesByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
         let templateGroupsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map { ($0.id, $0) })
@@ -953,6 +1031,60 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         }
         for stage in try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()) {
             stage.sessionSet = workoutSetsByID[stage.sessionSetID]
+        }
+    }
+
+    private func relinkCustomExerciseRelationships(in context: ModelContext) throws {
+        let exercisesByRemoteUUID = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+                .map { ($0.remoteUUID, $0) }
+        )
+        let musclesByRemoteID = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<MuscleGroup>())
+                .map { ($0.remoteID, $0) }
+        )
+
+        for item in customExercises {
+            guard let exercise = exercisesByRemoteUUID[item.remoteUUID] else { continue }
+
+            let primaryMuscleIDs = Set(item.primaryMuscleRemoteIDs ?? [])
+            let secondaryMuscleIDs = Set(item.secondaryMuscleRemoteIDs ?? [])
+                .subtracting(primaryMuscleIDs)
+            for muscleID in primaryMuscleIDs.union(secondaryMuscleIDs).sorted()
+                where musclesByRemoteID[muscleID] == nil {
+                throw UserDataCloudRestoreValidationError.missingCatalogMuscle(
+                    exerciseIdentifier: item.remoteUUID,
+                    muscleIdentifier: muscleID
+                )
+            }
+            exercise.primaryMuscles = primaryMuscleIDs
+                .sorted()
+                .compactMap { musclesByRemoteID[$0] }
+            exercise.secondaryMuscles = secondaryMuscleIDs
+                .sorted()
+                .compactMap { musclesByRemoteID[$0] }
+
+            for alias in exercise.aliases {
+                context.delete(alias)
+            }
+            exercise.aliases.removeAll()
+
+            let aliases = Set(
+                item.aliases?.compactMap { rawAlias -> String? in
+                    let alias = rawAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !alias.isEmpty,
+                          alias.localizedCaseInsensitiveCompare(exercise.displayName) != .orderedSame
+                    else {
+                        return nil
+                    }
+                    return alias
+                } ?? []
+            )
+            for aliasValue in aliases.sorted() {
+                let alias = ExerciseAlias(value: aliasValue, exercise: exercise)
+                context.insert(alias)
+                exercise.aliases.append(alias)
+            }
         }
     }
 }
@@ -1112,6 +1244,9 @@ private struct CustomExercise: Codable, BackupModel {
     var isHidden: Bool
     var lastUpdateGlobal: Date?
     var updatedAt: Date
+    var primaryMuscleRemoteIDs: [Int]?
+    var secondaryMuscleRemoteIDs: [Int]?
+    var aliases: [String]?
 
     nonisolated init(_ model: ExerciseCatalogItem) {
         remoteUUID = model.remoteUUID
@@ -1124,6 +1259,9 @@ private struct CustomExercise: Codable, BackupModel {
         isHidden = model.isHidden
         lastUpdateGlobal = model.lastUpdateGlobal
         updatedAt = model.updatedAt
+        primaryMuscleRemoteIDs = model.primaryMuscles.map(\.remoteID).sorted()
+        secondaryMuscleRemoteIDs = model.secondaryMuscles.map(\.remoteID).sorted()
+        aliases = model.aliases.map(\.value).sorted()
     }
 
     nonisolated var model: ExerciseCatalogItem {
@@ -1150,7 +1288,9 @@ private struct CustomExercise: Codable, BackupModel {
         model.equipmentSummary = equipmentSummary
         model.instructionText = instructionText
         model.cardioTrackingProfileRaw = cardioTrackingProfileRaw
+        model.isCurated = false
         model.isHidden = isHidden
+        model.sourceName = "custom"
         model.lastUpdateGlobal = lastUpdateGlobal
         model.updatedAt = updatedAt
     }

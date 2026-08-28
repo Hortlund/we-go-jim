@@ -203,34 +203,30 @@ nonisolated enum AppRuntimeConfig {
 
 nonisolated enum UserDataSyncStateKind: Equatable, Sendable {
     case localOnly
+    case checking
+    case checked
     case backedUp
     case pending
+    case checkFailed
     case degraded
 }
 
 nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let state: UserDataSyncStateKind
+    let title: String
     let detail: String
     let latestLocalMutationAt: Date?
     let latestSuccessfulExportAt: Date?
     let latestErrorDescription: String?
 
-    var title: String {
-        switch state {
-        case .localOnly:
-            return "Saved locally"
-        case .pending:
-            return "Backing up to iCloud"
-        case .backedUp:
-            return "Cloud backup updated"
-        case .degraded:
-            return "Cloud backup unavailable"
-        }
+    var hasKnownRemoteBackup: Bool {
+        latestSuccessfulExportAt != nil
     }
 
     static func localOnly(reason: String?) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .localOnly,
+            title: reason == nil ? "Cloud backup not checked" : "Saved locally",
             detail: reason ?? "Saved on this device. iCloud backup is available.",
             latestLocalMutationAt: nil,
             latestSuccessfulExportAt: nil,
@@ -238,10 +234,59 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
         )
     }
 
+    static func checkingStatus() -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .checking,
+            title: "Checking cloud backup",
+            detail: "",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: nil
+        )
+    }
+
+    static func checkingContents() -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .checking,
+            title: "Checking backup details",
+            detail: "",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: nil
+        )
+    }
+
+    static func statusChecked(at date: Date?) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .checked,
+            title: date == nil ? "No cloud backup found" : "Cloud backup found",
+            detail: date == nil
+                ? "No existing iCloud backup was found."
+                : "An existing iCloud backup was found.",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: date,
+            latestErrorDescription: nil
+        )
+    }
+
+    static func contentsChecked(at date: Date?, comparisonResult: String?) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .checked,
+            title: date == nil ? "No cloud backup found" : "Backup details checked",
+            detail: date == nil
+                ? "No existing iCloud backup was found."
+                : comparisonResult ?? "The backup details were checked.",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: date,
+            latestErrorDescription: nil
+        )
+    }
+
     static func pending(at date: Date = .now) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .pending,
-            detail: "Saved on this device.",
+            title: "Backing up to iCloud",
+            detail: "Creating and uploading a backup of your latest WGJ data.",
             latestLocalMutationAt: date,
             latestSuccessfulExportAt: nil,
             latestErrorDescription: nil
@@ -251,16 +296,29 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     static func backedUp(at date: Date? = .now) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .backedUp,
-            detail: "Backed up to iCloud.",
+            title: "Cloud backup complete",
+            detail: "Your latest WGJ data was uploaded to iCloud.",
             latestLocalMutationAt: nil,
             latestSuccessfulExportAt: date,
             latestErrorDescription: nil
         )
     }
 
+    static func checkFailed(_ description: String) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .checkFailed,
+            title: "Couldn’t check cloud backup",
+            detail: "No WGJ data was uploaded. \(description)",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: description
+        )
+    }
+
     static func degraded(_ description: String) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .degraded,
+            title: "Cloud backup failed",
             detail: description,
             latestLocalMutationAt: nil,
             latestSuccessfulExportAt: nil,
@@ -312,6 +370,7 @@ final class AppRuntimeState {
     @ObservationIgnored private var lastRuntimeCloudAvailabilityRefreshAt: Date?
     @ObservationIgnored private var runtimeCloudAvailabilityRefreshGeneration = 0
     @ObservationIgnored private var runtimeCloudAvailabilityRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var userDataSyncStatusRevision = 0
 
     private init() { }
 
@@ -346,7 +405,30 @@ final class AppRuntimeState {
     }
 
     func updateUserDataSyncStatus(_ snapshot: UserDataSyncStatusSnapshot) {
+        userDataSyncStatusRevision += 1
         userDataSyncStatus = snapshot
+    }
+
+    func beginUserDataSyncStatusCheck(_ snapshot: UserDataSyncStatusSnapshot) -> Int? {
+        guard userDataSyncStatus.state != .pending,
+              userDataSyncStatus.state != .checking
+        else {
+            return nil
+        }
+        updateUserDataSyncStatus(snapshot)
+        return userDataSyncStatusRevision
+    }
+
+    func finishUserDataSyncStatusCheck(
+        _ snapshot: UserDataSyncStatusSnapshot,
+        matching revision: Int
+    ) {
+        guard userDataSyncStatusRevision == revision,
+              userDataSyncStatus.state == .checking
+        else {
+            return
+        }
+        updateUserDataSyncStatus(snapshot)
     }
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) {

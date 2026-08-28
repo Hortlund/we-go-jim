@@ -120,10 +120,22 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             XCTAssertTrue(project.contains(setting), "Missing isolation setting: \(setting)")
         }
 
+        let developmentLaunchAction = try XCTUnwrap(
+            developmentScheme
+                .components(separatedBy: "<LaunchAction")
+                .dropFirst()
+                .first?
+                .components(separatedBy: "</LaunchAction>")
+                .first
+        )
         XCTAssertTrue(developmentScheme.contains("<TestAction\n      buildConfiguration = \"Debug\""))
-        XCTAssertTrue(developmentScheme.contains("<LaunchAction\n      buildConfiguration = \"Dev Preview\""))
-        XCTAssertTrue(developmentScheme.contains("selectedDebuggerIdentifier = \"\""))
-        XCTAssertTrue(developmentScheme.contains("selectedLauncherIdentifier = \"Xcode.IDEFoundation.Launcher.PosixSpawn\""))
+        XCTAssertTrue(developmentLaunchAction.contains("buildConfiguration = \"Debug\""))
+        XCTAssertTrue(developmentLaunchAction.contains(
+            "selectedDebuggerIdentifier = \"Xcode.DebuggerFoundation.Debugger.LLDB\""
+        ))
+        XCTAssertTrue(developmentLaunchAction.contains(
+            "selectedLauncherIdentifier = \"Xcode.DebuggerFoundation.Launcher.LLDB\""
+        ))
         XCTAssertTrue(developmentScheme.contains("<ProfileAction\n      buildConfiguration = \"Dev Preview\""))
         XCTAssertTrue(developmentScheme.contains("<ArchiveAction\n      buildConfiguration = \"Dev Preview\""))
         XCTAssertFalse(developmentScheme.contains("DEV_SEED_DEMO_DATA"))

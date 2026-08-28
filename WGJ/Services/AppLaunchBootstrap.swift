@@ -166,7 +166,7 @@ final class AppLaunchBootstrapState {
         )
         AppRuntimeState.shared.updateUserDataSyncStatus(
             bootstrap.userDataSyncEnabled
-                ? .backedUp(at: nil)
+                ? .localOnly(reason: nil)
                 : .localOnly(reason: bootstrap.cloudSyncErrorDescription)
         )
     }

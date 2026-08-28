@@ -194,9 +194,11 @@ struct LoginGateView: View {
             switch userDataSyncStatus.state {
             case .pending:
                 return "Backing up to iCloud."
+            case .checking, .checked:
+                return userDataSyncStatus.detail
             case .backedUp:
                 return "iCloud backup is available."
-            case .degraded:
+            case .checkFailed, .degraded:
                 return userDataSyncStatus.detail
             case .localOnly:
                 return "iCloud is available, but this session is currently local-only."

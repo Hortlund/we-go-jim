@@ -250,17 +250,17 @@ private struct CloudBackupStatusBannerHost: View {
             withAnimation(overlayAnimation) {
                 banner = nil
             }
-        case .pending:
+        case .pending, .checking:
             dismissTask?.cancel()
             dismissTask = nil
             withAnimation(overlayAnimation) {
                 banner = status
             }
-        case .backedUp, .degraded:
+        case .checked, .backedUp, .checkFailed, .degraded:
             withAnimation(overlayAnimation) {
                 banner = status
             }
-            scheduleDismiss(after: status.state == .backedUp ? 3 : 5)
+            scheduleDismiss(after: status.state == .checked || status.state == .backedUp ? 3 : 5)
         }
     }
 
@@ -276,32 +276,24 @@ private struct CloudBackupStatusBannerHost: View {
     }
 
     private func cloudBackupBannerTitle(for status: UserDataSyncStatusSnapshot) -> String {
-        switch status.state {
-        case .pending:
-            return "Backing up to iCloud"
-        case .backedUp:
-            return "Cloud backup complete"
-        case .degraded:
-            return "Cloud backup failed"
-        case .localOnly:
-            return status.title
-        }
+        status.title
     }
 
     private func cloudBackupBannerMessage(for status: UserDataSyncStatusSnapshot) -> String? {
-        if let latestExport = status.latestSuccessfulExportAt {
-            return latestExport.formatted(.dateTime.month(.abbreviated).day().hour().minute())
-        }
-        return status.detail
+        status.detail.isEmpty ? nil : status.detail
     }
 
     private func cloudBackupBannerIcon(for status: UserDataSyncStatusSnapshot) -> String {
         switch status.state {
+        case .checking:
+            return "magnifyingglass"
+        case .checked:
+            return status.hasKnownRemoteBackup ? "checkmark.icloud.fill" : "icloud.slash"
         case .pending:
             return "icloud.and.arrow.up"
         case .backedUp:
             return "checkmark.icloud.fill"
-        case .degraded:
+        case .checkFailed, .degraded:
             return "exclamationmark.icloud.fill"
         case .localOnly:
             return "icloud.slash"
@@ -310,11 +302,15 @@ private struct CloudBackupStatusBannerHost: View {
 
     private func cloudBackupBannerTint(for status: UserDataSyncStatusSnapshot) -> Color {
         switch status.state {
+        case .checking:
+            return WGJTheme.accentCyan
+        case .checked:
+            return status.hasKnownRemoteBackup ? WGJTheme.success : WGJTheme.textSecondary
         case .pending:
             return WGJTheme.accentBlue
         case .backedUp:
             return WGJTheme.success
-        case .degraded:
+        case .checkFailed, .degraded:
             return WGJTheme.accentGold
         case .localOnly:
             return WGJTheme.textSecondary
