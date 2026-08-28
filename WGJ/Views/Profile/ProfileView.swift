@@ -103,6 +103,7 @@ struct ProfileView: View {
     @State private var remoteCloudBackupSummary: UserDataCloudBackupContentSummary?
     @State private var isLoadingCloudBackupSummary = false
     @State private var isRefreshingCloudBackupMetadata = false
+    @State private var shouldRetryCloudBackupDetailsWhenAvailable = false
     @State private var isForcingCloudBackup = false
     @State private var showsCloudBackupDetails = false
 
@@ -142,14 +143,29 @@ struct ProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             applyWarmProfileSnapshotIfAvailable()
-            Task {
-                await refreshCloudBackupSummary()
-                await refreshCloudBackupMetadata()
-            }
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await handleInitialActivation()
+            await refreshCloudBackupSummary()
+            await refreshCloudBackupDetails()
+        }
+        .onChange(of: userDataSyncStatus.state) { _, newState in
+            guard shouldRetryCloudBackupDetailsWhenAvailable,
+                  isTabActive,
+                  newState != .checking,
+                  newState != .pending
+            else {
+                return
+            }
+
+            shouldRetryCloudBackupDetailsWhenAvailable = false
+            Task { @MainActor in
+                await Task.yield()
+                guard isTabActive else { return }
+                await refreshCloudBackupSummary()
+                await refreshCloudBackupDetails()
+            }
         }
         .task(id: appWarmupState.profileCompletionVersion) {
             guard appWarmupState.profileCompletionVersion > 0 else { return }
@@ -869,7 +885,7 @@ struct ProfileView: View {
 
     private var cloudBackupStatusDetail: String {
         if isRefreshingCloudBackupMetadata {
-            return "Checking latest backup..."
+            return "Checking backup details..."
         }
         return "Last backup: \(latestCloudBackupText)"
     }
@@ -902,8 +918,12 @@ struct ProfileView: View {
 
         let localTotal = localCloudBackupSummary.totalBackedUpItemCount
         let remoteTotal = remoteCloudBackupSummary.totalBackedUpItemCount
+        guard remoteCloudBackupSummary != localCloudBackupSummary else {
+            return "Cloud and device item counts match"
+        }
+
         guard localTotal != remoteTotal else {
-            return "Cloud matches this device"
+            return "Cloud and device item counts differ"
         }
 
         if localTotal > remoteTotal {
@@ -1025,9 +1045,13 @@ struct ProfileView: View {
         switch userDataSyncStatus.state {
         case .backedUp:
             return "checkmark.icloud.fill"
+        case .checked:
+            return userDataSyncStatus.hasKnownRemoteBackup ? "checkmark.icloud.fill" : "icloud.slash"
         case .pending:
             return "icloud.and.arrow.up"
-        case .degraded:
+        case .checking:
+            return "magnifyingglass"
+        case .degraded, .checkFailed:
             return "exclamationmark.icloud.fill"
         case .localOnly:
             return cloudSyncEnabled ? "icloud" : "internaldrive"
@@ -1041,9 +1065,13 @@ struct ProfileView: View {
         switch userDataSyncStatus.state {
         case .backedUp:
             return WGJTheme.success
+        case .checked:
+            return userDataSyncStatus.hasKnownRemoteBackup ? WGJTheme.success : WGJTheme.textSecondary
         case .pending:
             return WGJTheme.accentBlue
-        case .degraded:
+        case .checking:
+            return WGJTheme.accentCyan
+        case .degraded, .checkFailed:
             return WGJTheme.accentGold
         case .localOnly:
             return cloudSyncEnabled ? WGJTheme.accentCyan : WGJTheme.textSecondary
@@ -1180,10 +1208,17 @@ struct ProfileView: View {
     }
 
     @MainActor
-    private func refreshCloudBackupMetadata() async {
+    private func refreshCloudBackupDetails() async {
         guard cloudSyncEnabled, !isRefreshingCloudBackupMetadata else { return }
 
         isRefreshingCloudBackupMetadata = true
+        defer { isRefreshingCloudBackupMetadata = false }
+        let previousStatus = AppRuntimeState.shared.userDataSyncStatus
+        guard let revision = AppRuntimeState.shared.beginUserDataSyncStatusCheck(.checkingContents()) else {
+            shouldRetryCloudBackupDetailsWhenAvailable = true
+            return
+        }
+        shouldRetryCloudBackupDetailsWhenAvailable = false
         do {
             let snapshot = try await UserDataCloudBackupService(
                 localContainer: modelContext.container,
@@ -1191,15 +1226,36 @@ struct ProfileView: View {
             ).latestBackupSnapshot()
             if let snapshot {
                 remoteCloudBackupSummary = snapshot.contentSummary
-                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: snapshot.updatedAt))
+                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                    .contentsChecked(
+                        at: snapshot.updatedAt,
+                        comparisonResult: cloudBackupComparisonText
+                    ),
+                    matching: revision
+                )
             } else {
                 remoteCloudBackupSummary = nil
-                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: nil))
+                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                    .contentsChecked(at: nil, comparisonResult: nil),
+                    matching: revision
+                )
             }
         } catch {
-            AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup status check failed: \(error.localizedDescription)"))
+            if CloudBackupOperationErrorPolicy.isCancellation(
+                error,
+                taskWasCancelled: Task.isCancelled
+            ) {
+                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                    previousStatus,
+                    matching: revision
+                )
+            } else {
+                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
+                    .checkFailed(error.localizedDescription),
+                    matching: revision
+                )
+            }
         }
-        isRefreshingCloudBackupMetadata = false
     }
 
     @MainActor

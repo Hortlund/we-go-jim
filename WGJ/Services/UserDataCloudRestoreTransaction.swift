@@ -5,6 +5,7 @@ nonisolated enum UserDataCloudRestoreValidationError: Error, Equatable, Sendable
     case unsupportedSchemaVersion(Int)
     case duplicateIdentifier(entity: String, identifier: String)
     case missingParent(childEntity: String, childIdentifier: String, parentIdentifier: String)
+    case missingCatalogMuscle(exerciseIdentifier: String, muscleIdentifier: Int)
     case invalidCompletedWorkoutStatus(UUID)
     case invalidSupersetMembership(UUID)
 }

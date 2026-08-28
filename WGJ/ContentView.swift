@@ -27,9 +27,11 @@ struct ContentView: View {
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
     @State private var postWorkoutBackgroundWorkTask: Task<Void, Never>?
+    @State private var startupCloudBackupStatusCheckTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
+    @State private var hasRequestedStartupCloudBackupStatusCheck = false
 
     private var rootBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -312,9 +314,22 @@ struct ContentView: View {
 
     private func performEnteredMainNoncriticalWork() {
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
+        requestStartupCloudBackupStatusCheckIfNeeded()
         scheduleWeeklyGoalWidgetPublish()
         scheduleExerciseImageCacheTrim()
         requestWarmups(trigger: .enteredMain)
+    }
+
+    private func requestStartupCloudBackupStatusCheckIfNeeded() {
+        guard appRuntimeState.cloudSyncEnabled,
+              !hasRequestedStartupCloudBackupStatusCheck
+        else {
+            return
+        }
+        hasRequestedStartupCloudBackupStatusCheck = true
+        startupCloudBackupStatusCheckTask = CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
+            container: modelContext.container
+        )
     }
 
     private func scheduleExerciseImageCacheTrim() {
@@ -554,6 +569,8 @@ struct ContentView: View {
         enteredMainNoncriticalWorkTask = nil
         postWorkoutBackgroundWorkTask?.cancel()
         postWorkoutBackgroundWorkTask = nil
+        startupCloudBackupStatusCheckTask?.cancel()
+        startupCloudBackupStatusCheckTask = nil
         activeWorkoutCoordinator.clearInMemory()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         clearWeeklyGoalWidgetSnapshot()
@@ -563,6 +580,8 @@ struct ContentView: View {
         appWarmupState.reset()
         FirstRunLocalBootstrapProgress.reset()
         hasScheduledInitialDeferredMaintenance = false
+        hasRequestedStartupCloudBackupStatusCheck = false
+        appRuntimeState.updateUserDataSyncStatus(.localOnly(reason: nil))
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash

@@ -1,3 +1,4 @@
+import CloudKit
 import SwiftData
 import XCTest
 @testable import WGJ
@@ -392,7 +393,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertTrue(source.contains("AppDataArtifactCleanupQueue.shared.retryPending()"))
     }
 
-    func testStartupRootViewDoesNotReadOrRestoreCloudBackup() throws {
+    func testStartupRootViewChecksMetadataWithoutDownloadingOrRestoringBackup() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let repositoryRoot = testFileURL
             .deletingLastPathComponent()
@@ -402,9 +403,91 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             .appendingPathComponent("ContentView.swift")
         let contentViewSource = try String(contentsOf: contentViewURL, encoding: .utf8)
 
-        XCTAssertFalse(contentViewSource.contains("UserDataCloudBackupService("))
+        XCTAssertTrue(contentViewSource.contains("CloudBackupStatusCheckScheduler.checkMetadataBestEffort"))
+        XCTAssertTrue(contentViewSource.contains("startupCloudBackupStatusCheckTask?.cancel()"))
+        XCTAssertTrue(contentViewSource.contains("hasRequestedStartupCloudBackupStatusCheck = false"))
+        XCTAssertFalse(contentViewSource.contains("latestBackupSnapshot("))
         XCTAssertFalse(contentViewSource.contains("restoreLatestBackup("))
         XCTAssertFalse(contentViewSource.contains("app.startup-cloud-restore"))
+    }
+
+    func testCloudBackupStatusMessagesDistinguishChecksFromUploads() {
+        let checking = UserDataSyncStatusSnapshot.checkingStatus()
+        XCTAssertEqual(checking.state, .checking)
+        XCTAssertEqual(checking.title, "Checking cloud backup")
+        XCTAssertTrue(checking.detail.isEmpty)
+
+        let checked = UserDataSyncStatusSnapshot.statusChecked(at: .now)
+        XCTAssertEqual(checked.state, .checked)
+        XCTAssertEqual(checked.title, "Cloud backup found")
+        XCTAssertEqual(checked.detail, "An existing iCloud backup was found.")
+        XCTAssertTrue(checked.hasKnownRemoteBackup)
+
+        let missing = UserDataSyncStatusSnapshot.statusChecked(at: nil)
+        XCTAssertFalse(missing.hasKnownRemoteBackup)
+
+        let pending = UserDataSyncStatusSnapshot.pending()
+        XCTAssertEqual(pending.state, .pending)
+        XCTAssertEqual(pending.title, "Backing up to iCloud")
+        XCTAssertTrue(pending.detail.contains("uploading"))
+
+        let backedUp = UserDataSyncStatusSnapshot.backedUp()
+        XCTAssertEqual(backedUp.state, .backedUp)
+        XCTAssertEqual(backedUp.title, "Cloud backup complete")
+        XCTAssertTrue(backedUp.detail.contains("was uploaded"))
+    }
+
+    func testCloudBackupMetadataFetchExcludesPayloadFields() {
+        XCTAssertEqual(
+            UserDataCloudBackupDescriptor.metadataFieldKeys,
+            [UserDataCloudBackupDescriptor.Field.updatedAt]
+        )
+        XCTAssertFalse(UserDataCloudBackupDescriptor.metadataFieldKeys.contains(
+            UserDataCloudBackupDescriptor.Field.payloadAsset
+        ))
+        XCTAssertFalse(UserDataCloudBackupDescriptor.metadataFieldKeys.contains(
+            UserDataCloudBackupDescriptor.Field.payloadData
+        ))
+    }
+
+    func testCloudBackupCancellationPolicyRecognizesSwiftAndCloudKitCancellation() {
+        XCTAssertTrue(CloudBackupOperationErrorPolicy.isCancellation(
+            CancellationError(),
+            taskWasCancelled: false
+        ))
+        XCTAssertTrue(CloudBackupOperationErrorPolicy.isCancellation(
+            NSError(
+                domain: CKErrorDomain,
+                code: CKError.Code.operationCancelled.rawValue
+            ),
+            taskWasCancelled: false
+        ))
+        XCTAssertTrue(CloudBackupOperationErrorPolicy.isCancellation(
+            RestoreTestError.artifactCleanup,
+            taskWasCancelled: true
+        ))
+        XCTAssertFalse(CloudBackupOperationErrorPolicy.isCancellation(
+            RestoreTestError.artifactCleanup,
+            taskWasCancelled: false
+        ))
+    }
+
+    func testLateStatusCheckCannotOverwriteActiveBackup() throws {
+        let state = AppRuntimeState.shared
+        defer { state.updateUserDataSyncStatus(.localOnly(reason: nil)) }
+        state.updateUserDataSyncStatus(.localOnly(reason: nil))
+        guard let revision = state.beginUserDataSyncStatusCheck(.checkingStatus()) else {
+            return XCTFail("Expected the status check to start")
+        }
+
+        XCTAssertNil(state.beginUserDataSyncStatusCheck(.checkingContents()))
+
+        state.updateUserDataSyncStatus(.pending())
+        state.finishUserDataSyncStatusCheck(.statusChecked(at: .now), matching: revision)
+
+        XCTAssertEqual(state.userDataSyncStatus.state, .pending)
+        let blockedRevision = state.beginUserDataSyncStatusCheck(.checkingStatus())
+        XCTAssertNil(blockedRevision)
     }
 
     func testCloudBackupBannerStatusObservationStaysOutOfMainTabShell() throws {
@@ -925,6 +1008,103 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(restoredCustom?.cardioTrackingProfileRaw, WorkoutCardioTrackingProfile.rower.rawValue)
     }
 
+    func testBackupRoundTripPreservesCustomExerciseMusclesAndAliases() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        let chest = MuscleGroup(remoteID: 10, name: "Chest", nameEn: "Chest")
+        let triceps = MuscleGroup(remoteID: 20, name: "Triceps", nameEn: "Triceps")
+        let custom = ExerciseCatalogItem(
+            remoteUUID: "custom-floor-press",
+            displayName: "Floor Press",
+            categoryName: "Strength",
+            equipmentSummary: "Dumbbells",
+            instructionText: "Press from the floor.",
+            isCurated: false,
+            sourceName: "custom"
+        )
+        let shortAlias = ExerciseAlias(value: "DB Floor Press", exercise: custom)
+        let longAlias = ExerciseAlias(value: "Dumbbell Floor Press", exercise: custom)
+        for model in [chest, triceps, custom, shortAlias, longAlias] as [any PersistentModel] {
+            sourceContext.insert(model)
+        }
+        custom.primaryMuscles = [chest]
+        custom.secondaryMuscles = [triceps]
+        custom.aliases = [shortAlias, longAlias]
+        try sourceContext.save()
+
+        let store = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: store
+        ).exportCurrentBackup()
+
+        let restored = try makeInMemoryContainer()
+        let restoredSeedContext = ModelContext(restored)
+        restoredSeedContext.insert(MuscleGroup(remoteID: 10, name: "Chest", nameEn: "Chest"))
+        restoredSeedContext.insert(MuscleGroup(remoteID: 20, name: "Triceps", nameEn: "Triceps"))
+        try restoredSeedContext.save()
+
+        _ = try await UserDataCloudBackupService(
+            localContainer: restored,
+            backupStore: store
+        ).restoreLatestBackup()
+
+        let restoredContext = ModelContext(restored)
+        let restoredCustom = try XCTUnwrap(
+            restoredContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
+                .first(where: { $0.remoteUUID == custom.remoteUUID })
+        )
+        XCTAssertEqual(restoredCustom.primaryMuscles.map(\.remoteID).sorted(), [10])
+        XCTAssertEqual(restoredCustom.secondaryMuscles.map(\.remoteID).sorted(), [20])
+        XCTAssertEqual(
+            restoredCustom.aliases.map(\.value).sorted(),
+            ["DB Floor Press", "Dumbbell Floor Press"]
+        )
+    }
+
+    func testRestoreRejectsCustomExerciseWhenReferencedCatalogMuscleIsMissing() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        let chest = MuscleGroup(remoteID: 10, name: "Chest", nameEn: "Chest")
+        let custom = ExerciseCatalogItem(
+            remoteUUID: "custom-floor-press",
+            displayName: "Floor Press",
+            categoryName: "Strength",
+            isCurated: false,
+            sourceName: "custom"
+        )
+        sourceContext.insert(chest)
+        sourceContext.insert(custom)
+        custom.primaryMuscles = [chest]
+        try sourceContext.save()
+
+        let store = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: store
+        ).exportCurrentBackup()
+
+        let restored = try makeInMemoryContainer()
+        do {
+            _ = try await UserDataCloudBackupService(
+                localContainer: restored,
+                backupStore: store
+            ).restoreLatestBackup()
+            XCTFail("Expected restore to reject a missing catalog muscle")
+        } catch {
+            XCTAssertEqual(
+                error as? UserDataCloudRestoreValidationError,
+                .missingCatalogMuscle(
+                    exerciseIdentifier: custom.remoteUUID,
+                    muscleIdentifier: chest.remoteID
+                )
+            )
+        }
+
+        let restoredContext = ModelContext(restored)
+        XCTAssertTrue(try restoredContext.fetch(FetchDescriptor<ExerciseCatalogItem>()).isEmpty)
+    }
+
     func testBackupWithoutNewCardioProfileFieldsUsesLegacyFallbacks() async throws {
         let source = try makeInMemoryContainer()
         let sourceContext = ModelContext(source)
@@ -975,7 +1155,14 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         }
         json["profiles"] = profiles
         var customExercises = try XCTUnwrap(json["customExercises"] as? [[String: Any]])
-        customExercises[0].removeValue(forKey: "cardioTrackingProfileRaw")
+        for key in [
+            "cardioTrackingProfileRaw",
+            "primaryMuscleRemoteIDs",
+            "secondaryMuscleRemoteIDs",
+            "aliases",
+        ] {
+            customExercises[0].removeValue(forKey: key)
+        }
         json["customExercises"] = customExercises
         var templateActivities = try XCTUnwrap(json["templateCardioBlocks"] as? [[String: Any]])
         for key in ["roleRaw", "sortOrder", "trackingProfileRaw", "goalKindRaw", "targetDistanceMeters", "preferredDistanceUnitRaw"] {
@@ -1002,6 +1189,9 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(restoredProfile.bodyWeightKilograms)
         XCTAssertTrue(restoredProfile.showsCalorieEstimates)
         XCTAssertNil(restoredCustom.cardioTrackingProfileRaw)
+        XCTAssertTrue(restoredCustom.primaryMuscles.isEmpty)
+        XCTAssertTrue(restoredCustom.secondaryMuscles.isEmpty)
+        XCTAssertTrue(restoredCustom.aliases.isEmpty)
         XCTAssertEqual(restoredActivity.role, .finisher)
         XCTAssertEqual(restoredActivity.sortOrder, 0)
         XCTAssertEqual(restoredActivity.goalKind, .time)
