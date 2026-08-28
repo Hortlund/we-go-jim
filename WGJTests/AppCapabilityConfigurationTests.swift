@@ -167,7 +167,7 @@ final class AppCapabilityConfigurationTests: XCTestCase {
                 .first
         )
         XCTAssertTrue(developmentScheme.contains("<TestAction\n      buildConfiguration = \"Debug\""))
-        XCTAssertTrue(developmentLaunchAction.contains("buildConfiguration = \"Debug\""))
+        XCTAssertTrue(developmentLaunchAction.contains("buildConfiguration = \"Dev Preview\""))
         XCTAssertTrue(developmentLaunchAction.contains(
             "selectedDebuggerIdentifier = \"Xcode.DebuggerFoundation.Debugger.LLDB\""
         ))
