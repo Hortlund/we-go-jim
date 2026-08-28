@@ -1,6 +1,7 @@
 import Foundation
 
 nonisolated struct ActiveWorkoutSupersetContext: Equatable, Sendable {
+    let groupID: UUID
     let position: SupersetExercisePosition
     let roundRestSeconds: Int
     let pairedExerciseID: UUID
@@ -90,11 +91,13 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
         for group in groups {
             guard case .superset(let superset) = group else { continue }
             contexts[superset.first.id] = ActiveWorkoutSupersetContext(
+                groupID: superset.groupID,
                 position: .first,
                 roundRestSeconds: superset.roundRestSeconds,
                 pairedExerciseID: superset.second.id
             )
             contexts[superset.second.id] = ActiveWorkoutSupersetContext(
+                groupID: superset.groupID,
                 position: .second,
                 roundRestSeconds: superset.roundRestSeconds,
                 pairedExerciseID: superset.first.id
