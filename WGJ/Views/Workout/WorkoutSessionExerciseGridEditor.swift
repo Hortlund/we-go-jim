@@ -1572,7 +1572,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         guard focusedInput != nil else { return }
         focusedInput = nil
-        WGJKeyboard.dismiss()
     }
 
     private func repsTextBinding(for index: Int) -> Binding<String> {

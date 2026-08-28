@@ -34,7 +34,6 @@ struct ExercisePickerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        WGJKeyboard.dismiss()
                         dismiss()
                     }
                 }
@@ -62,8 +61,6 @@ struct ExercisePickerView: View {
     }
 
     private func handleSelection(_ selected: ExerciseCatalogSelection) {
-        WGJKeyboard.dismiss()
-
         let result = onSelect(selected)
         guard !result.shouldDismissPicker else {
             dismiss()

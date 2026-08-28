@@ -3942,7 +3942,6 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
-        .wgjMinimalKeyboardToolbar()
     }
 
     private func formattedRest(_ seconds: Int) -> String {
