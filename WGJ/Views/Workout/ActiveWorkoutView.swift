@@ -863,6 +863,7 @@ struct ActiveWorkoutView: View {
                     )
             )
             .accessibilityIdentifier("active-workout-superset-group-\(superset.groupID.uuidString.lowercased())")
+            .id(ActiveWorkoutScrollTarget.superset(superset.groupID))
             .transition(exerciseCardTransition)
         }
     }
@@ -1951,11 +1952,30 @@ struct ActiveWorkoutView: View {
         ) {
         case .none:
             return
-        case .collapseCard:
+        case .collapseCardKeepingVisible:
+            let destination = completedExerciseScrollDestination(for: exerciseID)
+            let target = destination.target
+            scrollPositionTracker.currentTarget = target
             withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
                 cardStateController.setExpanded(false, for: exerciseID)
+                // Collapsing a tall card can clamp the previous offset to the bottom of
+                // the shorter scroll content. Anchor the card in the same transaction so
+                // the completed exercise remains visible after it closes.
+                scrollPosition.scrollTo(id: target, anchor: destination.anchor)
             }
         }
+    }
+
+    @MainActor
+    private func completedExerciseScrollDestination(
+        for exerciseID: UUID
+    ) -> (target: ActiveWorkoutScrollTarget, anchor: UnitPoint) {
+        guard let supersetContext = supersetContextByExerciseID[exerciseID] else {
+            return (.exercise(exerciseID), .center)
+        }
+
+        let anchor: UnitPoint = supersetContext.position == .first ? .top : .bottom
+        return (.superset(supersetContext.groupID), anchor)
     }
 
     @MainActor
@@ -2377,6 +2397,11 @@ struct ActiveWorkoutView: View {
             return cardioBlocks(for: role).contains { $0.id == activityID }
         case .exercise(let exerciseID):
             return sessionExercises.contains { $0.id == exerciseID }
+        case .superset(let groupID):
+            return exerciseDisplayGroups.contains { group in
+                guard case .superset(let superset) = group else { return false }
+                return superset.groupID == groupID
+            }
         case .cancelSection:
             return session != nil && !isEndingSession
         }

@@ -28,7 +28,7 @@ nonisolated final class ActiveWorkoutScrollPositionTracker {
 
 nonisolated enum ActiveWorkoutCompletedExercisePresentationEffect: Equatable, Sendable {
     case none
-    case collapseCard
+    case collapseCardKeepingVisible
 }
 
 nonisolated enum ActiveWorkoutCompletedExercisePresentationPolicy {
@@ -36,7 +36,7 @@ nonisolated enum ActiveWorkoutCompletedExercisePresentationPolicy {
         wasExpanded: Bool,
         automaticallyClosesCompletedExercises: Bool
     ) -> ActiveWorkoutCompletedExercisePresentationEffect {
-        wasExpanded && automaticallyClosesCompletedExercises ? .collapseCard : .none
+        wasExpanded && automaticallyClosesCompletedExercises ? .collapseCardKeepingVisible : .none
     }
 }
 

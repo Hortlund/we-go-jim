@@ -10,7 +10,7 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
                 wasExpanded: true,
                 automaticallyClosesCompletedExercises: true
             ),
-            .collapseCard
+            .collapseCardKeepingVisible
         )
         XCTAssertEqual(
             ActiveWorkoutCompletedExercisePresentationPolicy.effect(
@@ -207,6 +207,17 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
 
     func testRoleAndActivityScrollTargetRoundTripsThroughCodable() throws {
         let original = ActiveWorkoutScrollTarget.cardio(role: .main, activityID: UUID())
+
+        let decoded = try JSONDecoder().decode(
+            ActiveWorkoutScrollTarget.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testSupersetScrollTargetRoundTripsThroughCodable() throws {
+        let original = ActiveWorkoutScrollTarget.superset(UUID())
 
         let decoded = try JSONDecoder().decode(
             ActiveWorkoutScrollTarget.self,
