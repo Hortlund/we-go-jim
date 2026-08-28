@@ -12,11 +12,11 @@ final class WorkoutCalorieCompletionTests: XCTestCase {
 
         let completed = try complete(runtime, in: context)
 
-        XCTAssertEqual(completed.estimatedActiveCalories, 35)
-        XCTAssertEqual(completed.calorieEstimateVersion, 1)
+        XCTAssertEqual(completed.estimatedActiveCalories, 105)
+        XCTAssertEqual(completed.calorieEstimateVersion, 2)
     }
 
-    func testCompletionExcludesCompletedWarmupFromWorkingSetEstimate() throws {
+    func testCompletionIncludesCompletedWarmupAtReducedDuration() throws {
         let context = try makeContext(profile: validProfile())
         let runtime = makeRuntime(
             setDrafts: [completedSet(isWarmup: true)]
@@ -25,8 +25,8 @@ final class WorkoutCalorieCompletionTests: XCTestCase {
 
         let completed = try complete(runtime, in: context)
 
-        XCTAssertEqual(completed.estimatedActiveCalories, 35)
-        XCTAssertEqual(completed.calorieEstimateVersion, 1)
+        XCTAssertEqual(completed.estimatedActiveCalories, 115)
+        XCTAssertEqual(completed.calorieEstimateVersion, 2)
     }
 
     func testCompletionUsesOnlyPositiveDurationFromCompletedCardio() throws {
@@ -41,8 +41,28 @@ final class WorkoutCalorieCompletionTests: XCTestCase {
 
         let completed = try complete(runtime, in: context)
 
-        XCTAssertEqual(completed.estimatedActiveCalories, 70)
-        XCTAssertEqual(completed.calorieEstimateVersion, 1)
+        XCTAssertEqual(completed.estimatedActiveCalories, 130)
+        XCTAssertEqual(completed.calorieEstimateVersion, 2)
+    }
+
+    func testCompletionCarriesRecordedTreadmillInclineIntoEstimate() throws {
+        let context = try makeContext(profile: validProfile())
+        let runtime = makeRuntime(cardioBlocks: [
+            cardio(
+                durationSeconds: 1_800,
+                isCompleted: true,
+                sortOrder: 0,
+                exerciseName: "Treadmill Walk",
+                trackingProfile: .treadmill,
+                distanceMeters: 2_500,
+                inclinePercent: 10
+            ),
+        ])
+
+        let completed = try complete(runtime, in: context)
+
+        XCTAssertEqual(completed.estimatedActiveCalories, 280)
+        XCTAssertEqual(completed.calorieEstimateVersion, 2)
     }
 
     func testIncompleteProfileLeavesEstimateFieldsNilWithoutBlockingCompletion() throws {
@@ -66,7 +86,7 @@ final class WorkoutCalorieCompletionTests: XCTestCase {
         let completed = try complete(makeRuntime(), in: context)
 
         XCTAssertNil(completed.estimatedActiveCalories)
-        XCTAssertEqual(completed.calorieEstimateVersion, 1)
+        XCTAssertEqual(completed.calorieEstimateVersion, 2)
     }
 
     private func makeContext(profile: UserProfile) throws -> ModelContext {
@@ -139,18 +159,25 @@ final class WorkoutCalorieCompletionTests: XCTestCase {
     private func cardio(
         durationSeconds: Int?,
         isCompleted: Bool,
-        sortOrder: Int
+        sortOrder: Int,
+        exerciseName: String? = nil,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        distanceMeters: Double? = nil,
+        inclinePercent: Double? = nil
     ) -> ActiveWorkoutRuntimeCardioBlock {
         ActiveWorkoutRuntimeCardioBlock(
             phase: .preWorkout,
             role: .main,
             sortOrder: sortOrder,
             catalogExerciseUUID: "cardio-\(sortOrder)",
-            exerciseNameSnapshot: "Cardio \(sortOrder)",
+            exerciseNameSnapshot: exerciseName ?? "Cardio \(sortOrder)",
             categorySnapshot: "Cardio",
             muscleSummarySnapshot: "Full Body",
+            trackingProfile: trackingProfile,
             targetDurationSeconds: 1_800,
             actualDurationSeconds: durationSeconds,
+            actualDistanceMeters: distanceMeters,
+            inclinePercent: inclinePercent,
             isCompleted: isCompleted
         )
     }

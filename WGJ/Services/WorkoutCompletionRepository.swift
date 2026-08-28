@@ -39,20 +39,33 @@ nonisolated enum WorkoutCaloriePersistedFactsAdapter {
                 !set.isWarmup && WorkoutSessionSetDraft(model: set).isCycleCompleted
             }
             .count
-        let completedCardioDurationsSeconds: [Int] = cardioBlocks.compactMap { block in
+        let completedWarmupSetCount = sets
+            .filter { set in
+                set.isWarmup && WorkoutSessionSetDraft(model: set).isCycleCompleted
+            }
+            .count
+        let completedCardioActivities: [WorkoutCalorieCardioFact] = cardioBlocks.compactMap { block in
             guard block.isCompleted,
                   let durationSeconds = block.actualDurationSeconds,
                   durationSeconds > 0
             else {
                 return nil
             }
-            return durationSeconds
+            return WorkoutCalorieCardioFact(
+                durationSeconds: durationSeconds,
+                catalogExerciseUUID: block.catalogExerciseUUID,
+                exerciseName: block.exerciseNameSnapshot,
+                trackingProfile: block.trackingProfile,
+                distanceMeters: block.actualDistanceMeters,
+                inclinePercent: block.inclinePercent
+            )
         }
 
         return WorkoutCalorieFacts(
             durationSeconds: durationSeconds,
             completedWorkingSetCount: completedWorkingSetCount,
-            completedCardioDurationsSeconds: completedCardioDurationsSeconds
+            completedWarmupSetCount: completedWarmupSetCount,
+            completedCardioActivities: completedCardioActivities
         )
     }
 }

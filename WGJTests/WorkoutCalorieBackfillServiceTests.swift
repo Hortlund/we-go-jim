@@ -88,7 +88,11 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
             WorkoutCalorieBackfillResult(evaluatedCount: 0, estimatedCount: 0)
         )
         XCTAssertTrue(eligibleSessions.allSatisfy { $0.estimatedActiveCalories == nil })
-        XCTAssertTrue(eligibleSessions.allSatisfy { $0.calorieEstimateVersion == 1 })
+        XCTAssertTrue(
+            eligibleSessions.allSatisfy {
+                $0.calorieEstimateVersion == WorkoutCalorieEstimator.currentVersion
+            }
+        )
         XCTAssertTrue(eligibleSessions.allSatisfy { $0.updatedAt == referenceDate })
         XCTAssertEqual(versionedSession.estimatedActiveCalories, 145)
         XCTAssertEqual(versionedSession.calorieEstimateVersion, 7)
@@ -153,8 +157,8 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
             result,
             WorkoutCalorieBackfillResult(evaluatedCount: 1, estimatedCount: 1)
         )
-        XCTAssertEqual(restored.estimatedActiveCalories, 35)
-        XCTAssertEqual(restored.calorieEstimateVersion, 1)
+        XCTAssertEqual(restored.estimatedActiveCalories, 105)
+        XCTAssertEqual(restored.calorieEstimateVersion, WorkoutCalorieEstimator.currentVersion)
     }
 
     func testBackfillFetchesOnlyOneBoundedBatchBeforeFirstSave() throws {
@@ -271,7 +275,10 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
         let observerContext = ModelContext(container)
         let committedAfterLaterSave = try fetchSession(id: committedSessionID, in: observerContext)
         let failedAfterLaterSave = try fetchSession(id: failedSessionID, in: observerContext)
-        XCTAssertEqual(committedAfterLaterSave.calorieEstimateVersion, 1)
+        XCTAssertEqual(
+            committedAfterLaterSave.calorieEstimateVersion,
+            WorkoutCalorieEstimator.currentVersion
+        )
         XCTAssertNil(failedAfterLaterSave.estimatedActiveCalories)
         XCTAssertNil(failedAfterLaterSave.calorieEstimateVersion)
         XCTAssertEqual(failedAfterLaterSave.updatedAt, failedSessionOriginalUpdatedAt)
@@ -372,7 +379,7 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
                 )
                 return try context.fetch(descriptor).first?.calorieEstimateVersion
             }
-            if version == 1 {
+            if version == WorkoutCalorieEstimator.currentVersion {
                 return
             }
             try await Task.sleep(for: .milliseconds(10))
