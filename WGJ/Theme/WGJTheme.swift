@@ -859,9 +859,12 @@ extension View {
         modifier(WGJCardModifier(strong: strong, cornerRadius: cornerRadius))
     }
 
-    func wgjPillField() -> some View {
-        padding(.vertical, 11)
-            .padding(.horizontal, 12)
+    func wgjPillField(
+        verticalPadding: CGFloat = 11,
+        horizontalPadding: CGFloat = 12
+    ) -> some View {
+        padding(.vertical, verticalPadding)
+            .padding(.horizontal, horizontalPadding)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .fill(WGJTheme.fieldStrong.opacity(0.96))

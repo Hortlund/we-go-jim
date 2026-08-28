@@ -63,7 +63,6 @@ struct ExercisesCatalogView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var headerPresentation = ExercisesCatalogHeaderPresentationModel()
-    @State private var isSearchToolbarExpanded = false
     @State private var activeFilterDropdown: ExerciseFilterDropdown?
     @State private var showingMuscleMapFilterSheet = false
     @FocusState private var isSearchFieldFocused: Bool
@@ -370,20 +369,18 @@ struct ExercisesCatalogView: View {
             Task { @MainActor in
                 await Task.yield()
                 isSearchFieldFocused = false
-                isSearchToolbarExpanded = false
                 activeFilterDropdown = nil
             }
         }
         .onChange(of: isSearchFieldFocused) { _, isFocused in
             let shouldExpand = isFocused || activeFilterDropdown != nil
-            isSearchToolbarExpanded = shouldExpand
             headerPresentation.forceExpanded(shouldExpand)
         }
     }
 
     private var pinnedSearchControls: some View {
         ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedProgress in
-            let collapseProgress = isPickerMode || isSearchFieldFocused || isSearchToolbarExpanded
+            let collapseProgress = isPickerMode || isSearchFieldFocused || activeFilterDropdown != nil
                 ? 0
                 : storedProgress
             VStack(alignment: .leading, spacing: 0) {
@@ -438,9 +435,17 @@ struct ExercisesCatalogView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(WGJTheme.textSecondary)
+        HStack(spacing: 0) {
+            Button {
+                isSearchFieldFocused = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHidden(true)
 
             ExercisesCatalogSearchField(
                 committedQuery: Binding(
@@ -450,14 +455,9 @@ struct ExercisesCatalogView: View {
                 resetToken: searchState.resetToken,
                 isFocused: $isSearchFieldFocused
             )
-            .frame(height: 22)
+            .frame(maxWidth: .infinity, minHeight: 44)
         }
-        .wgjPillField()
-        .contentShape(Rectangle())
-        .onTapGesture {
-            isSearchToolbarExpanded = true
-            isSearchFieldFocused = true
-        }
+        .wgjPillField(verticalPadding: 0, horizontalPadding: 0)
     }
 
     private var filterRow: some View {
@@ -569,7 +569,6 @@ struct ExercisesCatalogView: View {
                         isSelected: false
                     ) {
                         self.activeFilterDropdown = nil
-                        isSearchToolbarExpanded = false
                         isSearchFieldFocused = false
                         showingMuscleMapFilterSheet = true
                     }
@@ -632,13 +631,11 @@ struct ExercisesCatalogView: View {
         withAnimation(.easeInOut(duration: 0.16)) {
             activeFilterDropdown = nextDropdown
         }
-        isSearchToolbarExpanded = nextDropdown != nil
         headerPresentation.forceExpanded(nextDropdown != nil)
     }
 
     private func closeFilterDropdownAfterSelection() {
         activeFilterDropdown = nil
-        isSearchToolbarExpanded = false
         isSearchFieldFocused = false
         headerPresentation.forceExpanded(false)
     }
@@ -853,14 +850,12 @@ struct ExercisesCatalogView: View {
     private func clearSearchAndFilters() {
         searchState.clearSearchAndFilters()
         isSearchFieldFocused = false
-        isSearchToolbarExpanded = false
         activeFilterDropdown = nil
         applyCurrentFilters()
     }
 
     private func handleSelection(_ exercise: ExerciseCatalogItemSnapshot) {
         isSearchFieldFocused = false
-        isSearchToolbarExpanded = false
         activeFilterDropdown = nil
 
         if let pickerSelectAction {
@@ -882,7 +877,6 @@ struct ExercisesCatalogView: View {
                         presentActiveWorkout(sessionID: activeSession.id)
                     }
                     isSearchFieldFocused = false
-                    isSearchToolbarExpanded = false
                     return
                 }
 
@@ -901,7 +895,6 @@ struct ExercisesCatalogView: View {
             let appendInput = ExerciseRuntimeAppendInput(exercise: pendingExerciseForAdd)
             self.pendingExerciseForAdd = nil
             isSearchFieldFocused = false
-            isSearchToolbarExpanded = false
 
             do {
                 if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
