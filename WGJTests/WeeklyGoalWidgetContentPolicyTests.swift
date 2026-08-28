@@ -33,6 +33,27 @@ final class WeeklyGoalWidgetContentPolicyTests: XCTestCase {
         XCTAssertEqual(WeeklyGoalWeekPolicy.nextWeekStart(after: sundayNight, calendar: calendar), expectedNextWeekStart)
     }
 
+    func testTimelineRefreshWaitsForNextWeekBoundary() throws {
+        let calendar = try makeMondayCalendar(timeZoneIdentifier: "Europe/Stockholm")
+        let wednesday = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 1,
+            hour: 12
+        )))
+        let expectedMonday = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 6,
+            hour: 0
+        )))
+
+        XCTAssertEqual(
+            WeeklyGoalWeekPolicy.nextTimelineRefresh(after: wednesday, calendar: calendar),
+            expectedMonday
+        )
+    }
+
     func testResolvedSnapshotRollsOverAtLocalMondayMidnight() throws {
         let calendar = try makeMondayCalendar(timeZoneIdentifier: "Europe/Stockholm")
         let previousWeekStart = try XCTUnwrap(calendar.date(from: DateComponents(

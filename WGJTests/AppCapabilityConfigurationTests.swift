@@ -1,7 +1,45 @@
+import ImageIO
 import XCTest
 @testable import WGJ
 
 final class AppCapabilityConfigurationTests: XCTestCase {
+    func testLaunchScreenAndSplashAssetsUseProductionConfiguration() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let info = try propertyList(at: repository.appendingPathComponent("WGJ-App-Info.plist"))
+        let launchScreen = try XCTUnwrap(info["UILaunchScreen"] as? [String: Any])
+        XCTAssertEqual(launchScreen["UIColorName"] as? String, "LaunchBackground")
+        XCTAssertNil(launchScreen["UILaunchScreen"])
+
+        let imageDirectory = repository.appendingPathComponent(
+            "WGJ/Assets.xcassets/SplashIcon.imageset",
+            isDirectory: true
+        )
+        let expectedPixelsByFilename = [
+            "SplashIcon.png": 176,
+            "SplashIcon@2x.png": 352,
+            "SplashIcon@3x.png": 528,
+        ]
+        for (filename, expectedPixels) in expectedPixelsByFilename {
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(
+                imageDirectory.appendingPathComponent(filename) as CFURL,
+                nil
+            ))
+            let properties = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+            )
+            XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, expectedPixels, filename)
+            XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, expectedPixels, filename)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: repository
+                .appendingPathComponent("WGJ/Assets.xcassets/LaunchBackground.colorset/Contents.json")
+                .path
+        ))
+    }
+
     func testRuntimeEnvironmentFallbackCannotPromoteDevelopmentBundleToProduction() {
         XCTAssertEqual(
             AppRuntimeConfig.resolvedAppEnvironment(

@@ -10,6 +10,42 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         case artifactCleanup
     }
 
+    func testLocalContentSummaryCountsOnlyBackedUpRows() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        context.insert(UserProfile(displayName: "Andy"))
+        context.insert(ExerciseCatalogItem(
+            remoteUUID: "seed-bench",
+            displayName: "Bench Press",
+            sourceName: "seed"
+        ))
+        context.insert(ExerciseCatalogItem(
+            remoteUUID: "custom-bench",
+            displayName: "My Bench",
+            sourceName: "custom"
+        ))
+        context.insert(WorkoutSession(name: "Active", status: .active))
+        context.insert(WorkoutSession(name: "Completed", status: .completed, endedAt: .now))
+        context.insert(WorkoutSession(
+            name: "Archived",
+            status: .completed,
+            endedAt: .now,
+            archivedAt: .now
+        ))
+        try context.save()
+
+        let summary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+
+        XCTAssertEqual(summary.profileCount, 1)
+        XCTAssertEqual(summary.customExerciseCount, 1)
+        XCTAssertEqual(summary.completedWorkoutCount, 2)
+        XCTAssertEqual(summary.workoutTemplateCount, 0)
+        XCTAssertEqual(summary.workoutExerciseCount, 0)
+        XCTAssertEqual(summary.workoutSetCount, 0)
+    }
+
     func testCompletionRepositoryReturnsExistingCompletedSessionWithoutDuplicateInsert() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -1535,6 +1571,69 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(rows.map(\.exercise), ["1 x Lat Pulldown", "Bike"])
         XCTAssertNotEqual(rows.first?.bestSet, "-")
         XCTAssertEqual(rows.last?.bestSet, "10 min")
+    }
+
+    func testHistoryOverviewBatchLoadingPreservesPaginationAndSummaries() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let fixtures: [(name: String, completedAt: TimeInterval, weight: Double)] = [
+            ("Recent", 300, 90),
+            ("Middle", 200, 80),
+            ("Old", 100, 70),
+        ]
+
+        for (index, fixture) in fixtures.enumerated() {
+            let session = WorkoutSession(
+                name: fixture.name,
+                status: .completed,
+                startedAt: Date(timeIntervalSince1970: fixture.completedAt - 60),
+                endedAt: Date(timeIntervalSince1970: fixture.completedAt),
+                durationSeconds: 60
+            )
+            let exercise = WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "exercise-\(index)",
+                exerciseNameSnapshot: "Exercise \(index)",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Muscle",
+                sortOrder: 0
+            )
+            let set = WorkoutSessionSet(
+                sessionExerciseID: exercise.id,
+                sortOrder: 0,
+                actualReps: 10,
+                actualWeight: fixture.weight,
+                isCompleted: true
+            )
+            context.insert(session)
+            context.insert(exercise)
+            context.insert(set)
+        }
+        try context.save()
+
+        let firstPage = try HistoryOverviewSnapshotLoader.load(
+            modelContext: context,
+            selectedDayFilter: nil,
+            pageSize: 2
+        )
+        XCTAssertEqual(firstPage.completedSessions.map(\.name), ["Recent", "Middle"])
+        XCTAssertTrue(firstPage.hasMorePages)
+        XCTAssertEqual(firstPage.completedSessions.flatMap(\.summaryRows).count, 2)
+
+        let lastLoaded = try XCTUnwrap(firstPage.completedSessions.last)
+        let secondPage = try HistoryOverviewSnapshotLoader.loadPage(
+            modelContext: context,
+            after: WorkoutSessionPageCursor(
+                completedAt: lastLoaded.displayDate,
+                sessionID: lastLoaded.id
+            ),
+            pageSize: 2
+        )
+        XCTAssertEqual(secondPage.completedSessions.map(\.name), ["Old"])
+        XCTAssertFalse(secondPage.hasMorePages)
+        XCTAssertEqual(secondPage.completedSessions.first?.summaryRows.first?.exercise, "1 x Exercise 2")
+        XCTAssertNotEqual(secondPage.completedSessions.first?.summaryRows.first?.bestSet, "-")
     }
 
     func testHistoryQueriesUseDisplayedCompletionDayForOvernightWorkouts() throws {

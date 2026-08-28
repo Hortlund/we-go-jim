@@ -99,6 +99,87 @@ final class WorkoutWarmupPresentationTests: XCTestCase {
         XCTAssertEqual(partialShare.exercises.first?.setProgressText, "2/3 working · 0/1 warm-up")
     }
 
+    func testBatchHistorySummaryKeepsSessionAndSortBoundaries() throws {
+        let container = try AppSchema.makeInMemoryContainer(
+            name: "BatchHistorySummaryTests-\(UUID().uuidString)"
+        )
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let firstSessionID = UUID()
+        let secondSessionID = UUID()
+        let firstExercise = WorkoutSessionExercise(
+            sessionID: firstSessionID,
+            catalogExerciseUUID: "row",
+            exerciseNameSnapshot: "Row",
+            categorySnapshot: "Back",
+            muscleSummarySnapshot: "Back",
+            sortOrder: 1
+        )
+        let secondExercise = WorkoutSessionExercise(
+            sessionID: firstSessionID,
+            catalogExerciseUUID: "curl",
+            exerciseNameSnapshot: "Curl",
+            categorySnapshot: "Arms",
+            muscleSummarySnapshot: "Biceps",
+            sortOrder: 0
+        )
+        let unrelatedExercise = WorkoutSessionExercise(
+            sessionID: secondSessionID,
+            catalogExerciseUUID: "squat",
+            exerciseNameSnapshot: "Squat",
+            categorySnapshot: "Legs",
+            muscleSummarySnapshot: "Quads",
+            sortOrder: 0
+        )
+        let rowSet = WorkoutSessionSet(
+            sessionExerciseID: firstExercise.id,
+            sortOrder: 1,
+            actualReps: 8,
+            actualWeight: 80,
+            isCompleted: true
+        )
+        let curlWarmup = WorkoutSessionSet(
+            sessionExerciseID: secondExercise.id,
+            sortOrder: 0,
+            isWarmup: true,
+            actualReps: 12,
+            actualWeight: 10,
+            isCompleted: true
+        )
+        let curlSet = WorkoutSessionSet(
+            sessionExerciseID: secondExercise.id,
+            sortOrder: 1,
+            actualReps: 10,
+            actualWeight: 20,
+            isCompleted: true
+        )
+        let unrelatedSet = WorkoutSessionSet(
+            sessionExerciseID: unrelatedExercise.id,
+            sortOrder: 0,
+            actualReps: 5,
+            actualWeight: 100,
+            isCompleted: true
+        )
+        [firstExercise, secondExercise, unrelatedExercise].forEach(context.insert)
+        [rowSet, curlWarmup, curlSet, unrelatedSet].forEach(context.insert)
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let exercises = try repository.sessionExercises(sessionIDs: [firstSessionID])
+        let sets = try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id)))
+        let rows = HistorySessionSummaryBuilder.rows(
+            for: exercises,
+            cardioBlocks: [],
+            setsBySessionExerciseID: Dictionary(grouping: sets, by: \.sessionExerciseID)
+        )
+
+        XCTAssertEqual(exercises.map(\.exerciseNameSnapshot), ["Curl", "Row"])
+        XCTAssertEqual(sets.count, 3)
+        XCTAssertEqual(rows.map(\.exercise), ["1 x Curl", "1 x Row"])
+        XCTAssertEqual(rows.first?.supportingText, "1 warm-up")
+        XCTAssertFalse(rows.contains { $0.exercise.contains("Squat") })
+    }
+
     private func completedSet(
         exercise: WorkoutSessionExercise,
         sortOrder: Int,

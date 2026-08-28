@@ -508,34 +508,53 @@ struct ContentView: View {
             return
         }
 
-        await WGJPerformance.measureAsync("app.maintenance") {
+        let maintenanceCompleted = await WGJPerformance.measureAsync("app.maintenance") {
             let backgroundStore = rootBackgroundStore
             let outcome = await ((try? backgroundStore.perform("app.maintenance.work") { backgroundContext in
+                var completedAllWork = true
+                var didPrimeCatalog = false
+
                 if work.shouldPrimeCatalog {
-                    try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+                    do {
+                        try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+                        didPrimeCatalog = true
+                    } catch {
+                        completedAllWork = false
+                    }
                 }
 
                 if work.shouldBackfillHistoryProjection {
-                    _ = try? HistoryProjectionRepository(modelContext: backgroundContext).backfillIfNeeded(
-                        persistChanges: true
-                    )
+                    do {
+                        _ = try HistoryProjectionRepository(modelContext: backgroundContext).backfillIfNeeded(
+                            persistChanges: true
+                        )
+                    } catch {
+                        completedAllWork = false
+                    }
                 }
 
                 if work.shouldBackfillSessionSummaries {
-                    _ = try? WorkoutSessionRepository(modelContext: backgroundContext)
-                        .backfillCompletedSessionSummariesIfNeeded()
+                    do {
+                        _ = try WorkoutSessionRepository(modelContext: backgroundContext)
+                            .backfillCompletedSessionSummariesIfNeeded()
+                    } catch {
+                        completedAllWork = false
+                    }
                 }
 
                 return DeferredMaintenanceExecutionOutcome(
-                    didPrimeCatalog: work.shouldPrimeCatalog
+                    didPrimeCatalog: didPrimeCatalog,
+                    completedAllWork: completedAllWork
                 )
             })) ?? .none
 
             if outcome.didPrimeCatalog {
                 catalogSyncCoordinator.markPrimed()
             }
+            return outcome.completedAllWork
         }
 
+        guard maintenanceCompleted else { return }
         if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
             deferredMaintenanceState.markCompleted()
             await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
@@ -769,13 +788,20 @@ struct ContentView: View {
         guard shouldRun else { return }
 
         let backgroundStore = rootBackgroundStore
-        let result = try? await backgroundStore.perform("app.first-run.local-bootstrap") { backgroundContext in
-            try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
-            return try? Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
+        let profileWarmSnapshot: ProfileWarmSnapshot?
+        do {
+            profileWarmSnapshot = try await FirstRunLocalBootstrapProgress.performAndMarkCompleted {
+                try await backgroundStore.perform("app.first-run.local-bootstrap") { backgroundContext in
+                    try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+                    return try? Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
+                }
+            }
+        } catch {
+            return
         }
 
         catalogSyncCoordinator.markPrimed()
-        if let profileWarmSnapshot = result {
+        if let profileWarmSnapshot {
             await AvatarThumbnailCacheService.shared.prime(
                 data: profileWarmSnapshot.profile.avatarImageData,
                 maxPixelSize: 176
@@ -786,7 +812,6 @@ struct ContentView: View {
                 keepsScreenAwake: profileWarmSnapshot.profile.keepsScreenAwake
             )
         }
-        FirstRunLocalBootstrapProgress.markCompleted()
     }
 
     nonisolated private static func buildProfileWarmSnapshot(
@@ -825,8 +850,12 @@ struct ContentView: View {
 
 private struct DeferredMaintenanceExecutionOutcome: Sendable {
     let didPrimeCatalog: Bool
+    let completedAllWork: Bool
 
-    static let none = DeferredMaintenanceExecutionOutcome(didPrimeCatalog: false)
+    static let none = DeferredMaintenanceExecutionOutcome(
+        didPrimeCatalog: false,
+        completedAllWork: false
+    )
 }
 
 private enum AppStartupRouting {
