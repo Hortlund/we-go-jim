@@ -363,7 +363,9 @@ private struct MainTabBottomOverlayChrome: View {
         .wgjGlassContainer(spacing: 16)
         .animation(activeWorkoutAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
         .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
-        .animation(overlayAnimation, value: isKeyboardVisible)
+        // Remove immediately before the keyboard changes the bottom safe area;
+        // animating the strip's removal can carry it upward with that inset.
+        .animation(nil, value: isKeyboardVisible)
     }
 
     private var activeWorkoutStripBottomLift: CGFloat {

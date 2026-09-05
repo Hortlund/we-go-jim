@@ -86,6 +86,53 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutStripHidesDuringExerciseSearchAndReturnsAfterDismissal() {
+        let app = launchLocalApp()
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        let minimize = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimize.waitForExistence(timeout: 8))
+        minimize.tap()
+        openExercisesTab(in: app)
+
+        let strip = app.buttons["active-workout-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 4))
+        let originalY = strip.frame.midY
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 4))
+
+        for query in ["bench", "zzzznoexercise"] {
+            search.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+            let visibleKey = app.keyboards.keys["b"]
+            XCTAssertTrue(visibleKey.wait(for: \.isHittable, toEqual: true, timeout: 3),
+                          "Enable the Simulator software keyboard before running this test")
+            // Focusing an empty field alone must hide the strip.
+            XCTAssertTrue(strip.waitForNonExistence(timeout: 3))
+            search.typeText(query)
+            if query == "bench" {
+                XCTAssertTrue(app.staticTexts["Barbell Bench Press"].firstMatch.waitForExistence(timeout: 4))
+            } else {
+                XCTAssertTrue(app.staticTexts["Barbell Bench Press"].firstMatch.waitForNonExistence(timeout: 4))
+            }
+            XCTAssertFalse(strip.exists)
+
+            app.buttons["exercises-body-part-filter"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+            XCTAssertTrue(strip.waitForExistence(timeout: 3))
+            XCTAssertEqual(strip.frame.midY, originalY, accuracy: 3)
+            app.buttons
+                .matching(identifier: "exercises-body-part-dropdown")
+                .matching(NSPredicate(format: "label == %@", "Any Body Part"))
+                .firstMatch.tap()
+        }
+
+        strip.tap()
+        XCTAssertTrue(minimize.waitForExistence(timeout: 4))
+    }
+
+    @MainActor
     func testExerciseProgressSelectors() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
         openExercisesTab(in: app)
