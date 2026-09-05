@@ -22,7 +22,7 @@ enum WGJKeyboard {
         )
     }
 
-    private static func endFrame(from notification: Notification) -> CGRect? {
+    fileprivate static func endFrame(from notification: Notification) -> CGRect? {
         guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
               frame.minX.isFinite,
               frame.minY.isFinite,
@@ -57,43 +57,93 @@ private struct WGJContainerFramePreferenceKey: PreferenceKey {
 private struct WGJKeyboardVisibilityModifier: ViewModifier {
     @Binding var isVisible: Bool
     let isEnabled: Bool
-    @State private var containerFrame = CGRect.zero
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: WGJContainerFramePreferenceKey.self,
-                            value: geometry.frame(in: .global)
-                        )
-                    }
-                }
-                .onPreferenceChange(WGJContainerFramePreferenceKey.self) { containerFrame = $0 }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                    updateVisibility(WGJKeyboard.isVisible(
-                        from: notification,
-                        containerFrame: containerFrame
-                    ))
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
-                    updateVisibility(false)
-                }
-        } else {
-            content
-                .onChange(of: isEnabled) { _, newValue in
-                    if !newValue {
-                        updateVisibility(false)
-                    }
-                }
+        // Keep the tab hierarchy stable when the workout is expanded/minimized.
+        content.background {
+            WGJKeyboardWindowObserver(isEnabled: isEnabled) { visible in
+                guard isVisible != visible else { return }
+                isVisible = visible
+            }
+            .allowsHitTesting(false)
         }
     }
+}
 
-    private func updateVisibility(_ newValue: Bool) {
-        guard isVisible != newValue else { return }
-        isVisible = newValue
+private struct WGJKeyboardWindowObserver: UIViewRepresentable {
+    let isEnabled: Bool
+    let onVisibilityChange: (Bool) -> Void
+
+    func makeUIView(context: Context) -> WGJKeyboardWindowView {
+        WGJKeyboardWindowView()
+    }
+
+    func updateUIView(_ view: WGJKeyboardWindowView, context: Context) {
+        view.isTrackingEnabled = isEnabled
+        view.onVisibilityChange = onVisibilityChange
+        view.refreshVisibility()
+    }
+}
+
+private final class WGJKeyboardWindowView: UIView {
+    var isTrackingEnabled = true
+    var onVisibilityChange: ((Bool) -> Void)?
+    private var keyboardEndFrame: CGRect?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardFrameChanged(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardHidden),
+            name: UIResponder.keyboardDidHideNotification, object: nil
+        )
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        refreshVisibility()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        refreshVisibility()
+    }
+
+    @objc private func keyboardFrameChanged(_ notification: Notification) {
+        guard let frame = WGJKeyboard.endFrame(from: notification) else { return }
+        keyboardEndFrame = frame
+        refreshVisibility()
+    }
+
+    @objc private func keyboardHidden() {
+        keyboardEndFrame = nil
+        refreshVisibility()
+    }
+
+    func refreshVisibility() {
+        // UIKit layout/updateUIView can run during a SwiftUI update. Publish afterward,
+        // using the latest state rather than capturing an obsolete keyboard frame.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard isTrackingEnabled, let window, let keyboardEndFrame else {
+                onVisibilityChange?(false)
+                return
+            }
+            // Window bounds do not shrink with SwiftUI keyboard avoidance. Convert
+            // from screen coordinates so split windows also use the correct geometry.
+            let frame = window.convert(keyboardEndFrame, from: window.screen.coordinateSpace)
+            onVisibilityChange?(WGJKeyboardGeometry.isVisible(
+                keyboardEndFrame: frame, containerFrame: window.bounds
+            ))
+        }
     }
 }
 
