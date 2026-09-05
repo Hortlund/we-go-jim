@@ -368,7 +368,7 @@ nonisolated final class TemplateRepository {
     }
 
     private func saveUserDataChanges() throws {
-        guard autoSaveChanges else { return }
+        guard autoSaveChanges, modelContext.hasChanges else { return }
         try modelContext.save()
         boundaryEffects.postLibraryChange()
         boundaryEffects.scheduleBackup(modelContext.container, userDataChangeBackupReason)
@@ -559,7 +559,12 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.workoutSessionNotFound
         }
 
-        let deferredRepository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let deferredRepository = TemplateRepository(
+            modelContext: modelContext,
+            autoSaveChanges: false,
+            userDataChangeBackupReason: userDataChangeBackupReason,
+            boundaryEffects: boundaryEffects
+        )
         let template = try deferredRepository.createTemplate(
             folderID: folderID,
             name: name,
@@ -651,7 +656,12 @@ nonisolated final class TemplateRepository {
         }
 
         let targetFolderID = sourceTemplate.folderID == Self.unfiledFolderID ? nil : sourceTemplate.folderID
-        let deferredRepository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let deferredRepository = TemplateRepository(
+            modelContext: modelContext,
+            autoSaveChanges: false,
+            userDataChangeBackupReason: userDataChangeBackupReason,
+            boundaryEffects: boundaryEffects
+        )
         let copy = try deferredRepository.createTemplate(
             folderID: targetFolderID,
             name: name ?? "\(sourceTemplate.name) Copy",

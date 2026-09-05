@@ -100,10 +100,11 @@ struct ProfileView: View {
     @State private var lastRefreshAt: Date?
     @State private var lastHandledProfileInvalidationVersion = 0
     @State private var localCloudBackupSummary = UserDataCloudBackupContentSummary.empty
-    @State private var remoteCloudBackupSummary: UserDataCloudBackupContentSummary?
+    private var remoteCloudBackupSummary: UserDataCloudBackupContentSummary? {
+        AppRuntimeState.shared.cloudBackupContentSummary
+    }
     @State private var isLoadingCloudBackupSummary = false
-    @State private var isRefreshingCloudBackupMetadata = false
-    @State private var shouldRetryCloudBackupDetailsWhenAvailable = false
+    private var isRefreshingCloudBackupMetadata: Bool { userDataSyncStatus.state == .checking }
     @State private var isForcingCloudBackup = false
     @State private var showsCloudBackupDetails = false
 
@@ -148,24 +149,10 @@ struct ProfileView: View {
             guard isTabActive else { return }
             await handleInitialActivation()
             await refreshCloudBackupSummary()
-            await refreshCloudBackupDetails()
         }
-        .onChange(of: userDataSyncStatus.state) { _, newState in
-            guard shouldRetryCloudBackupDetailsWhenAvailable,
-                  isTabActive,
-                  newState != .checking,
-                  newState != .pending
-            else {
-                return
-            }
-
-            shouldRetryCloudBackupDetailsWhenAvailable = false
-            Task { @MainActor in
-                await Task.yield()
-                guard isTabActive else { return }
-                await refreshCloudBackupSummary()
-                await refreshCloudBackupDetails()
-            }
+        .task(id: userDataSyncStatus) {
+            guard isTabActive else { return }
+            await refreshCloudBackupSummary()
         }
         .task(id: appWarmupState.profileCompletionVersion) {
             guard appWarmupState.profileCompletionVersion > 0 else { return }
@@ -800,6 +787,19 @@ struct ProfileView: View {
                 Spacer(minLength: 12)
 
                 Button {
+                    CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
+                        container: modelContext.container,
+                        isStartup: false
+                    )
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(WGJCompactGhostButtonStyle())
+                .disabled(!cloudSyncEnabled || isRefreshingCloudBackupMetadata || userDataSyncStatus.state == .pending)
+                .accessibilityLabel("Refresh backup status")
+                .accessibilityIdentifier("profile-cloud-backup-refresh-button")
+
+                Button {
                     Task {
                         await forceCloudBackup()
                     }
@@ -812,7 +812,7 @@ struct ProfileView: View {
                     }
                 }
                 .buttonStyle(WGJCompactGhostButtonStyle())
-                .disabled(!cloudSyncEnabled || isForcingCloudBackup)
+                .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending)
                 .accessibilityIdentifier("profile-cloud-backup-now-button")
             }
 
@@ -891,7 +891,7 @@ struct ProfileView: View {
     }
 
     private var latestCloudBackupText: String {
-        if let latestExport = userDataSyncStatus.latestSuccessfulExportAt {
+        if let latestExport = AppRuntimeState.shared.cloudBackupUpdatedAt {
             return latestExport.formatted(.relative(presentation: .named))
         }
         return "Never"
@@ -913,7 +913,11 @@ struct ProfileView: View {
 
     private var cloudBackupComparisonText: String {
         guard let remoteCloudBackupSummary else {
-            return cloudSyncEnabled ? "No cloud backup found" : "Cloud backup unavailable"
+            guard cloudSyncEnabled else { return "Cloud backup unavailable" }
+            if AppRuntimeState.shared.cloudBackupUpdatedAt != nil {
+                return "Backup counts will be available after your next backup"
+            }
+            return "No backup information available"
         }
 
         let localTotal = localCloudBackupSummary.totalBackedUpItemCount
@@ -1208,73 +1212,12 @@ struct ProfileView: View {
     }
 
     @MainActor
-    private func refreshCloudBackupDetails() async {
-        guard cloudSyncEnabled, !isRefreshingCloudBackupMetadata else { return }
-
-        isRefreshingCloudBackupMetadata = true
-        defer { isRefreshingCloudBackupMetadata = false }
-        let previousStatus = AppRuntimeState.shared.userDataSyncStatus
-        guard let revision = AppRuntimeState.shared.beginUserDataSyncStatusCheck(.checkingContents()) else {
-            shouldRetryCloudBackupDetailsWhenAvailable = true
-            return
-        }
-        shouldRetryCloudBackupDetailsWhenAvailable = false
-        do {
-            let snapshot = try await UserDataCloudBackupService(
-                localContainer: modelContext.container,
-                backupStore: CloudKitUserDataCloudBackupStore()
-            ).latestBackupSnapshot()
-            if let snapshot {
-                remoteCloudBackupSummary = snapshot.contentSummary
-                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                    .contentsChecked(
-                        at: snapshot.updatedAt,
-                        comparisonResult: cloudBackupComparisonText
-                    ),
-                    matching: revision
-                )
-            } else {
-                remoteCloudBackupSummary = nil
-                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                    .contentsChecked(at: nil, comparisonResult: nil),
-                    matching: revision
-                )
-            }
-        } catch {
-            if CloudBackupOperationErrorPolicy.isCancellation(
-                error,
-                taskWasCancelled: Task.isCancelled
-            ) {
-                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                    previousStatus,
-                    matching: revision
-                )
-            } else {
-                AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                    .checkFailed(error.localizedDescription),
-                    matching: revision
-                )
-            }
-        }
-    }
-
-    @MainActor
     private func forceCloudBackup() async {
         guard cloudSyncEnabled, !isForcingCloudBackup else { return }
 
         isForcingCloudBackup = true
-        AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
-        do {
-            let exportedSnapshot = try await UserDataCloudBackupService(
-                localContainer: modelContext.container,
-                backupStore: CloudKitUserDataCloudBackupStore()
-            ).exportCurrentBackup()
-            remoteCloudBackupSummary = exportedSnapshot.contentSummary
-            AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
-            await refreshCloudBackupSummary()
-        } catch {
-            AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Manual cloud backup failed: \(error.localizedDescription)"))
-        }
+        await BoundaryCloudBackupScheduler.exportManually(container: modelContext.container)
+        await refreshCloudBackupSummary()
         isForcingCloudBackup = false
     }
 

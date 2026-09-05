@@ -5,10 +5,12 @@ import SwiftData
 struct UserDataCloudBackupRemoteRecord: Equatable, Sendable {
     var updatedAt: Date
     var payloadData: Data
+    var contentSummary: UserDataCloudBackupContentSummary? = nil
 }
 
-struct UserDataCloudBackupRemoteMetadata: Equatable, Sendable {
+nonisolated struct UserDataCloudBackupRemoteMetadata: Codable, Equatable, Sendable {
     var updatedAt: Date
+    var contentSummary: UserDataCloudBackupContentSummary? = nil
 }
 
 struct UserDataCloudBackupRemoteSnapshot: Equatable, Sendable {
@@ -21,7 +23,7 @@ struct UserDataCloudBackupRestoreResult: Equatable, Sendable {
     var cleanupWarnings: [AppDataArtifactCleanupWarning]
 }
 
-struct UserDataCloudBackupContentSummary: Equatable, Sendable {
+nonisolated struct UserDataCloudBackupContentSummary: Codable, Equatable, Sendable {
     var profileCount: Int
     var profileWidgetCount: Int
     var customExerciseCount: Int
@@ -88,18 +90,37 @@ nonisolated enum UserDataCloudBackupDescriptor {
     enum Field {
         static let updatedAt = "updatedAt"
         static let schemaVersion = "schemaVersion"
+        static let contentSummary = "contentSummary"
         static let payloadAsset = "payloadAsset"
         static let payloadData = "payloadData"
         static let payloadCompression = "payloadCompression"
     }
 
-    static let metadataFieldKeys: [CKRecord.FieldKey] = [Field.updatedAt]
+    static let metadataFieldKeys: [CKRecord.FieldKey] = [Field.updatedAt, Field.contentSummary]
+
+    static func encodeSummary(_ summary: UserDataCloudBackupContentSummary?, updatedAt: Date) throws -> Data? {
+        guard let summary else { return nil }
+        return try JSONEncoder().encode(UserDataCloudBackupRemoteMetadata(updatedAt: updatedAt, contentSummary: summary))
+    }
+
+    static func decodeSummary(_ data: Data?, updatedAt: Date) -> UserDataCloudBackupContentSummary? {
+        guard let data,
+              let metadata = try? JSONDecoder().decode(UserDataCloudBackupRemoteMetadata.self, from: data),
+              abs(metadata.updatedAt.timeIntervalSince(updatedAt)) < 0.001
+        else { return nil }
+        // Older app versions can preserve an unknown summary field while replacing the payload.
+        // Only use counts stamped for this upload (allowing sub-millisecond date rounding).
+        return metadata.contentSummary
+    }
 }
 
 nonisolated enum BoundaryCloudBackupReason: String, Sendable {
+    case manual
     case workoutCompleted
     case workoutCompletionTemplateSaved
     case workoutDeleted
+    case workoutEdited
+    case profileWidgetsSaved
     case templateSaved
     case customExerciseSaved
     case profileSaved
@@ -107,10 +128,16 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
 
     var failureDescription: String {
         switch self {
+        case .manual:
+            return "manual backup"
         case .workoutCompleted:
             return "workout completion"
         case .workoutCompletionTemplateSaved:
             return "workout completion template update"
+        case .workoutEdited:
+            return "workout edit"
+        case .profileWidgetsSaved:
+            return "profile widget save"
         case .workoutDeleted:
             return "workout delete"
         case .templateSaved:
@@ -125,12 +152,18 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     }
 }
 
+nonisolated struct UserDataBackupBoundaryEffects: Sendable {
+    let scheduleBackup: @Sendable (ModelContainer, BoundaryCloudBackupReason) -> Void
+
+    static let live = Self(scheduleBackup: BoundaryCloudBackupScheduler.exportBestEffort)
+}
+
 nonisolated enum BoundaryCloudBackupScheduler {
     static func enqueueDelay(for reason: BoundaryCloudBackupReason) -> Duration {
         switch reason {
         case .workoutCompleted, .workoutCompletionTemplateSaved:
             return WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        case .workoutDeleted, .templateSaved, .customExerciseSaved, .profileSaved, .settingsSaved:
+        case .manual, .workoutDeleted, .workoutEdited, .profileWidgetsSaved, .templateSaved, .customExerciseSaved, .profileSaved, .settingsSaved:
             return .zero
         }
     }
@@ -139,64 +172,59 @@ nonisolated enum BoundaryCloudBackupScheduler {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
 
         Task.detached(priority: .utility) {
+            let sessionRevision = await AppRuntimeState.shared.cloudBackupSessionRevision
             let delay = enqueueDelay(for: reason)
             if delay > .zero {
                 try? await Task.sleep(for: delay)
             }
-            await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason)
+            await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason, sessionRevision: sessionRevision)
         }
+    }
+
+    static func exportManually(container: ModelContainer) async {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+        let sessionRevision = await AppRuntimeState.shared.cloudBackupSessionRevision
+        await BoundaryCloudBackupExportQueue.shared.enqueueAndWait(container: container, sessionRevision: sessionRevision)
     }
 }
 
 nonisolated enum CloudBackupStatusCheckScheduler {
-    static func checkMetadataBestEffort(container: ModelContainer) -> Task<Void, Never>? {
+    @discardableResult
+    static func checkMetadataBestEffort(container: ModelContainer, isStartup: Bool = true) -> Task<Void, Never>? {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return nil }
 
         return Task.detached(priority: .utility) {
-            guard !Task.isCancelled else { return }
-            let statusCheck = await MainActor.run { () -> (
-                revision: Int?,
-                previousStatus: UserDataSyncStatusSnapshot
-            ) in
-                let previousStatus = AppRuntimeState.shared.userDataSyncStatus
-                guard let revision = AppRuntimeState.shared.beginUserDataSyncStatusCheck(.checkingStatus()) else {
-                    return (revision: nil, previousStatus: previousStatus)
-                }
-                return (revision: revision, previousStatus: previousStatus)
-            }
-            guard let revision = statusCheck.revision else { return }
-
-            do {
-                let metadata = try await UserDataCloudBackupService(
+            await checkMetadata(isStartup: isStartup, state: AppRuntimeState.shared) {
+                try await UserDataCloudBackupService(
                     localContainer: container,
                     backupStore: CloudKitUserDataCloudBackupStore()
                 ).latestBackupMetadata()
-                guard !Task.isCancelled else {
-                    await MainActor.run {
-                        AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                            statusCheck.previousStatus,
-                            matching: revision
-                        )
-                    }
-                    return
-                }
-                await MainActor.run {
-                    AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                        .statusChecked(at: metadata?.updatedAt),
-                        matching: revision
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    AppRuntimeState.shared.finishUserDataSyncStatusCheck(
-                        CloudBackupOperationErrorPolicy.isCancellation(
-                            error,
-                            taskWasCancelled: Task.isCancelled
-                        ) ? statusCheck.previousStatus : .checkFailed(error.localizedDescription),
-                        matching: revision
-                    )
-                }
             }
+        }
+    }
+
+    @MainActor
+    static func checkMetadata(
+        isStartup: Bool,
+        state: AppRuntimeState,
+        fetchMetadata: @Sendable () async throws -> UserDataCloudBackupRemoteMetadata?
+    ) async {
+        guard !Task.isCancelled else { return }
+        let previousStatus = state.userDataSyncStatus
+        guard let revision = state.beginCloudBackupMetadataCheck(isStartup: isStartup) else { return }
+        do {
+            let metadata = try await fetchMetadata()
+            guard !Task.isCancelled else {
+                state.finishUserDataSyncStatusCheck(previousStatus, matching: revision)
+                return
+            }
+            state.finishCloudBackupMetadataCheck(metadata, matching: revision)
+        } catch {
+            state.finishUserDataSyncStatusCheck(
+                CloudBackupOperationErrorPolicy.isCancellation(error, taskWasCancelled: Task.isCancelled)
+                    ? previousStatus : .checkFailed(error.localizedDescription),
+                matching: revision
+            )
         }
     }
 }
@@ -219,16 +247,32 @@ nonisolated enum CloudBackupOperationErrorPolicy {
 private struct BoundaryCloudBackupRequest {
     let container: ModelContainer
     let reason: BoundaryCloudBackupReason
+    let sessionRevision: Int
+    var completions: [CheckedContinuation<Void, Never>]
 }
 
-private actor BoundaryCloudBackupExportQueue {
+actor BoundaryCloudBackupExportQueue {
     static let shared = BoundaryCloudBackupExportQueue()
 
     private var isProcessing = false
     private var pendingRequest: BoundaryCloudBackupRequest?
+    private let exportOperation: @Sendable (ModelContainer, BoundaryCloudBackupReason, Int) async -> Void
 
-    func enqueue(container: ModelContainer, reason: BoundaryCloudBackupReason) {
-        pendingRequest = BoundaryCloudBackupRequest(container: container, reason: reason)
+    init(exportOperation: @escaping @Sendable (ModelContainer, BoundaryCloudBackupReason, Int) async -> Void = BoundaryCloudBackupExportQueue.export) {
+        self.exportOperation = exportOperation
+    }
+
+    func enqueue(
+        container: ModelContainer,
+        reason: BoundaryCloudBackupReason,
+        sessionRevision: Int,
+        completion: CheckedContinuation<Void, Never>? = nil
+    ) {
+        var completions = pendingRequest?.completions ?? []
+        if let completion { completions.append(completion) }
+        pendingRequest = BoundaryCloudBackupRequest(
+            container: container, reason: reason, sessionRevision: sessionRevision, completions: completions
+        )
         guard !isProcessing else { return }
 
         isProcessing = true
@@ -237,29 +281,40 @@ private actor BoundaryCloudBackupExportQueue {
         }
     }
 
+    func enqueueAndWait(container: ModelContainer, sessionRevision: Int) async {
+        await withCheckedContinuation { completion in
+            enqueue(container: container, reason: .manual, sessionRevision: sessionRevision, completion: completion)
+        }
+    }
+
     private func processPendingRequests() async {
         while let request = pendingRequest {
             pendingRequest = nil
-            await export(request)
+            await exportOperation(request.container, request.reason, request.sessionRevision)
+            for completion in request.completions { completion.resume() }
         }
         isProcessing = false
     }
 
-    private func export(_ request: BoundaryCloudBackupRequest) async {
+    private static func export(container: ModelContainer, reason: BoundaryCloudBackupReason, sessionRevision: Int) async {
+        let canExport = await MainActor.run {
+            guard AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else { return false }
+            AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
+            return true
+        }
+        guard canExport else { return }
         do {
-            await MainActor.run {
-                AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
-            }
             let exportedSnapshot = try await UserDataCloudBackupService(
-                localContainer: request.container,
+                localContainer: container,
                 backupStore: CloudKitUserDataCloudBackupStore()
             ).exportCurrentBackup()
             await MainActor.run {
-                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
+                AppRuntimeState.shared.recordSuccessfulCloudBackup(exportedSnapshot, sessionRevision: sessionRevision)
             }
         } catch {
             await MainActor.run {
-                AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(request.reason.failureDescription): \(error.localizedDescription)"))
+                guard AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else { return }
+                AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.failureDescription): \(error.localizedDescription)"))
             }
         }
     }
@@ -293,7 +348,8 @@ nonisolated final class UserDataCloudBackupService {
         let payloadData = try Self.makeEncoder().encode(payload)
         try await backupStore.saveBackup(UserDataCloudBackupRemoteRecord(
             updatedAt: payload.generatedAt,
-            payloadData: payloadData
+            payloadData: payloadData,
+            contentSummary: payload.contentSummary
         ))
         return UserDataCloudBackupRemoteSnapshot(
             updatedAt: payload.generatedAt,
@@ -307,6 +363,7 @@ nonisolated final class UserDataCloudBackupService {
 
     func deleteRemoteBackup() async throws {
         try await backupStore.deleteBackup()
+        await MainActor.run { AppRuntimeState.shared.recordCloudBackupDeletion() }
     }
 
     func latestBackupSnapshot() async throws -> UserDataCloudBackupRemoteSnapshot? {
@@ -322,6 +379,7 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     func restoreLatestBackup(replacingLocalData: Bool = false) async throws -> UserDataCloudBackupRestoreResult? {
+        let sessionRevision = await MainActor.run { AppRuntimeState.shared.cloudBackupSessionRevision }
         guard let record = try await backupStore.fetchBackup() else {
             return nil
         }
@@ -348,6 +406,12 @@ nonisolated final class UserDataCloudBackupService {
         ExerciseSearchService.invalidateCatalogIndex(for: ModelContext(localContainer))
         HistoryAnalyticsCache.shared.clear()
         let cleanupWarnings = await artifactCleanupQueue.enqueue(Set(AppDataArtifact.allCases))
+        await MainActor.run {
+            AppRuntimeState.shared.recordSuccessfulCloudBackup(UserDataCloudBackupRemoteSnapshot(
+                updatedAt: record.updatedAt,
+                contentSummary: payload.contentSummary
+            ), sessionRevision: sessionRevision)
+        }
         NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil)
         return UserDataCloudBackupRestoreResult(
             restoredAt: record.updatedAt,
@@ -421,7 +485,7 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     func saveBackup(_ backup: UserDataCloudBackupRemoteRecord) async throws {
         let database = try requireDatabase()
         let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
-        let record = try await existingRecord(recordID: recordID)
+        let record = try await existingRecord(recordID: recordID, desiredKeys: [])
             ?? CKRecord(recordType: UserDataCloudBackupDescriptor.recordType, recordID: recordID)
         let payloadURL = try writeTemporaryPayload(backup.payloadData)
         defer {
@@ -429,6 +493,9 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         }
 
         record[UserDataCloudBackupDescriptor.Field.updatedAt] = backup.updatedAt as CKRecordValue
+        record[UserDataCloudBackupDescriptor.Field.contentSummary] = try UserDataCloudBackupDescriptor.encodeSummary(
+            backup.contentSummary, updatedAt: backup.updatedAt
+        ) as CKRecordValue?
         record[UserDataCloudBackupDescriptor.Field.schemaVersion] = NSNumber(value: UserDataCloudBackupPayload.schemaVersion)
         record[UserDataCloudBackupDescriptor.Field.payloadAsset] = CKAsset(fileURL: payloadURL)
         if let inlinePayload = Self.inlinePayloadFallback(for: backup.payloadData) {
@@ -450,7 +517,7 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     func deleteBackup() async throws {
         let database = try requireDatabase()
         let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
-        guard try await existingRecord(recordID: recordID) != nil else {
+        guard try await existingRecord(recordID: recordID, desiredKeys: []) != nil else {
             return
         }
 
@@ -494,7 +561,10 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         }
 
         let updatedAt = record[UserDataCloudBackupDescriptor.Field.updatedAt] as? Date ?? .distantPast
-        return UserDataCloudBackupRemoteMetadata(updatedAt: updatedAt)
+        let summary = UserDataCloudBackupDescriptor.decodeSummary(
+            record[UserDataCloudBackupDescriptor.Field.contentSummary] as? Data, updatedAt: updatedAt
+        )
+        return UserDataCloudBackupRemoteMetadata(updatedAt: updatedAt, contentSummary: summary)
     }
 
     private static func inlinePayloadFallback(for payloadData: Data) -> (data: Data, compression: String?)? {

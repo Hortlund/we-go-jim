@@ -70,6 +70,7 @@ nonisolated final class ExerciseCatalogRepository {
     }
 
     private func saveUserDataChanges() throws {
+        guard modelContext.hasChanges else { return }
         try modelContext.save()
         boundaryEffects.scheduleBackup(modelContext.container, .customExerciseSaved)
     }
@@ -111,6 +112,16 @@ nonisolated final class ExerciseCatalogRepository {
         }
 
         let validated = try validatedCustomExerciseInput(draft: draft, excluding: exercise)
+
+        guard exercise.displayName != validated.name
+                || exercise.categoryName != validated.categoryName
+                || exercise.equipmentSummary != validated.equipmentSummary
+                || exercise.instructionText != validated.instructionText
+                || exercise.cardioTrackingProfileRaw != validated.cardioTrackingProfileRaw
+                || Set(exercise.primaryMuscles.map(\.remoteID)) != Set(validated.primaryMuscles.map(\.remoteID))
+                || Set(exercise.secondaryMuscles.map(\.remoteID)) != Set(validated.secondaryMuscles.map(\.remoteID))
+                || Set(exercise.aliases.map(\.value)) != normalizedAliases(validated.aliases, exerciseName: validated.name)
+        else { return }
 
         exercise.displayName = validated.name
         exercise.categoryName = validated.categoryName
@@ -326,17 +337,18 @@ nonisolated final class ExerciseCatalogRepository {
         }
         exercise.aliases.removeAll()
 
-        let uniqueAliases = Set(
-            aliases
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty && $0.localizedCaseInsensitiveCompare(exercise.displayName) != .orderedSame }
-        )
+        let uniqueAliases = normalizedAliases(aliases, exerciseName: exercise.displayName)
 
         for alias in uniqueAliases.sorted() {
             let model = ExerciseAlias(value: alias, exercise: exercise)
             modelContext.insert(model)
             exercise.aliases.append(model)
         }
+    }
+
+    private func normalizedAliases(_ aliases: [String], exerciseName: String) -> Set<String> {
+        Set(aliases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.localizedCaseInsensitiveCompare(exerciseName) != .orderedSame })
     }
 
     private func refreshTemplateSnapshots(for exercise: ExerciseCatalogItem) throws {

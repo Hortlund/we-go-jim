@@ -258,7 +258,6 @@ struct AppStorageDiagnosticsView: View {
                     snapshot = loadedSnapshot
                     isRestoringCloudBackup = false
                     if let restoreResult {
-                        AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: restoreResult.restoredAt))
                         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                         let message = restoreResult.cleanupWarnings.isEmpty
                             ? "Latest CloudKit backup was restored on this device."

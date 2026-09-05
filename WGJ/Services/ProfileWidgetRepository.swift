@@ -17,13 +17,17 @@ enum ProfileWidgetRepositoryError: LocalizedError {
 
 nonisolated final class ProfileWidgetRepository {
     private let modelContext: ModelContext
+    private let boundaryEffects: UserDataBackupBoundaryEffects
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, boundaryEffects: UserDataBackupBoundaryEffects = .live) {
         self.modelContext = modelContext
+        self.boundaryEffects = boundaryEffects
     }
 
     private func saveUserDataChanges() throws {
+        guard modelContext.hasChanges else { return }
         try modelContext.save()
+        boundaryEffects.scheduleBackup(modelContext.container, .profileWidgetsSaved)
     }
 
     func configurations() throws -> [ProfileWidgetConfig] {
@@ -47,6 +51,7 @@ nonisolated final class ProfileWidgetRepository {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(for: kind)
         try validateCanEnable(config: config, isEnabled: isEnabled)
+        guard config.isEnabled != isEnabled else { return }
         config.isEnabled = isEnabled
         config.updatedAt = .now
         try saveUserDataChanges()
@@ -56,6 +61,7 @@ nonisolated final class ProfileWidgetRepository {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(id: id)
         try validateCanEnable(config: config, isEnabled: isEnabled)
+        guard config.isEnabled != isEnabled else { return }
         config.isEnabled = isEnabled
         config.updatedAt = .now
         try saveUserDataChanges()
@@ -68,6 +74,8 @@ nonisolated final class ProfileWidgetRepository {
     ) throws {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(for: kind)
+        guard config.selectedCatalogExerciseUUID != catalogExerciseUUID
+                || config.selectedExerciseNameSnapshot != exerciseName else { return }
         config.selectedCatalogExerciseUUID = catalogExerciseUUID
         config.selectedExerciseNameSnapshot = exerciseName
         config.updatedAt = .now
@@ -107,10 +115,15 @@ nonisolated final class ProfileWidgetRepository {
     ) throws {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(id: id)
+        let normalizedUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        let normalizedName = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        guard config.kind != .exerciseOneRMTrend || config.exerciseTrendMetric != metric
+                || config.selectedCatalogExerciseUUID != normalizedUUID
+                || config.selectedExerciseNameSnapshot != normalizedName else { return }
         config.kind = .exerciseOneRMTrend
         config.exerciseTrendMetric = metric
-        config.selectedCatalogExerciseUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
-        config.selectedExerciseNameSnapshot = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        config.selectedCatalogExerciseUUID = normalizedUUID
+        config.selectedExerciseNameSnapshot = normalizedName
         try validateCanEnable(config: config, isEnabled: config.isEnabled)
         config.updatedAt = .now
         try saveUserDataChanges()
@@ -144,15 +157,19 @@ nonisolated final class ProfileWidgetRepository {
 
         var sortIndex = 0
         for enabledConfig in enabled {
-            enabledConfig.sortOrder = sortIndex
-            enabledConfig.updatedAt = .now
+            if enabledConfig.sortOrder != sortIndex {
+                enabledConfig.sortOrder = sortIndex
+                enabledConfig.updatedAt = .now
+            }
             sortIndex += 1
         }
 
         let disabled = configs.filter { !$0.isEnabled }
         for disabledConfig in disabled {
-            disabledConfig.sortOrder = sortIndex
-            disabledConfig.updatedAt = .now
+            if disabledConfig.sortOrder != sortIndex {
+                disabledConfig.sortOrder = sortIndex
+                disabledConfig.updatedAt = .now
+            }
             sortIndex += 1
         }
 
@@ -170,14 +187,18 @@ nonisolated final class ProfileWidgetRepository {
         var next = 0
         for kind in kindOrder {
             guard let config = map[kind] else { continue }
-            config.sortOrder = next
-            config.updatedAt = .now
+            if config.sortOrder != next {
+                config.sortOrder = next
+                config.updatedAt = .now
+            }
             next += 1
         }
 
         for config in configs where !kindOrder.contains(config.kind) {
-            config.sortOrder = next
-            config.updatedAt = .now
+            if config.sortOrder != next {
+                config.sortOrder = next
+                config.updatedAt = .now
+            }
             next += 1
         }
 
@@ -236,7 +257,7 @@ nonisolated final class ProfileWidgetRepository {
         }
 
         if didInsert || didChange {
-            try saveUserDataChanges()
+            try modelContext.save()
         }
     }
 
@@ -253,7 +274,7 @@ nonisolated final class ProfileWidgetRepository {
             sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
         )
         modelContext.insert(created)
-        try saveUserDataChanges()
+        try modelContext.save()
         return created
     }
 

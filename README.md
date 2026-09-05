@@ -52,7 +52,7 @@ WGJ uses SwiftUI, Swift 6, and SwiftData. The app and widget target iPhone and i
 - **Repositories and services** own persistence, backup boundaries, metrics, projections, cache management, and business rules.
 - **Active workout state** is memory-first while open and snapshot-backed for crash/relaunch recovery.
 - **Background projections** keep history analytics, profile metrics, and coach inputs away from hot editing and scrolling paths.
-- **CloudKit backup** serializes user data into one record in the user's private database. Local commits succeed independently of backup availability.
+- **CloudKit backup** serializes user data into one record in the user's private database. Local commits succeed independently of backup availability. Backup status is checked once per cold start and on explicit refresh; navigation does not fetch backups. See [backup boundaries and schema rollout](docs/cloud-backup-boundaries.md).
 - **WidgetKit** reads a compact weekly-goal snapshot from the shared app group instead of querying the main stores.
 - **Foundation Models** optionally generates private coach copy on supported systems; the feature has a non-generative fallback.
 - **MuscleMap** is the only Swift Package dependency and provides the interactive body-map rendering.

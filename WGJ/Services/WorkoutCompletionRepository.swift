@@ -72,9 +72,11 @@ nonisolated enum WorkoutCaloriePersistedFactsAdapter {
 
 nonisolated final class WorkoutCompletionRepository {
     private let modelContext: ModelContext
+    private let boundaryEffects: UserDataBackupBoundaryEffects
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, boundaryEffects: UserDataBackupBoundaryEffects = .live) {
         self.modelContext = modelContext
+        self.boundaryEffects = boundaryEffects
     }
 
     @discardableResult
@@ -92,7 +94,7 @@ nonisolated final class WorkoutCompletionRepository {
             )
         }
 
-        let sessionID = try WorkoutCompletionMaterializer(modelContext: modelContext)
+        let sessionID = try WorkoutCompletionMaterializer(modelContext: modelContext, boundaryEffects: boundaryEffects)
             .finish(session: runtimeSession, notes: notes)
         return WorkoutCompletionCommitResult(
             sessionID: sessionID,
@@ -112,9 +114,11 @@ nonisolated final class WorkoutCompletionRepository {
 
 nonisolated private final class WorkoutCompletionMaterializer {
     private let modelContext: ModelContext
+    private let boundaryEffects: UserDataBackupBoundaryEffects
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, boundaryEffects: UserDataBackupBoundaryEffects = .live) {
         self.modelContext = modelContext
+        self.boundaryEffects = boundaryEffects
     }
 
     @discardableResult
@@ -253,10 +257,7 @@ nonisolated private final class WorkoutCompletionMaterializer {
             )
         }
         WorkoutHistoryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: container,
-            reason: .workoutCompleted
-        )
+        boundaryEffects.scheduleBackup(container, .workoutCompleted)
 
         return completedSession.id
     }
