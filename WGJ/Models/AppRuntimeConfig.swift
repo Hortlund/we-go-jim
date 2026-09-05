@@ -378,6 +378,10 @@ final class AppRuntimeState {
 
     private init() { }
 
+    // Avoid the implicit isolated-deinit runtime crash on iOS 26.2 and older.
+    // https://github.com/swiftlang/swift/issues/88036
+    nonisolated deinit { }
+
 #if DEBUG
     static func makeTestingInstance() -> AppRuntimeState {
         AppRuntimeState()
@@ -702,6 +706,10 @@ nonisolated final class AppTabState {
 @MainActor
 @Observable
 final class TemplateFileOpenState {
+    // Avoid the implicit isolated-deinit runtime crash on iOS 26.2 and older.
+    // https://github.com/swiftlang/swift/issues/88036
+    nonisolated deinit { }
+
     var pendingRequest: PendingTemplateFileOpen?
 
     @discardableResult
@@ -886,6 +894,10 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
 @MainActor
 @Observable
 final class WorkoutCompletionPresentationState {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     var presentedWorkout: WorkoutCompletionPresentation?
     @ObservationIgnored private var queuedWorkout: WorkoutCompletionPresentation?
 
@@ -955,25 +967,6 @@ nonisolated enum MainTabOverlayLayoutPolicy {
     }
 }
 
-nonisolated struct ActiveWorkoutRestoredPresentation: Equatable, Sendable {
-    let sessionID: UUID
-    let presentationMode: ActiveWorkoutStoredPresentationMode?
-    let scrollTarget: ActiveWorkoutScrollTarget?
-    let expandedExerciseIDs: Set<UUID>
-
-    init(
-        sessionID: UUID,
-        presentationMode: ActiveWorkoutStoredPresentationMode?,
-        scrollTarget: ActiveWorkoutScrollTarget? = nil,
-        expandedExerciseIDs: Set<UUID> = []
-    ) {
-        self.sessionID = sessionID
-        self.presentationMode = presentationMode
-        self.scrollTarget = scrollTarget
-        self.expandedExerciseIDs = expandedExerciseIDs
-    }
-}
-
 nonisolated enum ActiveWorkoutRestorationPresentationPolicy: Equatable, Sendable {
     case preserveStored
     case present
@@ -994,6 +987,10 @@ nonisolated enum ActiveWorkoutRestorationPresentationPolicy: Equatable, Sendable
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
@@ -1237,6 +1234,10 @@ final class ActiveWorkoutPresentationState {
 @MainActor
 @Observable
 final class RestTimerState {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     var restTimerEndsAt: Date?
     var restTimerExerciseName: String?
     var restTimerSetLabel: String?

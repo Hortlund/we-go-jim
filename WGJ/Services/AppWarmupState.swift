@@ -220,6 +220,10 @@ struct StartupWarmupTasks {
 @MainActor
 @Observable
 final class AppWarmupState {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     nonisolated static let defaultProfileFreshnessInterval: TimeInterval = 300
 
     private(set) var latestProfile: ProfileWarmSnapshot?

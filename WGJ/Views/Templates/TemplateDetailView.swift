@@ -548,7 +548,7 @@ struct TemplateDetailView: View {
         }
     }
 
-    private func destinationFolders(for template: TemplateDetailTemplateSnapshot) -> [TemplateOverviewFolderSnapshot] {
+    private func destinationFolders(for template: TemplateDetailTemplateSnapshot) -> [TemplateFolderSnapshot] {
         controller.snapshot.destinationFolders.filter { $0.id != template.folderID }
     }
 
@@ -838,7 +838,7 @@ private struct TemplateExerciseDetailDestinationView: View {
 
 nonisolated struct TemplateDetailSnapshot: Sendable, Equatable {
     let template: TemplateDetailTemplateSnapshot?
-    let destinationFolders: [TemplateOverviewFolderSnapshot]
+    let destinationFolders: [TemplateFolderSnapshot]
     let cardioBlocks: [TemplateDetailCardioBlockSnapshot]
     let exercises: [TemplateDetailExerciseSnapshot]
     let preferredLoadUnit: TemplateLoadUnit
@@ -970,7 +970,7 @@ nonisolated enum TemplateDetailSnapshotLoader {
             destinationFolders: folders
                 .filter { $0.id != template.folderID }
                 .map { folder in
-                    TemplateOverviewFolderSnapshot(
+                    TemplateFolderSnapshot(
                         id: folder.id,
                         name: folder.name,
                         templateCount: templateCountsByFolderID[folder.id, default: 0]

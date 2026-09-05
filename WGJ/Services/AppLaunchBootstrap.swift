@@ -339,7 +339,6 @@ final class AppLifecycleDiagnostics {
     private func purgeVolatileMemoryCaches() {
         ExerciseImageCacheService.clearMemoryCache()
         AvatarThumbnailCacheService.shared.clear()
-        ExerciseSearchService.clearCachedCatalogIndexes()
         HistoryAnalyticsCache.shared.clear()
     }
 

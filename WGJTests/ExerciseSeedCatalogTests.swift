@@ -101,13 +101,18 @@ final class ExerciseSeedCatalogTests: XCTestCase {
 
     func testSearchingDumbbellBenchPressReturnsTheCanonicalWorkout() throws {
         let container = try AppSchema.makeInMemoryContainer(name: "ExerciseSeedCatalogSearchTests")
-        let repository = ExerciseCatalogRepository(modelContext: ModelContext(container))
+        let repositoryContext = ModelContext(container)
+        let repository = ExerciseCatalogRepository(modelContext: repositoryContext)
         try repository.ensureSeedImportedIfNeeded()
 
-        let results = try repository.searchExercises(query: "dumbbell bench press")
+        let snapshot = try ExercisesCatalogSnapshotLoader.load(modelContext: repositoryContext)
+        let results = ExerciseCatalogProjector.project(
+            documents: snapshot.searchDocuments,
+            input: ExerciseCatalogProjectionInput(query: "dumbbell bench press", filters: .default, sortDescending: false)
+        )
 
         XCTAssertEqual(
-            results.first(where: { $0.remoteUUID == "seed-dumbbell-flat-press" })?.displayName,
+            results.rows.first.flatMap { snapshot.exerciseByUUID[$0.id]?.displayName },
             "Dumbbell Bench Press"
         )
     }

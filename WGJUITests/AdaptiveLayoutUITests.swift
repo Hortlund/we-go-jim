@@ -150,8 +150,31 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(app.buttons["exercise-progress-range-sixMonths"].exists)
         app.buttons["exercise-progress-range-allTime"].tap()
         XCTAssertEqual(app.buttons["exercise-progress-range-allTime"].value as? String, "Selected")
-        XCTAssertTrue(app.otherElements["exercise-progress-chart"].exists)
+        let chart = app.otherElements["exercise-progress-chart"]
+        XCTAssertTrue(chart.exists)
         XCTAssertTrue(app.otherElements["exercise-progress-timeline"].exists)
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<6 {
+            if chart.frame.minY > 100 && chart.frame.maxY < app.frame.maxY - 80 { break }
+            scroll.swipeUp()
+        }
+        XCTAssertGreaterThan(chart.frame.minY, 100)
+        XCTAssertLessThan(chart.frame.maxY, app.frame.maxY - 80)
+        chart.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+            .press(forDuration: 0.3, thenDragTo: chart.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)))
+        let sixMonths = app.buttons["exercise-progress-range-sixMonths"]
+        for _ in 0..<6 {
+            if sixMonths.isHittable { break }
+            scroll.swipeDown()
+        }
+        XCTAssertTrue(sixMonths.isHittable)
+        sixMonths.tap()
+        let selection = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Selected"),
+            object: sixMonths
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [selection], timeout: 3), .completed)
+        XCTAssertTrue(chart.exists)
     }
 
     @MainActor
@@ -175,6 +198,31 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(
             app.buttons["history-detail-save-changes-button"].waitForExistence(timeout: 4)
         )
+    }
+
+    @MainActor
+    func testTemplateLibraryScrollsToOffscreenRowsAndBack() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_LIBRARY"])
+        let first = app.staticTexts["Library Plan 01"].firstMatch
+        let last = app.staticTexts["Library Plan 16"].firstMatch
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8))
+        for _ in 0..<5 {
+            if first.exists && first.isHittable { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(first.isHittable)
+        for _ in 0..<20 {
+            if last.exists && last.isHittable { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(last.isHittable, "The last template should be reachable in the lazy library")
+        for _ in 0..<20 {
+            if first.exists && first.isHittable { break }
+            scroll.swipeDown()
+        }
+        XCTAssertTrue(first.isHittable, "Returning to recycled template rows should preserve content")
+        XCTAssertTrue(app.buttons["start-workout-new-folder-button"].exists)
     }
 
     @MainActor

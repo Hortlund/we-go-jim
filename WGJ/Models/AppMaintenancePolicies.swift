@@ -40,6 +40,10 @@ nonisolated enum AppDeferredMaintenancePlanner {
 @MainActor
 @Observable
 final class AppDeferredMaintenanceState {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     private(set) var isPending = true
 
     func requestRun() {

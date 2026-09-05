@@ -254,7 +254,7 @@ struct ProgressDashboardView: View {
     }
 
     private func exerciseComparisonSection(_ comparisons: [WorkoutProgressExerciseComparison]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        LazyVStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader(
                 "Template Exercise Progress",
                 subtitle: "Best sets and volume from completed working sets."

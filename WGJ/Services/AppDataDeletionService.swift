@@ -81,7 +81,6 @@ nonisolated final class AppDataDeletionService {
     }
 
     func invalidateCommittedCaches() {
-        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         HistoryAnalyticsCache.shared.clear()
     }
 

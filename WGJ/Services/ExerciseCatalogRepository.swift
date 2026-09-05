@@ -38,8 +38,6 @@ nonisolated struct ExerciseCatalogSaveBoundaryEffects: Sendable {
 
 nonisolated final class ExerciseCatalogRepository {
     private let syncService: ExerciseCatalogSyncService
-    private let searchService: ExerciseSearchService
-    private let imageCacheService: ExerciseImageCacheService
     private let modelContext: ModelContext
     private let boundaryEffects: ExerciseCatalogSaveBoundaryEffects
 
@@ -53,8 +51,6 @@ nonisolated final class ExerciseCatalogRepository {
             modelContext: modelContext,
             seedLoader: seedLoader
         )
-        self.searchService = ExerciseSearchService(modelContext: modelContext)
-        self.imageCacheService = ExerciseImageCacheService()
         self.boundaryEffects = boundaryEffects
     }
 
@@ -102,7 +98,6 @@ nonisolated final class ExerciseCatalogRepository {
         replaceAliases(on: exercise, aliases: validated.aliases)
 
         try saveUserDataChanges()
-        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         return exercise
     }
 
@@ -135,7 +130,6 @@ nonisolated final class ExerciseCatalogRepository {
         try refreshTemplateSnapshots(for: exercise)
 
         try saveUserDataChanges()
-        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
     }
 
     func deleteCustomExercise(_ exercise: ExerciseCatalogItem) throws {
@@ -152,15 +146,6 @@ nonisolated final class ExerciseCatalogRepository {
         try modelContext.save()
         modelContext.delete(exercise)
         try saveUserDataChanges()
-        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
-    }
-
-    func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {
-        try searchService.searchExercises(query: query, filters: filters)
-    }
-
-    func searchExercises(query: String) throws -> [ExerciseCatalogItem] {
-        try searchService.searchExercises(query: query, filters: .default)
     }
 
     func allExercises() throws -> [ExerciseCatalogItem] {
@@ -168,18 +153,6 @@ nonisolated final class ExerciseCatalogRepository {
             sortBy: [SortDescriptor(\.displayName, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
-    }
-
-    func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection] {
-        try searchService.groupedByMuscle(primaryOnly: primaryOnly, query: "", filters: .default)
-    }
-
-    func groupedByMuscle(
-        primaryOnly: Bool,
-        query: String,
-        filters: ExerciseFilters
-    ) throws -> [ExerciseMuscleGroupSection] {
-        try searchService.groupedByMuscle(primaryOnly: primaryOnly, query: query, filters: filters)
     }
 
     func exerciseMap(for remoteUUIDs: [String]) throws -> [String: ExerciseCatalogItem] {
@@ -247,19 +220,20 @@ nonisolated final class ExerciseCatalogRepository {
     }
 
     func availableMuscles() throws -> [MuscleGroup] {
-        try searchService.availableMuscles()
+        try modelContext.fetch(FetchDescriptor<MuscleGroup>(
+            sortBy: [SortDescriptor(\.name, order: .forward)]
+        ))
     }
 
     func availableCategories(includeUncurated: Bool) throws -> [String] {
-        try searchService.availableCategories(includeUncurated: includeUncurated)
-    }
-
-    func availableEquipmentTokens(includeUncurated: Bool) throws -> [String] {
-        try searchService.availableEquipmentTokens(includeUncurated: includeUncurated)
-    }
-
-    func image(for exercise: ExerciseCatalogItem) async -> UIImage? {
-        await imageCacheService.image(for: exercise)
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                !exercise.isHidden && (includeUncurated || exercise.sourceName == "custom" || exercise.isCurated)
+            }
+        )
+        let categories = try modelContext.fetch(descriptor).map(\.categoryName)
+        return Set(categories.filter { !$0.isEmpty })
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     func syncState() -> ExerciseCatalogSyncState? {

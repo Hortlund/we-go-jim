@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class ExerciseCatalogRepositoryTests: XCTestCase {
+    func testCategoryOptionsRespectVisibilityAndReflectEditsWithoutCacheInvalidation() throws {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
+        let curated = ExerciseCatalogItem(remoteUUID: "curated", displayName: "Curated", categoryName: "Strength", isCurated: true)
+        let custom = ExerciseCatalogItem(remoteUUID: "custom", displayName: "Custom", categoryName: "Cardio", sourceName: "custom")
+        let uncurated = ExerciseCatalogItem(remoteUUID: "uncurated", displayName: "Uncurated", categoryName: "Mobility")
+        let hidden = ExerciseCatalogItem(remoteUUID: "hidden", displayName: "Hidden", categoryName: "Hidden", isCurated: true, isHidden: true)
+        for exercise in [curated, custom, uncurated, hidden] { context.insert(exercise) }
+        try context.save()
+        let repository = ExerciseCatalogRepository(modelContext: context)
+
+        XCTAssertEqual(try repository.availableCategories(includeUncurated: false), ["Cardio", "Strength"])
+        XCTAssertEqual(try repository.availableCategories(includeUncurated: true), ["Cardio", "Mobility", "Strength"])
+
+        custom.categoryName = "Strength"
+        curated.isHidden = true
+        try context.save()
+        XCTAssertEqual(try repository.availableCategories(includeUncurated: false), ["Strength"])
+    }
+
     func testCustomExerciseMutationsScheduleCloudBackupAfterSave() throws {
         let container = try AppSchema.makeInMemoryContainer(name: "ExerciseCatalogBackupBoundaryTests")
         let context = ModelContext(container)

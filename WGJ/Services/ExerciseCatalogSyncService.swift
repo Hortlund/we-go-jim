@@ -121,7 +121,6 @@ nonisolated final class ExerciseCatalogSyncService {
             state.lastRefreshAttemptAt = now
             state.lastErrorMessage = nil
             try modelContext.save()
-            ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         } catch {
             let importError = error
             modelContext.rollback()

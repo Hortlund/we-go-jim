@@ -1305,7 +1305,6 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let isCurated: Bool
     let isCustomExercise: Bool
     let aliases: [String]
-    let searchBlob: String
     let image: ExerciseCatalogImageSnapshot?
 
     var selection: ExerciseCatalogSelection {
@@ -1336,9 +1335,6 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         isCurated = exercise.isCurated
         isCustomExercise = exercise.isCustomExercise
         aliases = exercise.aliases.map(\.value)
-        searchBlob = exercise.searchableTerms
-            .joined(separator: " ")
-            .lowercased()
         image = exercise.images.first.map {
             ExerciseCatalogImageSnapshot(
                 localPath: $0.localPath,
@@ -1356,9 +1352,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
     var availableMuscles: [ExerciseMuscleSnapshot] = []
     var availableCategories: [String] = []
     var searchDocuments: [ExerciseCatalogSearchDocument] = []
-    var sections: [ExercisesSectionSnapshot] = []
     var totalSectionCount = 0
-    private var allRows: [ExerciseCatalogRowSnapshot] = []
 
     static let empty = ExercisesCatalogSnapshot()
 
@@ -1382,8 +1376,6 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
 
         var muscleNameByID: [Int: String] = [:]
         var categories = Set<String>()
-        var rows: [ExerciseCatalogRowSnapshot] = []
-        rows.reserveCapacity(uniqueExercises.count)
 
         for exercise in uniqueExercises where !exercise.isHidden {
             for muscleID in exercise.primaryMuscleIDs {
@@ -1395,30 +1387,6 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
                 categories.insert(exercise.categoryName)
             }
 
-            let indexKey: String
-            if let first = exercise.displayName.first {
-                indexKey = String(first).uppercased()
-            } else {
-                indexKey = "#"
-            }
-
-            rows.append(
-                ExerciseCatalogRowSnapshot(
-                    id: exercise.remoteUUID,
-                    displayName: exercise.displayName,
-                    categoryName: exercise.categoryName,
-                    searchBlob: exercise.searchBlob,
-                    primaryMuscleIDs: exercise.primaryMuscleIDs,
-                    secondaryMuscleIDs: exercise.secondaryMuscleIDs,
-                    equipmentTokens: Set(exercise.equipmentSummary
-                        .split(separator: ",")
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                        .filter { !$0.isEmpty }),
-                    isCurated: exercise.isCurated,
-                    isCustomExercise: exercise.isCustomExercise,
-                    indexKey: indexKey
-                )
-            )
         }
 
         availableMuscleNamesByID = muscleNameByID
@@ -1444,27 +1412,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
                     isCustomExercise: exercise.isCustomExercise
                 )
             }
-        totalSectionCount = Set(rows.map(\.indexKey)).count
-        allRows = rows
-        sections = Self.sections(
-            from: rows,
-            query: "",
-            filters: .default,
-            sortDescending: false
-        )
-    }
-
-    mutating func applyFilters(
-        query: String,
-        filters: ExerciseFilters,
-        sortDescending: Bool
-    ) {
-        sections = Self.sections(
-            from: allRows,
-            query: query,
-            filters: filters,
-            sortDescending: sortDescending
-        )
+        totalSectionCount = Set(searchDocuments.map(\.indexKey)).count
     }
 
     func muscleName(for muscleID: Int?) -> String? {
@@ -1472,83 +1420,6 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
         return availableMuscleNamesByID[muscleID]
     }
 
-    private static func sections(
-        from rows: [ExerciseCatalogRowSnapshot],
-        query: String,
-        filters: ExerciseFilters,
-        sortDescending: Bool
-    ) -> [ExercisesSectionSnapshot] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-        var filtered = rows
-        let queryTokens = trimmed
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-
-        if !filters.includeUncurated {
-            filtered = filtered.filter { $0.isCustomExercise || $0.isCurated }
-        }
-        if let selectedPrimaryMuscleID = filters.primaryMuscleID {
-            filtered = filtered.filter { $0.primaryMuscleIDs.contains(selectedPrimaryMuscleID) }
-        }
-        if let selectedSecondaryMuscleID = filters.secondaryMuscleID {
-            filtered = filtered.filter { $0.secondaryMuscleIDs.contains(selectedSecondaryMuscleID) }
-        }
-        if let selectedEquipmentToken = filters.equipmentToken {
-            let normalizedEquipment = selectedEquipmentToken
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            filtered = filtered.filter { $0.equipmentTokens.contains(normalizedEquipment) }
-        }
-        if let selectedCategory = filters.categoryName {
-            let normalizedCategory = selectedCategory.trimmingCharacters(in: .whitespacesAndNewlines)
-            filtered = filtered.filter { row in
-                row.categoryName
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .localizedCaseInsensitiveCompare(normalizedCategory) == .orderedSame
-            }
-        }
-        if !queryTokens.isEmpty {
-            filtered = filtered.filter { row in
-                queryTokens.allSatisfy { row.searchBlob.contains($0) }
-            }
-        }
-
-        filtered.sort { lhs, rhs in
-            let order = lhs.displayName.localizedStandardCompare(rhs.displayName)
-            return sortDescending ? order == .orderedDescending : order == .orderedAscending
-        }
-
-        let grouped = Dictionary(grouping: filtered, by: \.indexKey)
-        let sortedKeys = grouped.keys.sorted { lhs, rhs in
-            let order = lhs.localizedStandardCompare(rhs)
-            return sortDescending ? order == .orderedDescending : order == .orderedAscending
-        }
-
-        return sortedKeys.map { key in
-            let rows = grouped[key, default: []]
-            return ExercisesSectionSnapshot(id: key, title: key, rows: rows)
-        }
-    }
-}
-
-nonisolated struct ExerciseCatalogRowSnapshot: Identifiable, Equatable, Sendable {
-    let id: String
-    let displayName: String
-    let categoryName: String
-    let searchBlob: String
-    let primaryMuscleIDs: Set<Int>
-    let secondaryMuscleIDs: Set<Int>
-    let equipmentTokens: Set<String>
-    let isCurated: Bool
-    let isCustomExercise: Bool
-    let indexKey: String
-}
-
-nonisolated struct ExercisesSectionSnapshot: Identifiable, Equatable, Sendable {
-    let id: String
-    let title: String
-    let rows: [ExerciseCatalogRowSnapshot]
 }
 
 private struct ExercisesCatalogSearchField: View {

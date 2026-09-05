@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class CardioActivityQuickPickerTests: XCTestCase {
+    func testSnapshotBuildsOneSearchDocumentPerVisibleIdentityAndUsesProjectedIndexKeys() {
+        let first = ExerciseCatalogItem(remoteUUID: "one", displayName: "Élévation", isCurated: true)
+        let duplicate = ExerciseCatalogItem(remoteUUID: "one", displayName: "Duplicate", isCurated: true)
+        let second = ExerciseCatalogItem(remoteUUID: "two", displayName: "Extension", isCurated: true)
+        let hidden = ExerciseCatalogItem(remoteUUID: "hidden", displayName: "Hidden", isCurated: true, isHidden: true)
+        var snapshot = ExercisesCatalogSnapshot.empty
+        snapshot.rebuild(from: [first, duplicate, second, hidden], muscleGroups: [])
+
+        XCTAssertEqual(snapshot.searchDocuments.map(\.id), ["one", "two"])
+        XCTAssertEqual(snapshot.totalSectionCount, 1)
+        XCTAssertEqual(snapshot.exerciseByUUID["one"]?.displayName, "Élévation")
+    }
+
     func testCatalogSearchStateHonorsCompleteInitialFilters() {
         let state = ExercisesCatalogSearchState(filters: ExerciseFilters(
             primaryMuscleID: 9,
@@ -20,7 +33,7 @@ final class CardioActivityQuickPickerTests: XCTestCase {
         XCTAssertTrue(state.includeUncurated)
     }
 
-    func testCatalogSnapshotHonorsCompleteExerciseFilters() throws {
+    func testCatalogProjectionHonorsCompleteExerciseFilters() throws {
         let context = ModelContext(try AppSchema.makeInMemoryContainer())
         let primary = MuscleGroup(remoteID: 9, name: "Legs", nameEn: "Legs")
         let secondary = MuscleGroup(remoteID: 5, name: "Calves", nameEn: "Calves")
@@ -78,15 +91,21 @@ final class CardioActivityQuickPickerTests: XCTestCase {
             includeUncurated: false
         )
 
-        snapshot.applyFilters(query: "", filters: filters, sortDescending: false)
+        let curatedProjection = ExerciseCatalogProjector.project(
+            documents: snapshot.searchDocuments,
+            input: ExerciseCatalogProjectionInput(query: "", filters: filters, sortDescending: false)
+        )
 
-        XCTAssertEqual(snapshot.sections.flatMap(\.rows).map(\.id), ["curated-match", "custom-match"])
+        XCTAssertEqual(curatedProjection.rows.map(\.id), ["curated-match", "custom-match"])
 
         var includingUncurated = filters
         includingUncurated.includeUncurated = true
-        snapshot.applyFilters(query: "", filters: includingUncurated, sortDescending: false)
+        let fullProjection = ExerciseCatalogProjector.project(
+            documents: snapshot.searchDocuments,
+            input: ExerciseCatalogProjectionInput(query: "", filters: includingUncurated, sortDescending: false)
+        )
         XCTAssertEqual(
-            snapshot.sections.flatMap(\.rows).map(\.id),
+            fullProjection.rows.map(\.id),
             ["curated-match", "custom-match", "uncurated-match"]
         )
     }
@@ -107,13 +126,16 @@ final class CardioActivityQuickPickerTests: XCTestCase {
         var snapshot = ExercisesCatalogSnapshot.empty
         snapshot.rebuild(from: [customCardio, strength], muscleGroups: [])
 
-        snapshot.applyFilters(
-            query: "",
-            filters: ExerciseFilters(categoryName: "Cardio", includeUncurated: true),
-            sortDescending: false
+        let projection = ExerciseCatalogProjector.project(
+            documents: snapshot.searchDocuments,
+            input: ExerciseCatalogProjectionInput(
+                query: "",
+                filters: ExerciseFilters(categoryName: "Cardio", includeUncurated: true),
+                sortDescending: false
+            )
         )
 
-        XCTAssertEqual(snapshot.sections.flatMap(\.rows).map(\.id), ["custom-cardio"])
+        XCTAssertEqual(projection.rows.map(\.id), ["custom-cardio"])
     }
 
     func testBundledSeedContainsPromotedActivitiesAndProfiles() throws {

@@ -52,7 +52,7 @@ struct StartWorkoutHomeView: View {
 
     private var baseScreen: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
 
                 quickStartSection
@@ -65,7 +65,7 @@ struct StartWorkoutHomeView: View {
                         icon: "folder"
                     )
                 } else {
-                    VStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(controller.snapshot.sections) { section in
                             templateSectionCard(section)
                         }
@@ -365,18 +365,20 @@ struct StartWorkoutHomeView: View {
     }
 
     private func expandedTemplateSectionContent(_ section: StartWorkoutTemplateSection) -> some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             sectionDivider
 
             if section.templates.isEmpty {
                 emptySectionState(section)
             } else {
-                ForEach(Array(section.templates.enumerated()), id: \.element.id) { index, template in
-                    templateRow(template)
+                ForEach(section.templates) { template in
+                    VStack(spacing: 0) {
+                        templateRow(template)
 
-                    if index < section.templates.count - 1 {
-                        sectionDivider
-                            .padding(.leading, 14)
+                        if template.id != section.templates.last?.id {
+                            sectionDivider
+                                .padding(.leading, 14)
+                        }
                     }
                 }
             }
