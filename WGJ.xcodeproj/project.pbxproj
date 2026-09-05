@@ -609,6 +609,7 @@
 				WGJ_APP_ENVIRONMENT = development;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;
+				WGJ_CLOUDKIT_ENVIRONMENT = Development;
 				WGJ_URL_SCHEME = "wgj-dev";
 			};
 			name = Debug;
@@ -624,6 +625,8 @@
 				WGJ_APP_ENVIRONMENT = production;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
+				WGJ_CLOUDKIT_ENVIRONMENT = Production;
+				"WGJ_CLOUDKIT_ENVIRONMENT[sdk=iphonesimulator*]" = Development;
 				WGJ_URL_SCHEME = wgj;
 			};
 			name = Release;
@@ -639,6 +642,7 @@
 				WGJ_APP_ENVIRONMENT = development;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;
+				WGJ_CLOUDKIT_ENVIRONMENT = Development;
 				WGJ_URL_SCHEME = "wgj-dev";
 			};
 			name = "Dev Preview";

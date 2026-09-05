@@ -13,7 +13,7 @@
 		<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
 	</array>
 	<key>com.apple.developer.icloud-container-environment</key>
-	<string>Production</string>
+	<string>$(WGJ_CLOUDKIT_ENVIRONMENT)</string>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>

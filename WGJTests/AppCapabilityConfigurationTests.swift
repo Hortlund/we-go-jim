@@ -138,8 +138,8 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         XCTAssertEqual(info["WGJURLScheme"] as? String, "$(WGJ_URL_SCHEME)")
         XCTAssertEqual(widgetInfo["WGJAppGroupIdentifier"] as? String, "$(WGJ_APP_GROUP_IDENTIFIER)")
         XCTAssertEqual(widgetInfo["WGJURLScheme"] as? String, "$(WGJ_URL_SCHEME)")
-        XCTAssertEqual(debug["com.apple.developer.icloud-container-environment"] as? String, "Development")
-        XCTAssertEqual(release["com.apple.developer.icloud-container-environment"] as? String, "Production")
+        XCTAssertEqual(debug["com.apple.developer.icloud-container-environment"] as? String, "$(WGJ_CLOUDKIT_ENVIRONMENT)")
+        XCTAssertEqual(release["com.apple.developer.icloud-container-environment"] as? String, "$(WGJ_CLOUDKIT_ENVIRONMENT)")
 
         for setting in [
             "PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev;",
