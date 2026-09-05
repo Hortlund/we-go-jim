@@ -546,25 +546,6 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertTrue(mainTabSource.contains("@Environment(\\.userDataSyncStatus) private var userDataSyncStatus"))
     }
 
-    func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
-        XCTAssertEqual(
-            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
-            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        )
-        XCTAssertEqual(
-            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompletionTemplateSaved),
-            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        )
-        XCTAssertEqual(
-            BoundaryCloudBackupScheduler.enqueueDelay(for: .templateSaved),
-            .zero
-        )
-        XCTAssertEqual(
-            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutDeleted),
-            .zero
-        )
-    }
-
     func testTemplateRepositoryCanUseWorkoutCompletionTemplateBackupReason() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

@@ -1276,45 +1276,12 @@ private struct WorkoutCompletionConfettiOverlay: View {
                 overlayFrameInGlobalSpace: overlayFrameInGlobal
             )
 
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                let elapsed = max(0, timeline.date.timeIntervalSince(startDate))
-                let initialSpreadX = WorkoutCompletionConfettiPolicy.initialSpreadX(for: proxy.size.width)
-                let initialSpreadY = WorkoutCompletionConfettiPolicy.initialSpreadY(for: proxy.size.height)
-                let widthScale = WorkoutCompletionConfettiPolicy.horizontalMotionScale(for: proxy.size.width)
-                let heightScale = WorkoutCompletionConfettiPolicy.verticalMotionScale(for: proxy.size.height)
-
-                Canvas { context, _ in
-                    for piece in pieces {
-                        let progress = piece.progress(at: elapsed)
-                        guard progress > 0 else { continue }
-
-                        let x = resolvedOrigin.x
-                            + (piece.originX * initialSpreadX)
-                            + (piece.xOffset(progress: progress) * widthScale)
-                        let y = resolvedOrigin.y
-                            + (piece.originY * initialSpreadY)
-                            + (piece.yOffset(progress: progress) * heightScale)
-
-                        var pieceContext = context
-                        pieceContext.opacity = piece.opacity(progress: progress)
-                        pieceContext.translateBy(x: x, y: y)
-                        pieceContext.rotate(by: .degrees(piece.rotation(progress: progress)))
-                        pieceContext.fill(
-                            Path(
-                                roundedRect: CGRect(
-                                    x: -piece.width / 2,
-                                    y: -piece.height / 2,
-                                    width: piece.width,
-                                    height: piece.height
-                                ),
-                                cornerRadius: piece.cornerRadius
-                            ),
-                            with: .color(piece.color)
-                        )
-                    }
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            }
+            WorkoutCompletionConfettiLayerView(
+                origin: resolvedOrigin,
+                pieces: pieces,
+                startDate: startDate
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .allowsHitTesting(false)
     }

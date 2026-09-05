@@ -159,24 +159,11 @@ nonisolated struct UserDataBackupBoundaryEffects: Sendable {
 }
 
 nonisolated enum BoundaryCloudBackupScheduler {
-    static func enqueueDelay(for reason: BoundaryCloudBackupReason) -> Duration {
-        switch reason {
-        case .workoutCompleted, .workoutCompletionTemplateSaved:
-            return WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        case .manual, .workoutDeleted, .workoutEdited, .profileWidgetsSaved, .templateSaved, .customExerciseSaved, .profileSaved, .settingsSaved:
-            return .zero
-        }
-    }
-
     static func exportBestEffort(container: ModelContainer, reason: BoundaryCloudBackupReason) {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
 
         Task.detached(priority: .utility) {
             let sessionRevision = await AppRuntimeState.shared.cloudBackupSessionRevision
-            let delay = enqueueDelay(for: reason)
-            if delay > .zero {
-                try? await Task.sleep(for: delay)
-            }
             await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason, sessionRevision: sessionRevision)
         }
     }
@@ -296,6 +283,7 @@ actor BoundaryCloudBackupExportQueue {
         isProcessing = false
     }
 
+    @concurrent
     private static func export(container: ModelContainer, reason: BoundaryCloudBackupReason, sessionRevision: Int) async {
         let canExport = await MainActor.run {
             guard AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else { return false }
@@ -341,19 +329,24 @@ nonisolated final class UserDataCloudBackupService {
 
     @discardableResult
     func exportCurrentBackup() async throws -> UserDataCloudBackupRemoteSnapshot {
+        let (record, snapshot) = try makeExportRecord()
+        try await backupStore.saveBackup(record)
+        return snapshot
+    }
+
+    private func makeExportRecord() throws -> (UserDataCloudBackupRemoteRecord, UserDataCloudBackupRemoteSnapshot) {
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
         try TemplateRepository(modelContext: context, autoSaveChanges: false).pruneOrphanedTemplateGraphs()
         let payload = try UserDataCloudBackupPayload(context: context)
-        let payloadData = try Self.makeEncoder().encode(payload)
-        try await backupStore.saveBackup(UserDataCloudBackupRemoteRecord(
-            updatedAt: payload.generatedAt,
-            payloadData: payloadData,
-            contentSummary: payload.contentSummary
-        ))
-        return UserDataCloudBackupRemoteSnapshot(
-            updatedAt: payload.generatedAt,
-            contentSummary: payload.contentSummary
+        let summary = payload.contentSummary
+        return (
+            UserDataCloudBackupRemoteRecord(
+                updatedAt: payload.generatedAt,
+                payloadData: try Self.makeEncoder().encode(payload),
+                contentSummary: summary
+            ),
+            UserDataCloudBackupRemoteSnapshot(updatedAt: payload.generatedAt, contentSummary: summary)
         )
     }
 
@@ -481,6 +474,7 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         }
     }
 
+    @concurrent
     func saveBackup(_ backup: UserDataCloudBackupRemoteRecord) async throws {
         let database = try requireDatabase()
         let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)

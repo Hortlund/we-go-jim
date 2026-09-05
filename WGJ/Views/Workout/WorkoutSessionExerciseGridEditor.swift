@@ -215,12 +215,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         transaction.animation = nil
                     }
             }
-            .shadow(
-                color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
-                radius: 16,
-                x: 0,
-                y: 8
-            )
+
     }
 
     private var lifecycleObservedCard: some View {
@@ -310,6 +305,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     private var cardBackgroundLayer: some View {
         RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
             .fill(completedExerciseBackgroundStyle)
+            // Shadow only the rounded silhouette, never the expanded editor subtree.
+            .shadow(
+                color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
+                radius: 16,
+                x: 0,
+                y: 8
+            )
     }
 
     private var cardOverlayLayer: some View {

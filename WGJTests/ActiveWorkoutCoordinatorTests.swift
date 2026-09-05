@@ -219,6 +219,75 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.storedSnapshot)
     }
 
+    func testUnchangedCommandsKeepRevisionAndSkipDiskWrites() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        let exercise = makeExercise(id: UUID(), name: "Bench", sortOrder: 0)
+        let session = ActiveWorkoutRuntimeSession(name: "Push", exercises: [exercise])
+        coordinator.send(.start(session))
+        coordinator.send(.updatePresentation(mode: .presented, scrollTarget: nil, expandedExerciseIDs: []))
+        await coordinator.flushSnapshot()
+        let before = try XCTUnwrap(coordinator.storedSnapshot)
+        let writesBefore = await store.writeAttempts()
+        coordinator.send(.updateMetadata(name: session.name, notes: session.notes))
+        coordinator.send(.setExerciseDrafts(exerciseID: exercise.id, drafts: exercise.setDrafts))
+        coordinator.send(.setExerciseNotes(exerciseID: exercise.id, notes: exercise.notes))
+        coordinator.send(.moveExercise(exerciseID: exercise.id, destinationIndex: 0))
+        coordinator.send(.updateRestTimer(nil))
+        coordinator.send(.synchronize(session: before.session, restTimer: nil,
+            presentationMode: .presented, scrollTarget: nil, expandedExerciseIDs: []))
+        await coordinator.flushSnapshot()
+        XCTAssertEqual(coordinator.storedSnapshot, before)
+        let writesAfter = await store.writeAttempts()
+        XCTAssertEqual(writesAfter, writesBefore)
+    }
+
+    func testUnchangedCommandRetriesFailedSaveWithoutInventingRevision() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore(failuresRemaining: 1)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Push")), persist: false)
+        await coordinator.flushSnapshot()
+        XCTAssertNotNil(coordinator.persistenceWarning)
+        let revision = coordinator.storedSnapshot?.revision
+        coordinator.send(.updateRestTimer(nil))
+        await coordinator.flushSnapshot()
+        XCTAssertNil(coordinator.persistenceWarning)
+        let persisted = await store.lastSnapshot()
+        XCTAssertEqual(persisted?.revision, revision)
+        let attempts = await store.writeAttempts()
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testUnchangedPersistingCommandFlushesPreviouslyStagedState() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Push")))
+        await coordinator.flushSnapshot()
+        let staged = coordinator.send(.updateScrollOffsetY(300), persist: false)
+        coordinator.send(.updateScrollOffsetY(300))
+        await coordinator.flushSnapshot()
+        let persisted = await store.lastSnapshot()
+        XCTAssertEqual(persisted?.revision, staged.revision)
+        XCTAssertEqual(persisted?.scrollOffsetY, 300)
+    }
+
+    func testUnchangedPersistingCommandReplacesOlderQueuedSaveWithoutFlush() async throws {
+        let saved = expectation(description: "Staged revision saved without an explicit flush")
+        let store = RecordingActiveWorkoutSnapshotStore(onSave: { snapshot in
+            if snapshot.scrollOffsetY == 300 { saved.fulfill() }
+        })
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Push")))
+        // Stay on the main actor: the initial save is queued but has not run yet.
+        let staged = coordinator.send(.updateScrollOffsetY(300), persist: false)
+        coordinator.send(.updateScrollOffsetY(300))
+        await fulfillment(of: [saved], timeout: 3)
+        let persisted = await store.lastSnapshot()
+        XCTAssertEqual(persisted?.revision, staged.revision)
+        XCTAssertEqual(persisted?.scrollOffsetY, 300)
+        XCTAssertEqual(coordinator.storedSnapshot?.revision, staged.revision)
+    }
+
     private func makeExercise(id: UUID, name: String, sortOrder: Int) -> ActiveWorkoutRuntimeExercise {
         ActiveWorkoutRuntimeExercise(
             id: id,
@@ -234,13 +303,20 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
 private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     private var snapshots: [ActiveWorkoutStoredSnapshot] = []
     private var activeWrites = 0
+    private var attempts = 0
+    private var failuresRemaining: Int
     private var maxActiveWrites = 0
     private let writeDelayNanoseconds: UInt64
+    private let onSave: @Sendable (ActiveWorkoutStoredSnapshot) -> Void
 
     init(
         initialSnapshot: ActiveWorkoutStoredSnapshot? = nil,
-        writeDelayNanoseconds: UInt64 = 0
+        writeDelayNanoseconds: UInt64 = 0,
+        failuresRemaining: Int = 0,
+        onSave: @escaping @Sendable (ActiveWorkoutStoredSnapshot) -> Void = { _ in }
     ) {
+        self.failuresRemaining = failuresRemaining
+        self.onSave = onSave
         if let initialSnapshot {
             snapshots = [initialSnapshot]
         }
@@ -252,6 +328,11 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
     }
 
     func save(_ snapshot: ActiveWorkoutStoredSnapshot) async throws -> ActiveWorkoutSnapshotWriteResult {
+        attempts += 1
+        if failuresRemaining > 0 {
+            failuresRemaining -= 1
+            throw CocoaError(.fileWriteUnknown)
+        }
         activeWrites += 1
         maxActiveWrites = max(maxActiveWrites, activeWrites)
         if writeDelayNanoseconds > 0 {
@@ -262,6 +343,7 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
             return .unchanged
         }
         snapshots.append(snapshot)
+        onSave(snapshot)
         return .written
     }
 
@@ -272,6 +354,8 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
     func lastSnapshot() -> ActiveWorkoutStoredSnapshot? {
         snapshots.last
     }
+
+    func writeAttempts() -> Int { attempts }
 
     func maximumConcurrentWrites() -> Int {
         maxActiveWrites

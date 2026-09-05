@@ -22,25 +22,45 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
         }
     }
 
+    struct Source {
+        let session: WorkoutSession
+        let exercises: [(exercise: WorkoutSessionExercise, sets: [WorkoutSessionSet])]
+
+        var updatedAt: Date {
+            exercises.reduce(session.updatedAt) { latest, row in
+                row.sets.reduce(max(latest, row.exercise.updatedAt)) { max($0, $1.updatedAt) }
+            }
+        }
+
+        func projectedFacts() -> [CompletedSetFactDraft] {
+            let sourceUpdatedAt = updatedAt
+            let completedAt = session.endedAt ?? session.startedAt
+            return exercises.flatMap { row in
+                row.sets.compactMap { set in
+                    HistoryProjectionSnapshotBuilder.projectedFact(
+                        from: set, session: session, exercise: row.exercise,
+                        completedAt: completedAt, sourceSessionUpdatedAt: sourceUpdatedAt
+                    )
+                }
+            }
+        }
+    }
+
+    static func loadSource(
+        for session: WorkoutSession,
+        repository: WorkoutSessionRepository
+    ) throws -> Source {
+        let exercises = try repository.sessionExercises(sessionID: session.id)
+        return Source(session: session, exercises: try exercises.map { exercise in
+            (exercise, try repository.sessionSets(sessionExerciseID: exercise.id))
+        })
+    }
+
     static func projectedFacts(
         from session: WorkoutSession,
         repository: WorkoutSessionRepository
     ) throws -> [CompletedSetFactDraft] {
-        let completedAt = session.endedAt ?? session.startedAt
-        let sourceSessionUpdatedAt = try sourceSessionUpdatedAt(for: session, repository: repository)
-        let orderedExercises = try repository.sessionExercises(sessionID: session.id)
-
-        return try orderedExercises.flatMap { exercise in
-            try repository.sessionSets(sessionExerciseID: exercise.id).compactMap { set in
-                projectedFact(
-                    from: set,
-                    session: session,
-                    exercise: exercise,
-                    completedAt: completedAt,
-                    sourceSessionUpdatedAt: sourceSessionUpdatedAt
-                )
-            }
-        }
+        try loadSource(for: session, repository: repository).projectedFacts()
     }
 
     static func sourceSessionUpdatedAt(for session: WorkoutSession) -> Date {
@@ -60,16 +80,7 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
         for session: WorkoutSession,
         repository: WorkoutSessionRepository
     ) throws -> Date {
-        var latest = session.updatedAt
-
-        for exercise in try repository.sessionExercises(sessionID: session.id) {
-            latest = max(latest, exercise.updatedAt)
-            for set in try repository.sessionSets(sessionExerciseID: exercise.id) {
-                latest = max(latest, set.updatedAt)
-            }
-        }
-
-        return latest
+        try loadSource(for: session, repository: repository).updatedAt
     }
 
     private static func projectedFact(

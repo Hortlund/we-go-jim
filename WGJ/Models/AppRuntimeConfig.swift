@@ -899,14 +899,16 @@ final class WorkoutCompletionPresentationState {
     nonisolated deinit { }
 
     var presentedWorkout: WorkoutCompletionPresentation?
-    @ObservationIgnored private var queuedWorkout: WorkoutCompletionPresentation?
+    private var queuedWorkout: WorkoutCompletionPresentation?
+    private var isAwaitingDismissal = false
 
     var hasPendingOrPresentedWorkout: Bool {
-        presentedWorkout != nil || queuedWorkout != nil
+        presentedWorkout != nil || queuedWorkout != nil || isAwaitingDismissal
     }
 
     func present(sessionID: UUID) {
         queuedWorkout = nil
+        isAwaitingDismissal = true
         presentedWorkout = WorkoutCompletionPresentation(sessionID: sessionID)
     }
 
@@ -916,12 +918,17 @@ final class WorkoutCompletionPresentationState {
 
     func presentQueuedIfNeeded() {
         guard presentedWorkout == nil, let queuedWorkout else { return }
+        isAwaitingDismissal = true
         presentedWorkout = queuedWorkout
         self.queuedWorkout = nil
     }
 
     func dismiss() {
         presentedWorkout = nil
+    }
+
+    func didDismiss() {
+        isAwaitingDismissal = false
     }
 }
 
