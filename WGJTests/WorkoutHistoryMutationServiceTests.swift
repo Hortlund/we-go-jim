@@ -327,6 +327,60 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         XCTAssertEqual(session.prHitsCount, 0)
     }
 
+    func testWidgetCountsSavedWorkoutsWithoutWaitingForProjections() throws {
+        let container = try makeCompletedWorkoutContainer()
+        let context = ModelContext(container)
+        _ = try HistoryProjectionRepository(modelContext: context).deleteFacts(forSessionID: sessionID)
+        let date = Date(timeIntervalSince1970: 2_000)
+        let snapshot = try WeeklyGoalWidgetPublisher.makeSnapshot(modelContext: context, generatedAt: date)
+        XCTAssertEqual(snapshot.completedWorkouts, 1)
+        XCTAssertEqual(snapshot.recentWeeks.count, 6)
+        XCTAssertTrue(try HistoryProjectionRepository(modelContext: context).facts(forSessionID: sessionID).isEmpty)
+        let session = try XCTUnwrap(WorkoutSessionRepository(modelContext: context).session(id: sessionID))
+        session.archivedAt = date
+        try context.save()
+        XCTAssertEqual(try WeeklyGoalWidgetPublisher.makeSnapshot(modelContext: context, generatedAt: date).completedWorkouts, 0)
+    }
+
+    func testMaintenanceRecoversMissingFactsFromSavedWorkoutInNewContext() throws {
+        let container = try makeCompletedWorkoutContainer()
+        let context = ModelContext(container)
+        let projection = HistoryProjectionRepository(modelContext: context)
+        _ = try projection.deleteFacts(forSessionID: sessionID)
+
+        let freshContext = ModelContext(container)
+        let recoveredProjection = HistoryProjectionRepository(modelContext: freshContext)
+        XCTAssertTrue(try recoveredProjection.needsBackfill())
+        XCTAssertEqual(try recoveredProjection.backfillIfNeeded(), 1)
+        XCTAssertEqual(try recoveredProjection.facts(forSessionID: sessionID).count, 1)
+        XCTAssertFalse(try recoveredProjection.needsBackfill())
+        XCTAssertEqual(try recoveredProjection.backfillIfNeeded(), 0)
+    }
+
+    func testProjectionReusesLoadedGraphAndDetectsNestedSetChanges() throws {
+        let container = try makeCompletedWorkoutContainer()
+        let context = ModelContext(container)
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let session = try XCTUnwrap(repository.session(id: sessionID))
+        let source = try HistoryProjectionSnapshotBuilder.loadSource(for: session, repository: repository)
+        let before = source.projectedFacts()
+        XCTAssertEqual(before, HistoryProjectionSnapshotBuilder.projectedFacts(from: session))
+        let set = try XCTUnwrap(source.exercises.first?.sets.first)
+        let changedAt = session.updatedAt.addingTimeInterval(60)
+        set.updatedAt = changedAt
+        set.actualReps = 12
+        try context.save()
+        let updatedSource = try HistoryProjectionSnapshotBuilder.loadSource(for: session, repository: repository)
+        XCTAssertEqual(updatedSource.updatedAt, changedAt)
+        let after = updatedSource.projectedFacts()
+        XCTAssertEqual(after.first?.reps, 12)
+        XCTAssertEqual(after.first?.sourceSessionUpdatedAt, changedAt)
+        XCTAssertNotEqual(after, before)
+        XCTAssertTrue(try HistoryProjectionRepository(modelContext: context).needsBackfill())
+        XCTAssertEqual(try HistoryProjectionRepository(modelContext: context).backfillIfNeeded(), 1)
+        XCTAssertFalse(try HistoryProjectionRepository(modelContext: context).needsBackfill())
+    }
+
     private func makeCompletedWorkoutContainer() throws -> ModelContainer {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

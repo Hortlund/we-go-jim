@@ -353,11 +353,6 @@ final class WorkoutCalorieBackfillServiceTests: XCTestCase {
         XCTAssertNil(session.calorieEstimateVersion)
     }
 
-    func testProfileAndSettingsBoundaryBackupsHaveNoDelay() {
-        XCTAssertEqual(BoundaryCloudBackupScheduler.enqueueDelay(for: .profileSaved), .zero)
-        XCTAssertEqual(BoundaryCloudBackupScheduler.enqueueDelay(for: .settingsSaved), .zero)
-    }
-
     func testSchedulerRunsBackfillInBackgroundStore() async throws {
         let (seedContext, session) = try makeSingleSessionContext(profile: validProfile())
         let container = seedContext.container

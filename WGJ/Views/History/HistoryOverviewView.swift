@@ -415,7 +415,7 @@ struct HistoryOverviewView: View {
             let loaded: HistoryOverviewLoadedSnapshot
             let dayFilter = selectedDayFilter
             let backgroundStore = historyBackgroundStore
-            loaded = try await backgroundStore.perform("history-overview.snapshot.reload") { backgroundContext in
+            loaded = try await backgroundStore.performRead("history-overview.snapshot.reload") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.load(
                     modelContext: backgroundContext,
                     selectedDayFilter: dayFilter,
@@ -430,6 +430,8 @@ struct HistoryOverviewView: View {
             hasLoadedSnapshot = true
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
+        } catch is CancellationError {
+            return
         } catch {
             guard snapshotRefreshState.canContinueReload(
                 reloadRequest,
@@ -462,7 +464,7 @@ struct HistoryOverviewView: View {
 
         do {
             let backgroundStore = historyBackgroundStore
-            let loaded = try await backgroundStore.perform("history-overview.snapshot.load-more") { backgroundContext in
+            let loaded = try await backgroundStore.performRead("history-overview.snapshot.load-more") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.loadPage(
                     modelContext: backgroundContext,
                     after: pageCursor,
@@ -472,6 +474,8 @@ struct HistoryOverviewView: View {
             guard pageLoadGeneration.isCurrent(loadGeneration) else { return }
             guard selectedDayFilter == nil else { return }
             controller.appendPage(loaded)
+        } catch is CancellationError {
+            return
         } catch {
             guard pageLoadGeneration.isCurrent(loadGeneration) else { return }
             errorMessage = String(describing: error)
@@ -489,13 +493,15 @@ struct HistoryOverviewView: View {
 
         do {
             let backgroundStore = historyBackgroundStore
-            let counts = try await backgroundStore.perform("history.calendar-month-counts") { backgroundContext in
+            let counts = try await backgroundStore.performRead("history.calendar-month-counts") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.loadWorkoutCountsByDay(
                     modelContext: backgroundContext,
                     month: monthStart
                 )
             }
             controller.mergeCalendarWorkoutCounts(counts, month: monthStart)
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -505,7 +511,7 @@ struct HistoryOverviewView: View {
     @MainActor
     private func currentHistoryContentUpdatedAt() async -> Date? {
         let backgroundStore = historyBackgroundStore
-        return try? await backgroundStore.perform("history-overview.latest-updated-at") { backgroundContext in
+        return try? await backgroundStore.performRead("history-overview.latest-updated-at") { backgroundContext in
             try WorkoutSessionRepository(modelContext: backgroundContext).latestCompletedSessionUpdatedAt()
         }
     }
@@ -1350,9 +1356,11 @@ private struct HistoryArchivedWorkoutsSheet: View {
     private func loadArchivedSessions() async {
         do {
             let backgroundStore = historyBackgroundStore
-            archivedSessions = try await backgroundStore.perform("history-hidden.snapshot") { backgroundContext in
+            archivedSessions = try await backgroundStore.performRead("history-hidden.snapshot") { backgroundContext in
                 try Self.loadArchivedSnapshots(modelContext: backgroundContext)
             }
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = String(describing: error)
             showingError = true

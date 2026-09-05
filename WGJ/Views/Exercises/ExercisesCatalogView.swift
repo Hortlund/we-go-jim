@@ -353,11 +353,14 @@ struct ExercisesCatalogView: View {
 
             if hasAttemptedBootstrap {
                 do {
-                    let snapshot = try await exercisesBackgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                    let snapshot = try await exercisesBackgroundStore.performRead("exercises.snapshot.reload") { backgroundContext in
                         try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
                     }
                     controller.replaceCatalog(snapshot: snapshot)
+                    loadState = .ready
                     applyCurrentFilters()
+                } catch is CancellationError {
+                    return
                 } catch {
                     showError(error)
                 }
@@ -1073,10 +1076,14 @@ struct ExercisesCatalogView: View {
         }
 
         do {
-            let snapshot = try await backgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+            let snapshot = try await backgroundStore.performRead("exercises.snapshot.reload") { backgroundContext in
                 try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
             }
             controller.replaceCatalog(snapshot: snapshot)
+        } catch is CancellationError {
+            hasAttemptedBootstrap = false
+            loadState = .idle
+            return
         } catch {
             loadState = .failed
             showError(bootstrapError ?? error)
@@ -1103,7 +1110,7 @@ struct ExercisesCatalogView: View {
                         .createCustomExercise(draft: draft)
                     return ExerciseCatalogItemSnapshot(exercise: created)
                 }
-                let snapshot = try await backgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                let snapshot = try await backgroundStore.performRead("exercises.snapshot.reload") { backgroundContext in
                     try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
                 }
                 controller.replaceCatalog(snapshot: snapshot)
@@ -1120,6 +1127,8 @@ struct ExercisesCatalogView: View {
                 searchState.sortDescending = false
                 searchState.updateDebouncedQuery(created.displayName)
                 applyCurrentFilters()
+            } catch is CancellationError {
+                return
             } catch {
                 showError(error)
             }
@@ -1129,11 +1138,13 @@ struct ExercisesCatalogView: View {
     private func reloadCatalogAfterExerciseDeletion() {
         Task { @MainActor in
             do {
-                let snapshot = try await exercisesBackgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                let snapshot = try await exercisesBackgroundStore.performRead("exercises.snapshot.reload") { backgroundContext in
                     try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
                 }
                 controller.replaceCatalog(snapshot: snapshot)
                 applyCurrentFilters()
+            } catch is CancellationError {
+                return
             } catch {
                 showError(error)
             }
@@ -1843,7 +1854,7 @@ struct ExerciseDetailDestinationView: View {
         let requestedRemoteUUID = remoteUUID
         let preferredExerciseName = currentDisplaySnapshot.displayName
         do {
-            let dataset = try await detailBackgroundStore.perform("exercise-detail.progress") { backgroundContext in
+            let dataset = try await detailBackgroundStore.performRead("exercise-detail.progress") { backgroundContext in
                 try WorkoutMetricsService(modelContext: backgroundContext).exerciseProgressDataset(
                     for: requestedRemoteUUID,
                     preferredExerciseName: preferredExerciseName
@@ -1851,6 +1862,8 @@ struct ExerciseDetailDestinationView: View {
             }
             guard !Task.isCancelled else { return }
             statsLoadState = dataset.map(ExerciseDetailStatsLoadState.ready) ?? .empty
+        } catch is CancellationError {
+            return
         } catch {
             guard !Task.isCancelled else { return }
             statsLoadState = .failed(message: String(describing: error))

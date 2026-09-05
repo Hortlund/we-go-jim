@@ -201,6 +201,27 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn() {
+        let app = launchLocalApp(additionalArguments: [
+            "UITEST_SEED_HISTORY_MAIN_CARDIO", "UITEST_DELAY_HISTORY_DETAIL_LOAD",
+        ])
+        let historyTab = app.buttons["History"].firstMatch
+        XCTAssertTrue(historyTab.waitForExistence(timeout: 8))
+        historyTab.tap()
+        let card = app.buttons["history-session-card"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 8))
+        card.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Cardio Activities"].exists)
+        app.buttons["Start Workout"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["start-workout-empty-button"].waitForExistence(timeout: 4))
+        historyTab.tap()
+        // The retained destination must finish its own retry, without popping/reopening it.
+        XCTAssertTrue(app.staticTexts["Cardio Activities"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Bike"].waitForExistence(timeout: 4))
+    }
+
+    @MainActor
     func testTemplateLibraryScrollsToOffscreenRowsAndBack() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_LIBRARY"])
         let first = app.staticTexts["Library Plan 01"].firstMatch

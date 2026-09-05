@@ -9,7 +9,6 @@ struct HistoryDetailView: View {
 
     private let sessionID: UUID
 
-    @State private var hasBootstrapped = false
     @State private var didLoadSnapshot = false
     @State private var snapshot: HistoryDetailSnapshotBuilder.Snapshot?
     @State private var sessionNameDraft = ""
@@ -382,17 +381,23 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func bootstrapIfNeeded() async {
-        guard !hasBootstrapped else { return }
-        hasBootstrapped = true
+        // A canceled initial read has not loaded anything; retry on reappearance.
+        guard !didLoadSnapshot else { return }
         await reloadSnapshot()
     }
 
     @MainActor
     private func reloadSnapshot(preservingExerciseEdits: Bool = false) async {
         do {
+#if DEBUG
+            if AppRuntimeConfig.isRunningTests,
+               ProcessInfo.processInfo.arguments.contains("UITEST_DELAY_HISTORY_DETAIL_LOAD") {
+                try await Task.sleep(for: .seconds(4))
+            }
+#endif
             let loadedSnapshot: HistoryDetailSnapshotBuilder.Snapshot
             let backgroundStore = historyBackgroundStore
-            loadedSnapshot = try await backgroundStore.perform("history-detail.snapshot") { backgroundContext in
+            loadedSnapshot = try await backgroundStore.performRead("history-detail.snapshot") { backgroundContext in
                 try Self.loadSnapshot(modelContext: backgroundContext, sessionID: sessionID)
             }
 
@@ -400,6 +405,8 @@ struct HistoryDetailView: View {
                 loadedSnapshot,
                 preservingExerciseEdits: preservingExerciseEdits
             )
+        } catch is CancellationError {
+            return
         } catch WorkoutSessionRepositoryError.sessionNotFound {
             snapshot = nil
             renderProjection = .empty
@@ -809,7 +816,7 @@ struct HistoryDetailView: View {
         let backgroundStore = historyBackgroundStore
         Task { @MainActor in
             do {
-                let payloads = try await backgroundStore.perform("history-detail.hydration") { backgroundContext in
+                let payloads = try await backgroundStore.performRead("history-detail.hydration") { backgroundContext in
                     try Self.loadHydrationPayloads(
                         modelContext: backgroundContext,
                         sessionID: sessionID,

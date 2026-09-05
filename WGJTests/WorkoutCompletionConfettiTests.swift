@@ -1,8 +1,62 @@
 import XCTest
+import UIKit
+import SwiftUI
 @testable import WGJ
 
 @MainActor
 final class WorkoutCompletionConfettiTests: XCTestCase {
+    func testLayerAnimationPreservesTrajectoryRotationAndFade() throws {
+        let piece = try XCTUnwrap(WorkoutCompletionConfettiPiece.random(
+            seed: 42, role: .centralThrow, count: 1, variant: .standard
+        ).first)
+        let size = CGSize(width: 390, height: 844)
+        let origin = CGPoint(x: 120, y: 220)
+        let animation = WorkoutCompletionConfettiUIView.animation(
+            for: piece, origin: origin, size: size, beginTime: 100 + piece.delay
+        )
+        let position = try XCTUnwrap(animation.animations?[0] as? CAKeyframeAnimation)
+        let points = try XCTUnwrap(position.values as? [NSValue])
+        for index in [0, 34, 60, 120] {
+            let progress = Double(index) / 120
+            XCTAssertEqual(points[index].cgPointValue.x,
+                origin.x + piece.originX * WorkoutCompletionConfettiPolicy.initialSpreadX(for: size.width)
+                    + piece.xOffset(progress: progress) * WorkoutCompletionConfettiPolicy.horizontalMotionScale(for: size.width),
+                accuracy: 0.001)
+            XCTAssertEqual(points[index].cgPointValue.y,
+                origin.y + piece.originY * WorkoutCompletionConfettiPolicy.initialSpreadY(for: size.height)
+                    + piece.yOffset(progress: progress) * WorkoutCompletionConfettiPolicy.verticalMotionScale(for: size.height),
+                accuracy: 0.001)
+        }
+        XCTAssertEqual(animation.beginTime, 100 + piece.delay)
+        XCTAssertEqual(animation.duration, piece.duration)
+        let rotation = try XCTUnwrap(animation.animations?[1] as? CABasicAnimation)
+        XCTAssertEqual(try XCTUnwrap(rotation.toValue as? Double), piece.rotation(progress: 1) * .pi / 180)
+        let opacity = try XCTUnwrap(animation.animations?[2] as? CAKeyframeAnimation)
+        XCTAssertEqual(opacity.keyTimes, [0, 0.78, 1])
+        XCTAssertEqual(opacity.values as? [Int], [1, 1, 0])
+    }
+
+    func testLayerLayoutDoesNotReplayBurstAndDiscardsExpiredPieces() throws {
+        let view = WorkoutCompletionConfettiUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let pieces = WorkoutCompletionConfettiPiece.random(
+            seed: 42, role: .centralThrow, count: 2, variant: .standard
+        )
+        let startDate = Date.now
+        view.configure(origin: .zero, pieces: pieces, startDate: startDate)
+        view.layoutIfNeeded()
+        let particle = try XCTUnwrap(view.layer.sublayers?.first)
+        let initial = try XCTUnwrap(particle.animation(forKey: "confetti"))
+        view.configure(origin: .zero, pieces: pieces, startDate: startDate)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        XCTAssertTrue(view.layer.sublayers?.first === particle)
+        XCTAssertEqual(particle.animation(forKey: "confetti")?.beginTime, initial.beginTime)
+
+        view.configure(origin: .zero, pieces: pieces, startDate: .now.addingTimeInterval(-10))
+        view.layoutIfNeeded()
+        XCTAssertTrue(view.layer.sublayers?.isEmpty ?? true)
+    }
+
     func testStandardCompletionUsesOneCenteredBoundedBurst() {
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
             origin: .overlayCenter,
@@ -68,12 +122,27 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         )
     }
 
-    func testCompletionBackgroundWorkWaitsForCelebrationWindow() {
-        XCTAssertEqual(WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay, .seconds(7))
-        XCTAssertEqual(
-            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
-            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
-        )
+    func testMaintenanceWaitsUntilSummaryDismissalFinishes() {
+        let state = WorkoutCompletionPresentationState()
+        func canRun(activeSessionID: UUID? = nil, scenePhase: ScenePhase = .active) -> Bool {
+            AppMaintenancePolicy.shouldScheduleDeferred(
+                appPhase: .main, scenePhase: scenePhase, activeSessionID: activeSessionID,
+                hasPendingDeferredMaintenance: true,
+                hasPendingOrPresentedWorkout: state.hasPendingOrPresentedWorkout
+            )
+        }
+        XCTAssertTrue(canRun())
+        state.queueAfterActiveWorkoutDismiss(sessionID: UUID())
+        XCTAssertFalse(canRun())
+        state.presentQueuedIfNeeded()
+        XCTAssertFalse(canRun())
+        state.dismiss()
+        XCTAssertFalse(canRun(), "Wait for the cover dismissal animation, not just its binding")
+        state.didDismiss()
+        XCTAssertTrue(canRun())
+        XCTAssertFalse(canRun(activeSessionID: UUID()))
+        XCTAssertFalse(canRun(scenePhase: .background))
+        XCTAssertTrue(canRun(), "Pending work can resume on foreground entry")
     }
 
     func testReducedMotionUsesStaticPresentationWithoutParticles() {

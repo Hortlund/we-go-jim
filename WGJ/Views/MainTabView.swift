@@ -106,7 +106,10 @@ struct MainTabView: View {
                 CloudBackupStatusBannerHost(topSafeAreaInset: proxy.safeAreaInsets.top)
                     .ignoresSafeArea(edges: .top)
             }
-            .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
+            .fullScreenCover(
+                item: $workoutCompletionPresentationState.presentedWorkout,
+                onDismiss: { workoutCompletionPresentationState.didDismiss() }
+            ) { presentation in
                 WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
                     .interactiveDismissDisabled()
             }

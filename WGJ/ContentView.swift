@@ -27,7 +27,7 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
-    @State private var postWorkoutBackgroundWorkTask: Task<Void, Never>?
+    @State private var isPerformingDeferredMaintenance = false
     @State private var startupCloudBackupStatusCheckTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
@@ -104,7 +104,12 @@ struct ContentView: View {
             guard oldValue != nil, newValue == nil else { return }
             appWarmupState.invalidateProfile()
             requestNewDeferredMaintenanceRun()
-            schedulePostWorkoutBackgroundWork()
+            scheduleWeeklyGoalWidgetPublish()
+            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
+        }
+        .onChange(of: workoutCompletionPresentationState.hasPendingOrPresentedWorkout) { _, isPresented in
+            guard !isPresented else { return }
+            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
         }
         .onOpenURL { url in
             handleIncomingURL(url)
@@ -345,29 +350,13 @@ struct ContentView: View {
     private func handleWorkoutHistoryChanged() {
         guard appPhase == .main else { return }
         appWarmupState.invalidateProfile()
+        scheduleWeeklyGoalWidgetPublish()
         guard activeWorkoutPresentationState.activeSessionID == nil,
               !workoutCompletionPresentationState.hasPendingOrPresentedWorkout
         else {
             return
         }
-        scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .activeWorkoutEnded)
-    }
-
-    private func schedulePostWorkoutBackgroundWork() {
-        postWorkoutBackgroundWorkTask?.cancel()
-        postWorkoutBackgroundWorkTask = Task { @MainActor in
-            try? await Task.sleep(for: WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay)
-            guard !Task.isCancelled,
-                  activeWorkoutPresentationState.activeSessionID == nil
-            else {
-                return
-            }
-
-            scheduleWeeklyGoalWidgetPublish()
-            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
-            postWorkoutBackgroundWorkTask = nil
-        }
     }
 
     private func handleUserDataRestoreCompleted() {
@@ -434,6 +423,9 @@ struct ContentView: View {
             resumeCriticalMaintenanceTracker.finishRun(runID)
             if resumeCriticalMaintenanceTracker.isCurrent(runID) {
                 resumeCriticalMaintenanceTask = nil
+                if !Task.isCancelled, canRunDeferredMaintenance {
+                    requestDeferredMaintenance(trigger: .sceneActivated)
+                }
             }
         }
 
@@ -479,17 +471,22 @@ struct ContentView: View {
         resumeCriticalMaintenanceTracker.resetForegroundCycle()
     }
 
-    @MainActor
-    private func scheduleDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
-        guard !resumeCriticalMaintenanceTracker.isRunning else { return }
-        guard AppMaintenancePolicy.shouldScheduleDeferred(
+    private var canRunDeferredMaintenance: Bool {
+        AppMaintenancePolicy.shouldScheduleDeferred(
             appPhase: appPhase,
             scenePhase: scenePhase,
             activeSessionID: activeWorkoutPresentationState.activeSessionID,
-            hasPendingDeferredMaintenance: deferredMaintenanceState.isPending
-        ) else {
-            return
-        }
+            hasPendingDeferredMaintenance: deferredMaintenanceState.isPending,
+            hasPendingOrPresentedWorkout: workoutCompletionPresentationState.hasPendingOrPresentedWorkout
+        )
+    }
+
+    @MainActor
+    private func scheduleDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
+        guard !resumeCriticalMaintenanceTracker.isRunning, !isPerformingDeferredMaintenance else { return }
+        guard canRunDeferredMaintenance else { return }
+        isPerformingDeferredMaintenance = true
+        defer { isPerformingDeferredMaintenance = false }
 
         await performDeferredMaintenanceIfNeeded(trigger: trigger)
     }
@@ -503,6 +500,7 @@ struct ContentView: View {
         }
 
         let work = await currentDeferredMaintenanceWork()
+        guard canRunDeferredMaintenance else { return }
         guard work.hasWork else {
             if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
                 deferredMaintenanceState.markCompleted()
@@ -589,8 +587,6 @@ struct ContentView: View {
         enteredMainDeferredMaintenanceTask = nil
         enteredMainNoncriticalWorkTask?.cancel()
         enteredMainNoncriticalWorkTask = nil
-        postWorkoutBackgroundWorkTask?.cancel()
-        postWorkoutBackgroundWorkTask = nil
         startupCloudBackupStatusCheckTask?.cancel()
         startupCloudBackupStatusCheckTask = nil
         activeWorkoutCoordinator.clearInMemory()
@@ -622,6 +618,7 @@ struct ContentView: View {
 
     @MainActor
     private func scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger) async {
+        guard !workoutCompletionPresentationState.hasPendingOrPresentedWorkout else { return }
         guard AppWarmupPolicy.shouldWarm(
             appPhase: appPhase,
             scenePhase: scenePhase,

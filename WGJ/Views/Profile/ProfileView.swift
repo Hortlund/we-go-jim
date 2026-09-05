@@ -104,6 +104,16 @@ struct ProfileView: View {
         AppRuntimeState.shared.cloudBackupContentSummary
     }
     @State private var isLoadingCloudBackupSummary = false
+    @State private var cloudBackupSummaryRefreshState = ProfileBackupSummaryRefreshState()
+    @State private var cloudBackupSummaryLoadID: UUID?
+    private var cloudBackupSummaryRefreshKey: ProfileBackupSummaryRefreshKey {
+        ProfileBackupSummaryRefreshKey(
+            isActive: isTabActive,
+            latestMutationAt: userDataSyncStatus.latestLocalMutationAt ?? cloudBackupSummaryRefreshState.latestMutationAt,
+            profileInvalidationVersion: appWarmupState.profileInvalidationVersion,
+            cloudSessionRevision: AppRuntimeState.shared.cloudBackupSessionRevision
+        )
+    }
     private var isRefreshingCloudBackupMetadata: Bool { userDataSyncStatus.state == .checking }
     @State private var isForcingCloudBackup = false
     @State private var showsCloudBackupDetails = false
@@ -148,9 +158,11 @@ struct ProfileView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await handleInitialActivation()
-            await refreshCloudBackupSummary()
         }
-        .task(id: userDataSyncStatus) {
+        .onChange(of: userDataSyncStatus, initial: true) { _, status in
+            cloudBackupSummaryRefreshState.observe(status)
+        }
+        .task(id: cloudBackupSummaryRefreshKey) {
             guard isTabActive else { return }
             await refreshCloudBackupSummary()
         }
@@ -1191,6 +1203,8 @@ struct ProfileView: View {
             lastLoadedProfileUpdatedAt = profile.updatedAt
             lastRefreshAt = .now
             scheduleDashboardRender(enabledWidgets: dashboardContent.enabledWidgets)
+        } catch is CancellationError {
+            return
         } catch {
             guard profileReloadToken == reloadToken else { return }
             showError(error)
@@ -1199,16 +1213,25 @@ struct ProfileView: View {
 
     @MainActor
     private func refreshCloudBackupSummary() async {
+        let loadID = UUID()
+        cloudBackupSummaryLoadID = loadID
         isLoadingCloudBackupSummary = true
+        defer {
+            if cloudBackupSummaryLoadID == loadID { isLoadingCloudBackupSummary = false }
+        }
         do {
             let backgroundStore = profileBackgroundStore
-            localCloudBackupSummary = try await backgroundStore.perform("profile.cloud-backup-summary") { context in
+            let summary = try await backgroundStore.performRead("profile.cloud-backup-summary") { context in
                 try UserDataCloudBackupContentSummary.loadLocal(context: context)
             }
+            guard !Task.isCancelled, cloudBackupSummaryLoadID == loadID else { return }
+            localCloudBackupSummary = summary
+        } catch is CancellationError {
+            return
         } catch {
+            guard cloudBackupSummaryLoadID == loadID else { return }
             localCloudBackupSummary = .empty
         }
-        isLoadingCloudBackupSummary = false
     }
 
     @MainActor
@@ -1637,13 +1660,14 @@ final class ProfileViewController {
         profile: ProfileIdentitySnapshot,
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileDashboardContent {
-        try await backgroundStore.perform("profile.dashboard") { backgroundContext in
-            let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
+        let enabled = try await backgroundStore.perform("profile.widgets.prepare") { context in
+            try ProfileWidgetRepository(modelContext: context).enabledConfigurationSnapshots()
+        }
+        return try await backgroundStore.performRead("profile.dashboard") { backgroundContext in
             let metricsService = WorkoutMetricsService(
                 modelContext: backgroundContext,
                 calendar: WeeklyGoalWeekPolicy.calendar()
             )
-            let enabled = try widgetRepository.enabledConfigurationSnapshots()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
             var nextContent = ProfileDashboardContent.make(
                 enabledWidgets: enabled,
@@ -1661,7 +1685,7 @@ final class ProfileViewController {
         backgroundStore: AppBackgroundStore
     ) async throws -> [UUID: ExerciseMetricSeries] {
         let cachedSeries = trendSeriesCache
-        let result = try await backgroundStore.perform("profile.trends") { backgroundContext in
+        let result = try await backgroundStore.performRead("profile.trends") { backgroundContext in
             let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
             var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
             var nextCache = cachedSeries
@@ -1715,7 +1739,7 @@ final class ProfileViewController {
             return nil
         }
 
-        let snapshot = try await backgroundStore.perform("profile.coach.presentation.snapshot") {
+        let snapshot = try await backgroundStore.performRead("profile.coach.presentation.snapshot") {
             backgroundContext in
             try WGJPerformance.measure("profile.coach.snapshot") {
                 try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()

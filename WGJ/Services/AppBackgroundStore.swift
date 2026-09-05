@@ -33,6 +33,29 @@ actor AppBackgroundStore {
         coachNarrativeStore
     }
 
+    /// Cancellable reads only. Persisting operations continue to use perform/performWrite.
+    nonisolated func performRead<T: Sendable>(
+        _ operationName: StaticString? = nil,
+        _ operation: @Sendable (ModelContext) throws -> T
+    ) async throws -> T {
+        let trace = WGJPerformance.begin("store.read.wait-and-run")
+        defer { WGJPerformance.end(trace) }
+        try Task.checkCancellation()
+        return try await executeRead(operationName, operation)
+    }
+
+    private func executeRead<T: Sendable>(
+        _ operationName: StaticString?,
+        _ operation: @Sendable (ModelContext) throws -> T
+    ) throws -> T {
+        try Task.checkCancellation()
+        let result = try WGJPerformance.measure(operationName ?? "store.read.execute") {
+            try operation(makeContext())
+        }
+        try Task.checkCancellation()
+        return result
+    }
+
     func perform<T: Sendable>(
         _ operationName: StaticString? = nil,
         _ operation: @Sendable (ModelContext) throws -> T

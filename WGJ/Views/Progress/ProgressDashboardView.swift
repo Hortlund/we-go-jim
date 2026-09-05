@@ -304,7 +304,7 @@ struct ProgressDashboardView: View {
             let previousSelection = selectedPreviousSessionID
             let currentSelection = selectedCurrentSessionID
             let backgroundStore = progressBackgroundStore
-            let loadedSnapshot = try await backgroundStore.perform("progress-dashboard.snapshot") { backgroundContext in
+            let loadedSnapshot = try await backgroundStore.performRead("progress-dashboard.snapshot") { backgroundContext in
                 try WorkoutProgressSnapshotLoader.load(
                     modelContext: backgroundContext,
                     selectedPreviousSessionID: previousSelection,
@@ -319,6 +319,8 @@ struct ProgressDashboardView: View {
             hasLoadedSnapshot = true
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
+        } catch is CancellationError {
+            return
         } catch {
             guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
             errorMessage = String(describing: error)
@@ -353,7 +355,7 @@ struct ProgressDashboardView: View {
     @MainActor
     private func currentProgressContentUpdatedAt() async -> Date? {
         let backgroundStore = progressBackgroundStore
-        return try? await backgroundStore.perform("progress-dashboard.latest-updated-at") { backgroundContext in
+        return try? await backgroundStore.performRead("progress-dashboard.latest-updated-at") { backgroundContext in
             try WorkoutSessionRepository(modelContext: backgroundContext).latestCompletedSessionUpdatedAt()
         }
     }

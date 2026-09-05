@@ -89,6 +89,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     @ObservationIgnored private let snapshotStore: any ActiveWorkoutSnapshotStoring
     @ObservationIgnored private let persistence: any ActiveWorkoutPersistence
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var scheduledSave: (id: UUID, revision: UInt64)?
     @ObservationIgnored private var completionTask: Task<WorkoutCompletionCommitResult, Error>?
     @ObservationIgnored private var lastPersistedRevision: UInt64?
 
@@ -125,6 +126,14 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             apply(command, to: &snapshot)
         }
 
+        if snapshot == storedSnapshot {
+            // A failed or deliberately unstored revision must still be retried.
+            if shouldPersist, lastPersistedRevision != snapshot.revision,
+               scheduledSave?.revision != snapshot.revision {
+                scheduleSnapshotSave(snapshot)
+            }
+            return ActiveWorkoutMutationReceipt(revision: snapshot.revision, session: snapshot.session)
+        }
         snapshot.revision &+= 1
         storedSnapshot = snapshot
         persistenceWarning = nil
@@ -141,6 +150,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         let pendingSave = saveTask
         saveTask?.cancel()
         saveTask = nil
+        scheduledSave = nil
         await pendingSave?.value
 
         guard let snapshot = storedSnapshot,
@@ -207,6 +217,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             completionTask = nil
             saveTask?.cancel()
             saveTask = nil
+            scheduledSave = nil
             storedSnapshot = nil
             lastPersistedRevision = nil
             do {
@@ -225,6 +236,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     func discard() async {
         saveTask?.cancel()
         saveTask = nil
+        scheduledSave = nil
         completionTask?.cancel()
         completionTask = nil
         storedSnapshot = nil
@@ -240,6 +252,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     func clearInMemory() {
         saveTask?.cancel()
         saveTask = nil
+        scheduledSave = nil
         completionTask?.cancel()
         completionTask = nil
         storedSnapshot = nil
@@ -249,12 +262,16 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
 
     private func scheduleSnapshotSave(_ snapshot: ActiveWorkoutStoredSnapshot) {
         saveTask?.cancel()
+        let saveID = UUID()
+        scheduledSave = (saveID, snapshot.revision)
         saveTask = Task { [weak self] in
             await Task.yield()
             guard !Task.isCancelled, let self else { return }
             await self.persist(snapshot)
-            if self.storedSnapshot?.revision == snapshot.revision {
+            // An older write must not clear the task replacing it.
+            if self.scheduledSave?.id == saveID {
                 self.saveTask = nil
+                self.scheduledSave = nil
             }
         }
     }
@@ -285,12 +302,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             break
         case .updateMetadata(let name, let notes):
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedName.isEmpty {
-                snapshot.session.name = ReviewModerationService.sanitizedForSharing(
-                    trimmedName,
-                    kind: .workoutName
-                )
-            }
+            let name = trimmedName.isEmpty ? snapshot.session.name
+                : ReviewModerationService.sanitizedForSharing(trimmedName, kind: .workoutName)
+            guard name != snapshot.session.name || notes != snapshot.session.notes else { break }
+            snapshot.session.name = name
             snapshot.session.notes = notes
             snapshot.session.touch()
         case .appendExercise(var exercise):
@@ -304,11 +319,13 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 break
             }
             replacement.sortOrder = snapshot.session.exercises[index].sortOrder
+            guard replacement != snapshot.session.exercises[index] else { break }
             snapshot.session.exercises[index] = replacement
             snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
             snapshot.session.normalizeExerciseSortOrder()
             snapshot.session.touch()
         case .removeExercise(let exerciseID):
+            guard snapshot.session.exercises.contains(where: { $0.id == exerciseID }) else { break }
             snapshot.session.exercises.removeAll { $0.id == exerciseID }
             snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
             snapshot.session.normalizeExerciseSortOrder()
@@ -317,26 +334,24 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             guard let sourceIndex = snapshot.session.exercises.firstIndex(where: { $0.id == exerciseID }) else {
                 break
             }
+            let resolvedDestination = max(0, min(destinationIndex, snapshot.session.exercises.count - 1))
+            guard sourceIndex != resolvedDestination else { break }
             let exercise = snapshot.session.exercises.remove(at: sourceIndex)
-            let resolvedDestination = max(0, min(destinationIndex, snapshot.session.exercises.count))
             snapshot.session.exercises.insert(exercise, at: resolvedDestination)
             snapshot.session.normalizeExerciseSortOrder()
             snapshot.session.touch()
         case .setExerciseDrafts(let exerciseID, let drafts):
             mutateExercise(id: exerciseID, in: &snapshot) { exercise in
                 exercise.setDrafts = drafts
-                exercise.updatedAt = .now
             }
         case .setExerciseRest(let exerciseID, let seconds):
             mutateExercise(id: exerciseID, in: &snapshot) { exercise in
                 exercise.restSeconds = max(0, min(3600, seconds))
                 exercise.normalizeSetRestToExerciseDefault()
-                exercise.updatedAt = .now
             }
         case .setExerciseNotes(let exerciseID, let notes):
             mutateExercise(id: exerciseID, in: &snapshot) { exercise in
                 exercise.notes = notes
-                exercise.updatedAt = .now
             }
         case .updateExerciseSettings(let exerciseID, let minReps, let maxReps, let restSeconds):
             mutateExercise(id: exerciseID, in: &snapshot) { exercise in
@@ -344,9 +359,9 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 exercise.targetRepMax = maxReps
                 exercise.restSeconds = max(0, min(3600, restSeconds))
                 exercise.normalizeSetRestToExerciseDefault()
-                exercise.updatedAt = .now
             }
         case .selectExerciseComponent(let exerciseID, let componentID):
+            let previousIdentity = snapshot.session.exercises.first { $0.id == exerciseID }?.catalogExerciseUUID
             mutateExercise(id: exerciseID, in: &snapshot) { exercise in
                 guard let component = exercise.components.first(where: { $0.id == componentID }) else {
                     return
@@ -355,9 +370,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 exercise.exerciseNameSnapshot = component.exerciseNameSnapshot
                 exercise.categorySnapshot = component.categorySnapshot
                 exercise.muscleSummarySnapshot = component.muscleSummarySnapshot
-                exercise.updatedAt = .now
             }
-            snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
+            if snapshot.session.exercises.first(where: { $0.id == exerciseID })?.catalogExerciseUUID != previousIdentity {
+                snapshot.previousSetSnapshotsByExerciseID.removeValue(forKey: exerciseID)
+            }
         case .updatePresentation(let mode, let scrollTarget, let expandedExerciseIDs):
             snapshot.presentationMode = mode
             snapshot.scrollTarget = scrollTarget
@@ -407,7 +423,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         guard let index = snapshot.session.exercises.firstIndex(where: { $0.id == id }) else {
             return
         }
+        let previous = snapshot.session.exercises[index]
         mutation(&snapshot.session.exercises[index])
+        guard snapshot.session.exercises[index] != previous else { return }
+        snapshot.session.exercises[index].updatedAt = .now
         snapshot.session.touch()
     }
 }

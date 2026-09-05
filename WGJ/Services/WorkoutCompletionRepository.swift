@@ -246,16 +246,9 @@ nonisolated private final class WorkoutCompletionMaterializer {
             try modelContext.save()
         }
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
-        let completedSessionID = completedSession.id
         let container = modelContext.container
-        Task.detached(priority: .utility) {
-            try? await Task.sleep(for: WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay)
-            guard !Task.isCancelled else { return }
-            HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
-                sessionID: completedSessionID,
-                container: container
-            )
-        }
+        // Derived facts are recovered by maintenance after the summary closes, or on
+        // the next launch/resume. The saved session is the durable source of truth.
         WorkoutHistoryChangeBroadcaster.post()
         boundaryEffects.scheduleBackup(container, .workoutCompleted)
 
