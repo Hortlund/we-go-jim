@@ -1,4 +1,5 @@
 import CloudKit
+import os
 import SwiftData
 import XCTest
 @testable import WGJ
@@ -441,7 +442,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
 
         XCTAssertTrue(contentViewSource.contains("CloudBackupStatusCheckScheduler.checkMetadataBestEffort"))
         XCTAssertTrue(contentViewSource.contains("startupCloudBackupStatusCheckTask?.cancel()"))
-        XCTAssertTrue(contentViewSource.contains("hasRequestedStartupCloudBackupStatusCheck = false"))
+        XCTAssertTrue(contentViewSource.contains("resetCloudBackupSession()"))
         XCTAssertFalse(contentViewSource.contains("latestBackupSnapshot("))
         XCTAssertFalse(contentViewSource.contains("restoreLatestBackup("))
         XCTAssertFalse(contentViewSource.contains("app.startup-cloud-restore"))
@@ -476,7 +477,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
     func testCloudBackupMetadataFetchExcludesPayloadFields() {
         XCTAssertEqual(
             UserDataCloudBackupDescriptor.metadataFieldKeys,
-            [UserDataCloudBackupDescriptor.Field.updatedAt]
+            [UserDataCloudBackupDescriptor.Field.updatedAt, UserDataCloudBackupDescriptor.Field.contentSummary]
         )
         XCTAssertFalse(UserDataCloudBackupDescriptor.metadataFieldKeys.contains(
             UserDataCloudBackupDescriptor.Field.payloadAsset
@@ -2485,6 +2486,275 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(workoutSetCount, 1)
     }
 
+    func testStartupMetadataChecksRunOnceAndExplicitRefreshCanRunAgain() async throws {
+        let state = AppRuntimeState.makeTestingInstance()
+        let context = ModelContext(try makeInMemoryContainer())
+        let summary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let metadata = UserDataCloudBackupRemoteMetadata(updatedAt: .now, contentSummary: summary)
+        for _ in 0..<20 {
+            await CloudBackupStatusCheckScheduler.checkMetadata(isStartup: true, state: state) {
+                calls.withLock { $0 += 1 }
+                return metadata
+            }
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+        XCTAssertEqual(state.cloudBackupContentSummary, summary)
+        await CloudBackupStatusCheckScheduler.checkMetadata(isStartup: false, state: state) {
+            calls.withLock { $0 += 1 }
+            return nil
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+        XCTAssertNil(state.cloudBackupContentSummary)
+        XCTAssertNil(state.cloudBackupUpdatedAt)
+    }
+
+    func testFailedStartupCheckDoesNotRetryOnNavigation() async {
+        let state = AppRuntimeState.makeTestingInstance()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        for _ in 0..<10 {
+            await CloudBackupStatusCheckScheduler.checkMetadata(isStartup: true, state: state) {
+                calls.withLock { $0 += 1 }
+                throw CKError(.networkUnavailable)
+            }
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+        XCTAssertEqual(state.userDataSyncStatus.state, .checkFailed)
+    }
+
+    func testOlderMetadataCannotReplaceUploadedCountsAndResetRejectsOldAccountResults() throws {
+        let state = AppRuntimeState.makeTestingInstance()
+        let context = ModelContext(try makeInMemoryContainer())
+        let summary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+        let snapshot = UserDataCloudBackupRemoteSnapshot(updatedAt: .now, contentSummary: summary)
+        let check = try XCTUnwrap(state.beginCloudBackupMetadataCheck(isStartup: true))
+        state.recordSuccessfulCloudBackup(snapshot)
+        state.finishCloudBackupMetadataCheck(nil, matching: check)
+        XCTAssertEqual(state.cloudBackupContentSummary, summary)
+        XCTAssertEqual(state.cloudBackupUpdatedAt, snapshot.updatedAt)
+        state.updateUserDataSyncStatus(.pending())
+        XCTAssertNil(state.beginCloudBackupMetadataCheck(isStartup: false))
+        state.updateUserDataSyncStatus(.degraded("Offline"))
+        XCTAssertEqual(state.cloudBackupUpdatedAt, snapshot.updatedAt)
+        let oldSession = state.cloudBackupSessionRevision
+        state.resetCloudBackupSession()
+        state.recordSuccessfulCloudBackup(snapshot, sessionRevision: oldSession)
+        XCTAssertNil(state.cloudBackupContentSummary)
+        XCTAssertNotNil(state.beginCloudBackupMetadataCheck(isStartup: true))
+        state.recordCloudBackupDeletion()
+        state.finishCloudBackupMetadataCheck(.init(updatedAt: snapshot.updatedAt, contentSummary: summary), matching: check)
+        XCTAssertNil(state.cloudBackupContentSummary)
+    }
+
+    func testLegacyMetadataDoesNotClaimTheBackupIsMissingOrKeepOldCounts() throws {
+        let state = AppRuntimeState.makeTestingInstance()
+        let context = ModelContext(try makeInMemoryContainer())
+        let summary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+        state.recordSuccessfulCloudBackup(.init(updatedAt: .distantPast, contentSummary: summary))
+        let check = try XCTUnwrap(state.beginCloudBackupMetadataCheck(isStartup: false))
+        let date = Date()
+        state.finishCloudBackupMetadataCheck(.init(updatedAt: date), matching: check)
+        XCTAssertNil(state.cloudBackupContentSummary)
+        XCTAssertEqual(state.cloudBackupUpdatedAt, date)
+        XCTAssertTrue(state.userDataSyncStatus.hasKnownRemoteBackup)
+    }
+
+    func testExportCarriesSummaryWithoutFetchingTheBackupAgain() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.insert(UserProfile(displayName: "Athlete"))
+        try context.save()
+        let store = CapturingBackupStore()
+        let exported = try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+        let readsAfterExport = await store.payloadReadCount()
+        XCTAssertEqual(readsAfterExport, 0)
+        let stored = try await store.fetchBackup()
+        XCTAssertEqual(stored?.contentSummary, exported.contentSummary)
+        XCTAssertEqual(exported.contentSummary.profileCount, 1)
+        let encoded = try JSONEncoder().encode(exported.contentSummary)
+        XCTAssertEqual(try JSONDecoder().decode(UserDataCloudBackupContentSummary.self, from: encoded), exported.contentSummary)
+    }
+
+    func testProfileNavigationDoesNotRequestRemoteContents() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("WGJ/Views/Profile/ProfileView.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains("latestBackupSnapshot("))
+        XCTAssertFalse(source.contains("refreshCloudBackupDetails"))
+        XCTAssertFalse(source.contains("shouldRetryCloudBackupDetailsWhenAvailable"))
+    }
+
+    func testWidgetReadsStayLocalAndExplicitMutationsBackUpOnce() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = ProfileWidgetRepository(modelContext: context, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        })
+        _ = try repository.configurations()
+        _ = try repository.configurationSnapshots()
+        XCTAssertTrue(reasons.withLock { $0.isEmpty })
+        try repository.setEnabled(kind: .prs, isEnabled: false)
+        try repository.setEnabled(kind: .prs, isEnabled: false)
+        let config = try repository.createExerciseTrendConfig(metric: .oneRepMax, catalogExerciseUUID: "bench", exerciseName: "Bench", isEnabled: true)
+        try repository.updateExerciseTrendConfig(id: config.id, metric: .oneRepMax, catalogExerciseUUID: "squat", exerciseName: "Squat")
+        try repository.updateExerciseTrendConfig(id: config.id, metric: .oneRepMax, catalogExerciseUUID: "squat", exerciseName: "Squat")
+        try repository.removeConfig(id: config.id)
+        XCTAssertEqual(reasons.withLock { $0 }, Array(repeating: .profileWidgetsSaved, count: 4))
+        XCTAssertFalse(context.hasChanges)
+    }
+
+    func testProfileBootstrapAndUnchangedSavesDoNotUpload() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let backfills = OSAllocatedUnfairLock(initialState: 0)
+        let repository = ProfileRepository(modelContext: context, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        }, scheduleCalorieBackfill: { _ in backfills.withLock { $0 += 1 } })
+        _ = try repository.loadOrCreateProfile()
+        XCTAssertTrue(reasons.withLock { $0.isEmpty })
+        try repository.saveProfile(name: "Andy", athleteType: nil, avatarImageData: nil)
+        try repository.saveProfile(name: "Andy", athleteType: nil, avatarImageData: nil)
+        try repository.updateWeeklyWorkoutGoal(5)
+        try repository.updateWeeklyWorkoutGoal(5)
+        XCTAssertEqual(reasons.withLock { $0 }, [.profileSaved, .settingsSaved])
+        let calories = WorkoutCalorieProfileSnapshot(sex: nil, dateOfBirth: nil, heightCentimeters: 180, bodyWeightKilograms: 80, showsCalorieEstimates: false)
+        try repository.saveProfile(name: "Andy", athleteType: nil, avatarImageData: nil, calorieProfile: calories)
+        try repository.saveProfile(name: "Andy", athleteType: nil, avatarImageData: nil, calorieProfile: calories)
+        XCTAssertEqual(backfills.withLock { $0 }, 1)
+        XCTAssertEqual(reasons.withLock { $0 }, [.profileSaved, .settingsSaved])
+    }
+
+    func testWorkoutCompletionBacksUpOnceIncludingRepeatedFinish() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = WorkoutCompletionRepository(modelContext: context, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        })
+        let runtime = ActiveWorkoutRuntimeSession(name: "Push")
+        _ = try repository.completeWorkout(session: runtime)
+        _ = try repository.completeWorkout(session: runtime)
+        XCTAssertEqual(reasons.withLock { $0 }, [.workoutCompleted])
+    }
+
+    func testCompletedWorkoutEditsArchiveRestoreAndDeleteBackUpAfterCommit() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let session = WorkoutSession(name: "Push", status: .completed, endedAt: .now)
+        context.insert(session)
+        try context.save()
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = WorkoutSessionRepository(modelContext: context, weeklyGoalWidgetPublisher: nil, autoSaveChanges: false, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        })
+        try repository.updateSessionName(sessionID: session.id, name: "Pull")
+        try repository.recalculateSessionSummary(sessionID: session.id)
+        XCTAssertTrue(reasons.withLock { $0.isEmpty })
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        XCTAssertEqual(reasons.withLock { $0 }, [.workoutEdited])
+        try repository.archiveSession(id: session.id)
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        try repository.archiveSession(id: session.id)
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        try repository.restoreArchivedSession(id: session.id)
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        try repository.deleteSession(id: session.id)
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        XCTAssertEqual(reasons.withLock { $0 }, [.workoutEdited, .workoutEdited, .workoutEdited, .workoutDeleted])
+        XCTAssertTrue(try ModelContext(context.container).fetch(FetchDescriptor<WorkoutSession>()).isEmpty)
+    }
+
+    func testActiveWorkoutAndRolledBackHistoryEditsDoNotBackUp() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let session = WorkoutSession(name: "Active", status: .active)
+        context.insert(session)
+        try context.save()
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = WorkoutSessionRepository(modelContext: context, weeklyGoalWidgetPublisher: nil, autoSaveChanges: false, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        })
+        try repository.updateSessionName(sessionID: session.id, name: "Active edit")
+        try repository.recalculateSessionSummary(sessionID: session.id)
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        XCTAssertTrue(reasons.withLock { $0.isEmpty })
+        session.status = .completed
+        try context.save()
+        try repository.recalculateSessionSummary(sessionID: session.id)
+        context.rollback()
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        XCTAssertTrue(reasons.withLock { $0.isEmpty })
+    }
+
+    func testTemplateFolderAndDuplicateBoundariesUseTheInjectedScheduler() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = TemplateRepository(modelContext: context, boundaryEffects: .init(postLibraryChange: {}, scheduleBackup: { _, reason in
+            reasons.withLock { $0.append(reason) }
+        }))
+        let folder = try repository.createFolder(name: "Training")
+        let template = try repository.createTemplate(folderID: folder.id, name: "Push", notes: "")
+        try repository.updateTemplate(id: template.id, name: "Pull", notes: "")
+        try repository.updateTemplate(id: template.id, name: "Pull", notes: "")
+        let copy = try repository.duplicateTemplate(id: template.id)
+        try repository.deleteTemplate(id: copy.id)
+        try repository.deleteFolder(id: folder.id)
+        XCTAssertEqual(reasons.withLock { $0 }, Array(repeating: .templateSaved, count: 6))
+    }
+
+    func testCustomExerciseCreateUpdateDeleteAndNoOpBoundaries() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let reasons = OSAllocatedUnfairLock(initialState: [BoundaryCloudBackupReason]())
+        let repository = ExerciseCatalogRepository(modelContext: context, boundaryEffects: .init { _, reason in
+            reasons.withLock { $0.append(reason) }
+        })
+        var draft = CustomExerciseDraft.emptyCardio
+        draft.name = "My Bike"
+        let exercise = try repository.createCustomExercise(draft: draft)
+        try repository.updateCustomExercise(exercise, draft: draft)
+        XCTAssertEqual(reasons.withLock { $0 }, [.customExerciseSaved])
+        draft.name = "My Stationary Bike"
+        try repository.updateCustomExercise(exercise, draft: draft)
+        try repository.deleteCustomExercise(exercise)
+        XCTAssertEqual(reasons.withLock { $0 }, Array(repeating: .customExerciseSaved, count: 3))
+        XCTAssertTrue(try ModelContext(context.container).fetch(FetchDescriptor<ExerciseCatalogItem>()).isEmpty)
+    }
+
+    func testAutomaticAndManualBackupsShareOneSerialCoalescingQueue() async throws {
+        let container = try makeInMemoryContainer()
+        let probe = BackupExportProbe()
+        let queue = BoundaryCloudBackupExportQueue { _, reason, _ in await probe.export(reason) }
+        await queue.enqueue(container: container, reason: .templateSaved, sessionRevision: 0)
+        await probe.waitForStarts(1)
+        await queue.enqueue(container: container, reason: .profileSaved, sessionRevision: 0)
+        await queue.enqueue(container: container, reason: .settingsSaved, sessionRevision: 0)
+        await probe.release()
+        await probe.waitForStarts(2)
+        await probe.release()
+        let manual = Task { await queue.enqueueAndWait(container: container, sessionRevision: 0) }
+        await probe.waitForStarts(3)
+        await probe.release()
+        await manual.value
+        let recorded = await probe.recorded()
+        XCTAssertEqual(recorded.reasons, [.templateSaved, .settingsSaved, .manual])
+        XCTAssertEqual(recorded.maxConcurrent, 1)
+    }
+
+    func testMetadataRejectsCountsLeftBehindByAnOlderAppUpload() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        let summary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let data = try UserDataCloudBackupDescriptor.encodeSummary(summary, updatedAt: date)
+        XCTAssertEqual(UserDataCloudBackupDescriptor.decodeSummary(data, updatedAt: date), summary)
+        XCTAssertNil(UserDataCloudBackupDescriptor.decodeSummary(data, updatedAt: date.addingTimeInterval(1)))
+        XCTAssertNil(UserDataCloudBackupDescriptor.decodeSummary(Data("invalid".utf8), updatedAt: date))
+        XCTAssertNil(UserDataCloudBackupDescriptor.decodeSummary(nil, updatedAt: date))
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -2537,6 +2807,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
 
 private actor CapturingBackupStore: UserDataCloudBackupStoring {
     private var record: UserDataCloudBackupRemoteRecord?
+    private var payloadReads = 0
 
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws {
         self.record = record
@@ -2547,8 +2818,11 @@ private actor CapturingBackupStore: UserDataCloudBackupStoring {
     }
 
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? {
-        record
+        payloadReads += 1
+        return record
     }
+
+    func payloadReadCount() -> Int { payloadReads }
 
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
         nil
@@ -2557,4 +2831,31 @@ private actor CapturingBackupStore: UserDataCloudBackupStoring {
     func replaceRecord(_ record: UserDataCloudBackupRemoteRecord) {
         self.record = record
     }
+}
+
+private actor BackupExportProbe {
+    private var reasons: [BoundaryCloudBackupReason] = []
+    private var active = 0
+    private var maxConcurrent = 0
+    private var releases: [CheckedContinuation<Void, Never>] = []
+    private var startWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    func export(_ reason: BoundaryCloudBackupReason) async {
+        active += 1
+        maxConcurrent = max(maxConcurrent, active)
+        reasons.append(reason)
+        let ready = startWaiters.filter { $0.0 <= reasons.count }
+        startWaiters.removeAll { $0.0 <= reasons.count }
+        for (_, waiter) in ready { waiter.resume() }
+        await withCheckedContinuation { releases.append($0) }
+        active -= 1
+    }
+
+    func waitForStarts(_ count: Int) async {
+        guard reasons.count < count else { return }
+        await withCheckedContinuation { startWaiters.append((count, $0)) }
+    }
+
+    func release() { releases.removeFirst().resume() }
+    func recorded() -> (reasons: [BoundaryCloudBackupReason], maxConcurrent: Int) { (reasons, maxConcurrent) }
 }

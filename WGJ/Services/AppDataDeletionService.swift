@@ -31,6 +31,7 @@ nonisolated final class AppDataDeletionService {
 
     func deleteAllUserData() async throws {
         try await deleteCloudBackup()
+        await MainActor.run { AppRuntimeState.shared.recordCloudBackupDeletion() }
         try await deleteLocalDeviceData()
     }
 
@@ -87,6 +88,7 @@ nonisolated final class AppDataDeletionService {
     static func deleteConfiguredCloudBackup() async throws {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
         try await CloudKitUserDataCloudBackupStore().deleteBackup()
+        await MainActor.run { AppRuntimeState.shared.recordCloudBackupDeletion() }
     }
 
     static func clearDefaultLocalArtifacts() async throws {

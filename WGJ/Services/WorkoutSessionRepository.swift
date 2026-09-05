@@ -163,6 +163,7 @@ nonisolated final class WorkoutSessionRepository {
     private let modelContext: ModelContext
     private let weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher?
     private let autoSaveChanges: Bool
+    private let boundaryEffects: UserDataBackupBoundaryEffects
     private var pendingPostCommitEffects: Set<PostCommitEffect> = []
 
     private enum PostCommitEffect: Hashable {
@@ -170,6 +171,7 @@ nonisolated final class WorkoutSessionRepository {
         case scheduleProjection(UUID)
         case publishWeeklyGoalWidget
         case broadcastHistoryChange
+        case scheduleBackup(BoundaryCloudBackupReason)
     }
     private var historyProjectionRepository: HistoryProjectionRepository {
         HistoryProjectionRepository(modelContext: modelContext)
@@ -178,11 +180,13 @@ nonisolated final class WorkoutSessionRepository {
     init(
         modelContext: ModelContext,
         weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher? = WeeklyGoalWidgetPublisher(),
-        autoSaveChanges: Bool = true
+        autoSaveChanges: Bool = true,
+        boundaryEffects: UserDataBackupBoundaryEffects = .live
     ) {
         self.modelContext = modelContext
         self.weeklyGoalWidgetPublisher = weeklyGoalWidgetPublisher
         self.autoSaveChanges = autoSaveChanges
+        self.boundaryEffects = boundaryEffects
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {
@@ -208,9 +212,8 @@ nonisolated final class WorkoutSessionRepository {
         postCommitEffects: Set<PostCommitEffect>
     ) throws {
         if autoSaveChanges {
-            if modelContext.hasChanges {
-                try modelContext.save()
-            }
+            guard modelContext.hasChanges else { return }
+            try modelContext.save()
             apply(postCommitEffects)
         } else {
             pendingPostCommitEffects.formUnion(postCommitEffects)
@@ -237,6 +240,9 @@ nonisolated final class WorkoutSessionRepository {
         for effect in effects {
             if case .scheduleProjection(let sessionID) = effect {
                 scheduleProjectionRebuild(for: sessionID)
+            }
+            if case .scheduleBackup(let reason) = effect {
+                boundaryEffects.scheduleBackup(modelContext.container, reason)
             }
         }
         if effects.contains(.publishWeeklyGoalWidget) {
@@ -1046,10 +1052,9 @@ nonisolated final class WorkoutSessionRepository {
         let now = Date()
         session.archivedAt = now
         session.updatedAt = now
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        publishWeeklyGoalWidgetProgress()
-        WorkoutHistoryChangeBroadcaster.post()
+        try saveUserDataChanges(postCommitEffects: [
+            .invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange, .scheduleBackup(.workoutEdited)
+        ])
     }
 
     func restoreArchivedSession(id: UUID) throws {
@@ -1065,10 +1070,9 @@ nonisolated final class WorkoutSessionRepository {
 
         session.archivedAt = nil
         session.updatedAt = Date()
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        publishWeeklyGoalWidgetProgress()
-        WorkoutHistoryChangeBroadcaster.post()
+        try saveUserDataChanges(postCommitEffects: [
+            .invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange, .scheduleBackup(.workoutEdited)
+        ])
     }
 
     func cancelSession(sessionID: UUID) throws {
@@ -1110,7 +1114,7 @@ nonisolated final class WorkoutSessionRepository {
 
         var effects: Set<PostCommitEffect> = [.invalidateAnalytics]
         if session.status == .completed {
-            effects.formUnion([.publishWeeklyGoalWidget, .broadcastHistoryChange])
+            effects.formUnion([.publishWeeklyGoalWidget, .broadcastHistoryChange, .scheduleBackup(.workoutEdited)])
         } else {
             effects.insert(.scheduleProjection(sessionID))
         }
@@ -1159,20 +1163,16 @@ nonisolated final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
+        let wasCompleted = session.status == .completed
         modelContext.insert(UserDataDeletionTombstone(
             entityName: "WorkoutSession",
             entityID: id
         ))
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        publishWeeklyGoalWidgetProgress()
-        WorkoutHistoryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
-            reason: .workoutDeleted
-        )
+        var effects: Set<PostCommitEffect> = [.invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange]
+        if wasCompleted { effects.insert(.scheduleBackup(.workoutDeleted)) }
+        try saveUserDataChanges(postCommitEffects: effects)
     }
 
     private func template(id: UUID) throws -> WorkoutTemplate? {

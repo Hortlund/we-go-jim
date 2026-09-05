@@ -1,3 +1,4 @@
+import CloudKit
 import Combine
 import SwiftData
 import SwiftUI
@@ -31,7 +32,6 @@ struct ContentView: View {
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
-    @State private var hasRequestedStartupCloudBackupStatusCheck = false
 
     private var rootBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -117,6 +117,14 @@ struct ContentView: View {
         }
         .onDisappear {
             workoutIdleTimerController.reset()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged).receive(on: RunLoop.main)) { _ in
+            startupCloudBackupStatusCheckTask?.cancel()
+            appRuntimeState.resetCloudBackupSession()
+            appRuntimeState.refreshCloudAvailabilityIfNeeded(force: true)
+            startupCloudBackupStatusCheckTask = CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
+                container: modelContext.container
+            )
         }
         .onReceive(
             NotificationCenter.default
@@ -321,12 +329,7 @@ struct ContentView: View {
     }
 
     private func requestStartupCloudBackupStatusCheckIfNeeded() {
-        guard appRuntimeState.cloudSyncEnabled,
-              !hasRequestedStartupCloudBackupStatusCheck
-        else {
-            return
-        }
-        hasRequestedStartupCloudBackupStatusCheck = true
+        guard appRuntimeState.cloudSyncEnabled else { return }
         startupCloudBackupStatusCheckTask = CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
             container: modelContext.container
         )
@@ -599,8 +602,7 @@ struct ContentView: View {
         appWarmupState.reset()
         FirstRunLocalBootstrapProgress.reset()
         hasScheduledInitialDeferredMaintenance = false
-        hasRequestedStartupCloudBackupStatusCheck = false
-        appRuntimeState.updateUserDataSyncStatus(.localOnly(reason: nil))
+        appRuntimeState.resetCloudBackupSession()
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash

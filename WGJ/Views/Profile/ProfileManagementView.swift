@@ -26,7 +26,7 @@ struct ProfileManagementView: View {
     @State private var showingError = false
 
     private var profileRepository: ProfileRepository {
-        ProfileRepository(modelContext: modelContext)
+        ProfileRepository(modelContext: modelContext, backgroundStore: appBackgroundStore)
     }
 
     var body: some View {
@@ -295,7 +295,6 @@ struct ProfileManagementView: View {
                 calorieProfile: calorieProfile
             )
             dismiss()
-            scheduleCalorieHistoryRefreshAndBackfill()
         } catch {
             showError(error)
         }
@@ -323,20 +322,6 @@ struct ProfileManagementView: View {
             calorieDetailsValidationError = nil
         case let .failure(error):
             calorieDetailsValidationError = error
-        }
-    }
-
-    private func scheduleCalorieHistoryRefreshAndBackfill() {
-        let container = modelContext.container
-        let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: container)
-        Task { @MainActor in
-            HistoryAnalyticsCache.shared.invalidate(container: container)
-            WorkoutHistoryChangeBroadcaster.post()
-            WorkoutCalorieBackfillScheduler.schedule(
-                backgroundStore: backgroundStore,
-                container: container,
-                reason: .profileSaved
-            )
         }
     }
 

@@ -7,9 +7,26 @@ nonisolated final class ProfileRepository {
     }
 
     private let modelContext: ModelContext
+    private let boundaryEffects: UserDataBackupBoundaryEffects
+    private let scheduleCalorieBackfill: @Sendable (ModelContainer) -> Void
 
-    init(modelContext: ModelContext) {
+    init(
+        modelContext: ModelContext,
+        boundaryEffects: UserDataBackupBoundaryEffects = .live,
+        backgroundStore: AppBackgroundStore? = nil,
+        scheduleCalorieBackfill: (@Sendable (ModelContainer) -> Void)? = nil
+    ) {
         self.modelContext = modelContext
+        self.boundaryEffects = boundaryEffects
+        self.scheduleCalorieBackfill = scheduleCalorieBackfill ?? { container in
+            HistoryAnalyticsCache.shared.invalidate(container: container)
+            WorkoutHistoryChangeBroadcaster.post()
+            WorkoutCalorieBackfillScheduler.schedule(
+                backgroundStore: backgroundStore ?? AppBackgroundStore(container: container),
+                container: container,
+                reason: .profileSaved
+            )
+        }
     }
 
     func currentProfile() throws -> UserProfile? {
@@ -146,11 +163,14 @@ nonisolated final class ProfileRepository {
         let profile = try loadOrCreateProfile()
         let cleaned = try ReviewModerationService.validateUserInput(name, kind: .displayName)
 
+        guard profile.displayName != cleaned || profile.athleteType != athleteType
+                || profile.avatarImageData != avatarImageData || modelContext.hasChanges else { return }
         profile.displayName = cleaned
         profile.athleteType = athleteType
         profile.avatarImageData = avatarImageData
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .profileSaved)
     }
 
     func saveProfile(
@@ -168,6 +188,12 @@ nonisolated final class ProfileRepository {
             modelContext.insert(profile)
         }
 
+        let calorieDetailsChanged = profile.calorieEstimateSex != calorieProfile.sex
+            || profile.dateOfBirth != calorieProfile.dateOfBirth
+            || profile.heightCentimeters != calorieProfile.heightCentimeters
+            || profile.bodyWeightKilograms != calorieProfile.bodyWeightKilograms
+        guard calorieDetailsChanged || profile.displayName != cleaned || profile.athleteType != athleteType
+                || profile.avatarImageData != avatarImageData || modelContext.hasChanges else { return }
         profile.displayName = cleaned
         profile.athleteType = athleteType
         profile.avatarImageData = avatarImageData
@@ -177,73 +203,88 @@ nonisolated final class ProfileRepository {
         profile.bodyWeightKilograms = calorieProfile.bodyWeightKilograms
         profile.updatedAt = .now
         try saveUserDataChanges()
+        if calorieDetailsChanged {
+            scheduleCalorieBackfill(modelContext.container)
+        } else {
+            boundaryEffects.scheduleBackup(modelContext.container, .profileSaved)
+        }
     }
 
     func updateWeeklyWorkoutGoal(_ goal: Int) throws {
         let profile = try loadOrCreateProfile()
+        guard profile.weeklyWorkoutGoal != max(1, min(14, goal)) else { return }
         profile.weeklyWorkoutGoal = max(1, min(14, goal))
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .settingsSaved)
         WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
     }
 
     func updateTrainingGuidanceEnabled(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
+        guard profile.isTrainingGuidanceEnabled != isEnabled else { return }
         profile.isTrainingGuidanceEnabled = isEnabled
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .settingsSaved)
     }
 
     func updateKeepsScreenAwake(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
+        guard profile.keepsScreenAwake != isEnabled else { return }
         profile.keepsScreenAwake = isEnabled
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .settingsSaved)
     }
 
     func updatePreferredWeightUnit(_ unit: PreferredWeightUnit) throws {
         let profile = try loadOrCreateProfile()
+        guard profile.preferredWeightUnit != unit else { return }
         profile.preferredWeightUnit = unit
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .settingsSaved)
     }
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) throws {
         let profile = try loadOrCreateProfile()
+        guard profile.workoutNotificationStyle != style else { return }
         profile.workoutNotificationStyle = style
         profile.updatedAt = .now
         try saveUserDataChanges()
+        boundaryEffects.scheduleBackup(modelContext.container, .settingsSaved)
     }
 
     func applySettingsPatch(_ patch: UserSettingsPatch) throws -> UserSettingsDraft {
         let profile = try loadOrCreateProfile()
         var changed = false
 
-        if let value = patch.weeklyWorkoutGoal {
+        if let value = patch.weeklyWorkoutGoal, max(1, min(14, value)) != profile.weeklyWorkoutGoal {
             profile.weeklyWorkoutGoal = max(1, min(14, value))
             changed = true
         }
-        if let value = patch.isTrainingGuidanceEnabled {
+        if let value = patch.isTrainingGuidanceEnabled, value != profile.isTrainingGuidanceEnabled {
             profile.isTrainingGuidanceEnabled = value
             changed = true
         }
-        if let value = patch.keepsScreenAwake {
+        if let value = patch.keepsScreenAwake, value != profile.keepsScreenAwake {
             profile.keepsScreenAwake = value
             changed = true
         }
-        if let value = patch.preferredWeightUnit {
+        if let value = patch.preferredWeightUnit, value != profile.preferredWeightUnit {
             profile.preferredWeightUnit = value
             changed = true
         }
-        if let value = patch.preferredDistanceUnit {
+        if let value = patch.preferredDistanceUnit, value != profile.preferredDistanceUnit {
             profile.preferredDistanceUnit = value
             changed = true
         }
-        if let value = patch.workoutNotificationStyle {
+        if let value = patch.workoutNotificationStyle, value != profile.workoutNotificationStyle {
             profile.workoutNotificationStyle = value
             changed = true
         }
-        if let value = patch.automaticallyClosesCompletedExercises {
+        if let value = patch.automaticallyClosesCompletedExercises, value != profile.automaticallyClosesCompletedExercises {
             profile.automaticallyClosesCompletedExercises = value
             changed = true
         }

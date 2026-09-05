@@ -362,6 +362,10 @@ final class AppRuntimeState {
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
     var userDataSyncStatus = UserDataSyncStatusSnapshot.localOnly(reason: nil)
+    private(set) var cloudBackupUpdatedAt: Date?
+    private(set) var cloudBackupContentSummary: UserDataCloudBackupContentSummary?
+    private(set) var cloudBackupSessionRevision = 0
+    @ObservationIgnored private var hasRequestedStartupCloudBackupStatusCheck = false
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     var keepsScreenAwake = false
 
@@ -429,6 +433,42 @@ final class AppRuntimeState {
             return
         }
         updateUserDataSyncStatus(snapshot)
+    }
+
+    func beginCloudBackupMetadataCheck(isStartup: Bool) -> Int? {
+        guard !isStartup || !hasRequestedStartupCloudBackupStatusCheck else { return nil }
+        guard let revision = beginUserDataSyncStatusCheck(.checkingStatus()) else { return nil }
+        if isStartup { hasRequestedStartupCloudBackupStatusCheck = true }
+        return revision
+    }
+
+    func finishCloudBackupMetadataCheck(_ metadata: UserDataCloudBackupRemoteMetadata?, matching revision: Int) {
+        guard userDataSyncStatusRevision == revision, userDataSyncStatus.state == .checking else { return }
+        cloudBackupUpdatedAt = metadata?.updatedAt
+        cloudBackupContentSummary = metadata?.contentSummary
+        updateUserDataSyncStatus(.statusChecked(at: metadata?.updatedAt))
+    }
+
+    func recordSuccessfulCloudBackup(_ snapshot: UserDataCloudBackupRemoteSnapshot, sessionRevision: Int? = nil) {
+        guard sessionRevision == nil || sessionRevision == cloudBackupSessionRevision else { return }
+        cloudBackupUpdatedAt = snapshot.updatedAt
+        cloudBackupContentSummary = snapshot.contentSummary
+        updateUserDataSyncStatus(.backedUp(at: snapshot.updatedAt))
+    }
+
+    func recordCloudBackupDeletion() {
+        cloudBackupSessionRevision += 1
+        cloudBackupUpdatedAt = nil
+        cloudBackupContentSummary = nil
+        updateUserDataSyncStatus(.statusChecked(at: nil))
+    }
+
+    func resetCloudBackupSession() {
+        cloudBackupSessionRevision += 1
+        hasRequestedStartupCloudBackupStatusCheck = false
+        cloudBackupUpdatedAt = nil
+        cloudBackupContentSummary = nil
+        updateUserDataSyncStatus(.localOnly(reason: nil))
     }
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) {
