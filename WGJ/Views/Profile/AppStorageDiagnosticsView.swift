@@ -81,6 +81,7 @@ struct AppStorageDiagnosticsView: View {
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
+                cloudRestoreCard
                 cleanupCard
                 dangerZoneCard
             }
@@ -105,7 +106,7 @@ struct AppStorageDiagnosticsView: View {
         VStack(alignment: .leading, spacing: 10) {
             WGJSectionHeader(
                 "Cleanup",
-                subtitle: "Clear disposable files or replace this device's data from CloudKit."
+                subtitle: "Remove temporary files and cached data."
             )
 
             Button {
@@ -120,7 +121,18 @@ struct AppStorageDiagnosticsView: View {
                 }
             }
             .buttonStyle(WGJGhostButtonStyle())
-            .disabled(isClearing)
+            .disabled(isClearing || isRestoringCloudBackup)
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var cloudRestoreCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader(
+                "Cloud Backup",
+                subtitle: "Replace this device's data with your latest CloudKit backup."
+            )
 
             Button {
                 showingCloudRestoreConfirmation = true
@@ -134,7 +146,7 @@ struct AppStorageDiagnosticsView: View {
                 }
             }
             .buttonStyle(WGJGhostButtonStyle())
-            .disabled(!cloudSyncEnabled || isRestoringCloudBackup)
+            .disabled(!cloudSyncEnabled || isRestoringCloudBackup || isClearing)
             .confirmationDialog(
                 "Restore latest CloudKit backup?",
                 isPresented: $showingCloudRestoreConfirmation,
