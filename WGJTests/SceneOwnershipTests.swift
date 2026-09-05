@@ -2,6 +2,43 @@ import XCTest
 @testable import WGJ
 
 final class SceneOwnershipTests: XCTestCase {
+    private enum ReleaseContext {
+        @TaskLocal static var isReleasingState = false
+    }
+
+    @MainActor
+    func testStateObjectsReleaseSynchronouslyInsideTaskLocalScope() {
+        weak var releasedRuntime: AppRuntimeState?
+        weak var releasedFileOpenState: TemplateFileOpenState?
+        ReleaseContext.$isReleasingState.withValue(true) {
+            let runtime = AppRuntimeState.makeTestingInstance()
+            let fileOpenState = TemplateFileOpenState()
+            releasedRuntime = runtime
+            releasedFileOpenState = fileOpenState
+            XCTAssertNotNil(releasedRuntime)
+            XCTAssertNotNil(releasedFileOpenState)
+            assertSynchronousRelease(WorkoutCompletionPresentationState())
+            assertSynchronousRelease(ActiveWorkoutPresentationState())
+            assertSynchronousRelease(RestTimerState())
+            assertSynchronousRelease(CatalogSyncCoordinator())
+            assertSynchronousRelease(AppDeferredMaintenanceState())
+            assertSynchronousRelease(AppWarmupState())
+        }
+        XCTAssertNil(releasedRuntime)
+        XCTAssertNil(releasedFileOpenState)
+    }
+
+    @MainActor
+    private func assertSynchronousRelease<T: AnyObject>(_ makeObject: @autoclosure () -> T) {
+        weak var releasedObject: T?
+        do {
+            let object = makeObject()
+            releasedObject = object
+            XCTAssertNotNil(releasedObject)
+        }
+        XCTAssertNil(releasedObject)
+    }
+
     func testAppDisablesMultipleScenes() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

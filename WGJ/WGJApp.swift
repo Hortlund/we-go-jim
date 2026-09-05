@@ -109,6 +109,19 @@ struct WGJApp: App {
         try seedUITestCatalogIfNeeded(container: container)
         try seedUITestExerciseProgressIfRequested(container: container)
         try seedUITestHistoryMainCardioIfRequested(container: container)
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_LIBRARY") {
+            let context = ModelContext(container)
+            for index in 1...16 {
+                context.insert(WorkoutTemplate(
+                    folderID: TemplateRepository.unfiledFolderID,
+                    name: String(format: "Library Plan %02d", index),
+                    sortOrder: index
+                ))
+            }
+            try context.save()
+        }
+#endif
         return container
     }
 
@@ -263,7 +276,6 @@ struct WGJApp: App {
         )
         context.insert(bench)
         try context.save()
-        ExerciseSearchService.invalidateCatalogIndex(for: context)
     }
 
     nonisolated private static func seedUITestExerciseProgressIfRequested(container: ModelContainer) throws {

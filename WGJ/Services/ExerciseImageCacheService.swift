@@ -50,28 +50,6 @@ nonisolated final class ExerciseImageCacheService {
         sharedMemoryImageCache.removeAll()
     }
 
-    func image(for exercise: ExerciseCatalogItem) async -> UIImage? {
-        guard let imageAsset = exercise.images.first else {
-            return nil
-        }
-
-        let cacheToken = imageAsset.localPath ?? imageAsset.remoteURL
-        if let cached = Self.sharedMemoryImageCache.image(for: cacheToken) {
-            return cached
-        }
-
-        if let cached = await loadCachedImage(from: imageAsset) {
-            Self.sharedMemoryImageCache.insert(
-                cached,
-                for: cacheToken,
-                cost: Self.memoryCost(for: cached)
-            )
-            return cached
-        }
-
-        return nil
-    }
-
     func image(for snapshot: ExerciseCatalogImageSnapshot?) async -> UIImage? {
         guard let snapshot else {
             return nil
@@ -105,24 +83,6 @@ nonisolated final class ExerciseImageCacheService {
     func trimDiskCacheIfNeeded() async {
         let cacheDirectoryURL = self.cacheDirectoryURL
         await ExerciseImageDiskWorker.shared.trimDiskCache(at: cacheDirectoryURL)
-    }
-
-    private func loadCachedImage(from asset: ExerciseImageAsset) async -> UIImage? {
-        guard let localPath = asset.localPath else {
-            return nil
-        }
-
-        let fileURL = makeFileURL(for: localPath)
-        guard fileManager.fileExists(atPath: fileURL.path),
-              let data = await readData(from: fileURL),
-              let image = await decodeImage(from: data)
-        else {
-            asset.localPath = nil
-            asset.fileSizeBytes = 0
-            return nil
-        }
-
-        return image
     }
 
     private var cacheDirectoryURL: URL {

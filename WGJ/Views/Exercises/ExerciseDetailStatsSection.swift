@@ -9,13 +9,12 @@ nonisolated enum ExerciseDetailStatsLoadState: Equatable, Sendable {
 }
 
 struct ExerciseDetailStatsSection: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let state: ExerciseDetailStatsLoadState
     let onRetry: () -> Void
 
     @State private var selectedMetric: ExerciseProgressMetric = .estimatedOneRepMax
     @State private var selectedRange: ExerciseProgressRange = .sixMonths
-    @State private var selectedDate: Date?
+    @State private var chartSelectionRevision = 0
     @State private var configuredDatasetID: String?
 
     var body: some View {
@@ -45,7 +44,8 @@ struct ExerciseDetailStatsSection: View {
             if let summary = projection.summary {
                 summaryGrid(summary, projection: projection)
             }
-            chartCard(projection)
+            ExerciseProgressChartCard(projection: projection)
+                .id(chartSelectionRevision)
             if projection.milestones.isEmpty {
                 Text(projection.availability.reason ?? "No compatible history in this range.")
                     .font(.subheadline)
@@ -67,7 +67,7 @@ struct ExerciseDetailStatsSection: View {
                 ForEach(ExerciseProgressMetric.allCases) { metric in
                     Button {
                         selectedMetric = metric
-                        selectedDate = nil
+                        chartSelectionRevision &+= 1
                     } label: {
                         metric == selectedMetric
                             ? Label(metric.title, systemImage: "checkmark")
@@ -95,7 +95,7 @@ struct ExerciseDetailStatsSection: View {
                     ForEach(ExerciseProgressRange.allCases) { range in
                         Button(range.title) {
                             selectedRange = range
-                            selectedDate = nil
+                            chartSelectionRevision &+= 1
                         }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(range == selectedRange ? WGJTheme.bgBase : WGJTheme.textPrimary)
@@ -114,7 +114,7 @@ struct ExerciseDetailStatsSection: View {
     private func summaryGrid(_ summary: ExerciseProgressSummary, projection: ExerciseProgressProjection) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
             summaryCard("Change", value: changeText(summary, projection: projection), accent: changeColor(summary))
-            summaryCard("Best", value: valueText(summary.best, projection: projection), accent: WGJTheme.accentGold)
+            summaryCard("Best", value: projection.formattedValue(summary.best), accent: WGJTheme.accentGold)
             summaryCard("Sessions", value: "\(summary.sessionCount)")
             summaryCard("Working Sets", value: "\(summary.totalSets)")
             summaryCard("Total Reps", value: "\(summary.totalReps)")
@@ -129,66 +129,6 @@ struct ExerciseDetailStatsSection: View {
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
         .wgjCardContainer()
-    }
-
-    private func chartCard(_ projection: ExerciseProgressProjection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let point = selectedPoint(in: projection) ?? projection.points.last {
-                HStack {
-                    Text(selectedDate == nil ? "Latest" : point.date.formatted(date: .abbreviated, time: .omitted))
-                        .foregroundStyle(WGJTheme.textSecondary)
-                    Spacer()
-                    Text(valueText(point.value, projection: projection)).fontWeight(.bold).foregroundStyle(WGJTheme.accentBlue)
-                }
-                .font(.subheadline)
-            }
-
-            Chart {
-                ForEach(projection.chartPoints) { point in
-                    AreaMark(x: .value("Date", point.date), y: .value(selectedMetric.title, point.value))
-                        .foregroundStyle(LinearGradient(
-                            colors: [WGJTheme.accentBlue.opacity(0.20), WGJTheme.accentBlue.opacity(0.02)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ))
-                    LineMark(x: .value("Date", point.date), y: .value(selectedMetric.title, point.value))
-                        .interpolationMethod(.linear)
-                        .foregroundStyle(WGJTheme.accentBlue)
-                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    PointMark(x: .value("Date", point.date), y: .value(selectedMetric.title, point.value))
-                        .foregroundStyle(WGJTheme.accentBlue)
-                }
-                if let point = selectedPoint(in: projection) {
-                    RuleMark(x: .value("Selected", point.date))
-                        .foregroundStyle(WGJTheme.accentGold.opacity(0.8))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                }
-            }
-            .frame(height: 190)
-            .chartXSelection(value: $selectedDate)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                    AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
-                    AxisValueLabel(format: .dateTime.month(.abbreviated).day()).foregroundStyle(WGJTheme.textSecondary)
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
-                    AxisValueLabel {
-                        if let number = value.as(Double.self) {
-                            Text(WGJFormatters.decimalString(number)).foregroundStyle(WGJTheme.textSecondary)
-                        }
-                    }
-                }
-            }
-            .transaction { if reduceMotion { $0.animation = nil } }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("exercise-progress-chart")
-            .accessibilityLabel(projection.accessibilitySummary)
-        }
-        .padding(14)
-        .wgjCardContainer(strong: true)
     }
 
     private func milestoneTimeline(_ projection: ExerciseProgressProjection) -> some View {
@@ -206,7 +146,7 @@ struct ExerciseDetailStatsSection: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(milestoneTitle(milestone.kind)).font(.subheadline.weight(.bold)).foregroundStyle(WGJTheme.textPrimary)
-                        Text(valueText(milestone.value, projection: projection))
+                        Text(projection.formattedValue(milestone.value))
                             .font(.headline)
                             .foregroundStyle(milestone.kind == .personalRecord ? WGJTheme.accentGold : WGJTheme.accentBlue)
                         Text(milestone.date.formatted(date: .abbreviated, time: .omitted))
@@ -275,29 +215,8 @@ struct ExerciseDetailStatsSection: View {
         }
     }
 
-    private func selectedPoint(in projection: ExerciseProgressProjection) -> ExerciseProgressPoint? {
-        guard let selectedDate else { return nil }
-        return projection.points.min {
-            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
-        }
-    }
-
-    private func valueText(_ value: Double, projection: ExerciseProgressProjection) -> String {
-        switch projection.metric {
-        case .estimatedOneRepMax, .heaviestWeight:
-            return "\(WGJFormatters.oneDecimalString(value)) \(projection.displayUnit.shortLabel)"
-        case .sessionVolume:
-            return "\(WGJFormatters.integerString(value)) \(projection.displayUnit.shortLabel)"
-        case .bestSetReps, .totalReps:
-            return "\(Int(value.rounded())) reps"
-        case .workoutFrequency:
-            let count = Int(value.rounded())
-            return "\(count) workout" + (count == 1 ? "" : "s") + "/week"
-        }
-    }
-
     private func changeText(_ summary: ExerciseProgressSummary, projection: ExerciseProgressProjection) -> String {
-        (summary.absoluteChange > 0 ? "+" : "") + valueText(summary.absoluteChange, projection: projection)
+        (summary.absoluteChange > 0 ? "+" : "") + projection.formattedValue(summary.absoluteChange)
     }
 
     private func changeColor(_ summary: ExerciseProgressSummary) -> Color {
@@ -312,4 +231,81 @@ struct ExerciseDetailStatsSection: View {
         case .latestPerformance: "Latest Performance"
         }
     }
+}
+
+/// Chart gestures own their selection locally so they do not re-project history
+/// or rebuild the summary and milestone views for every selected date.
+private struct ExerciseProgressChartCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let projection: ExerciseProgressProjection
+    @State private var selectedDate: Date?
+
+    var body: some View {
+        let selectedPoint = selectedPoint(in: projection)
+        VStack(alignment: .leading, spacing: 10) {
+            if let point = selectedPoint ?? projection.points.last {
+                HStack {
+                    Text(selectedDate == nil ? "Latest" : point.date.formatted(date: .abbreviated, time: .omitted))
+                        .foregroundStyle(WGJTheme.textSecondary)
+                    Spacer()
+                    Text(projection.formattedValue(point.value)).fontWeight(.bold).foregroundStyle(WGJTheme.accentBlue)
+                }
+                .font(.subheadline)
+            }
+
+            Chart {
+                ForEach(projection.chartPoints) { point in
+                    AreaMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                        .foregroundStyle(LinearGradient(
+                            colors: [WGJTheme.accentBlue.opacity(0.20), WGJTheme.accentBlue.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ))
+                    LineMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                        .interpolationMethod(.linear)
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    PointMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                }
+                if let point = selectedPoint {
+                    RuleMark(x: .value("Selected", point.date))
+                        .foregroundStyle(WGJTheme.accentGold.opacity(0.8))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+            .frame(height: 190)
+            .chartXSelection(value: $selectedDate)
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                    AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day()).foregroundStyle(WGJTheme.textSecondary)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
+                    AxisValueLabel {
+                        if let number = value.as(Double.self) {
+                            Text(WGJFormatters.decimalString(number)).foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                }
+            }
+            .transaction { if reduceMotion { $0.animation = nil } }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("exercise-progress-chart")
+            .accessibilityLabel(projection.accessibilitySummary)
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+
+    private func selectedPoint(in projection: ExerciseProgressProjection) -> ExerciseProgressPoint? {
+        guard let selectedDate else { return nil }
+        return projection.points.min {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }
+    }
+
 }

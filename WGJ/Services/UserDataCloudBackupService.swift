@@ -403,7 +403,6 @@ nonisolated final class UserDataCloudBackupService {
                 try payload.relinkRelationships(in: context)
             }
         )
-        ExerciseSearchService.invalidateCatalogIndex(for: ModelContext(localContainer))
         HistoryAnalyticsCache.shared.clear()
         let cleanupWarnings = await artifactCleanupQueue.enqueue(Set(AppDataArtifact.allCases))
         await MainActor.run {

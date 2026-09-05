@@ -321,12 +321,6 @@ nonisolated struct CustomExerciseDraft: Equatable {
     }
 }
 
-nonisolated struct ExerciseMuscleGroupSection: Identifiable {
-    let id: String
-    let title: String
-    let exercises: [ExerciseCatalogItem]
-}
-
 extension ExerciseCatalogItem {
     var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
         if let explicit = cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) {
@@ -352,13 +346,6 @@ extension ExerciseCatalogItem {
             return .walkRun
         }
         return .machineDistance
-    }
-
-    var searchableTerms: [String] {
-        let aliasTerms = aliases.map(\.value)
-        return ([displayName] + aliasTerms)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
     }
 
     var primaryMuscleNames: String {

@@ -4,6 +4,10 @@ import SwiftData
 @MainActor
 @Observable
 final class CatalogSyncCoordinator {
+    // Scene state can be released synchronously inside SwiftUI task-local scopes.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     private var isPrimingLocalCatalog = false
     private(set) var hasPrimedLocalCatalog = false
 

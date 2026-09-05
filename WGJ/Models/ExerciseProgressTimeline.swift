@@ -128,3 +128,19 @@ nonisolated struct ExerciseProgressProjection: Equatable, Sendable {
     let milestones: [ExerciseProgressMilestone]
     let accessibilitySummary: String
 }
+
+extension ExerciseProgressProjection {
+    func formattedValue(_ value: Double) -> String {
+        switch metric {
+        case .estimatedOneRepMax, .heaviestWeight:
+            return "\(WGJFormatters.oneDecimalString(value)) \(displayUnit.shortLabel)"
+        case .sessionVolume:
+            return "\(WGJFormatters.integerString(value)) \(displayUnit.shortLabel)"
+        case .bestSetReps, .totalReps:
+            return "\(Int(value.rounded())) reps"
+        case .workoutFrequency:
+            let count = Int(value.rounded())
+            return "\(count) workout" + (count == 1 ? "" : "s") + "/week"
+        }
+    }
+}
