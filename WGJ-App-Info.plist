@@ -12,6 +12,8 @@
 	<string>$(WGJ_APP_ENVIRONMENT)</string>
 	<key>WGJAppGroupIdentifier</key>
 	<string>$(WGJ_APP_GROUP_IDENTIFIER)</string>
+	<key>WGJCloudKitEnvironment</key>
+	<string>$(WGJ_CLOUDKIT_ENVIRONMENT)</string>
 	<key>WGJCloudKitContainerIdentifier</key>
 	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
 	<key>WGJURLScheme</key>

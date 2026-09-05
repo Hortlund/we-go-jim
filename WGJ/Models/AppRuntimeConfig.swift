@@ -61,6 +61,7 @@ nonisolated enum AppEnvironment: String {
 nonisolated enum AppRuntimeConfig {
     private enum InfoKey {
         static let appEnvironment = "WGJAppEnvironment"
+        static let cloudKitEnvironment = "WGJCloudKitEnvironment"
         static let cloudKitContainerIdentifier = "WGJCloudKitContainerIdentifier"
         static let urlScheme = "WGJURLScheme"
     }
@@ -98,7 +99,7 @@ nonisolated enum AppRuntimeConfig {
     }
 
     static var cloudKitConsoleEnvironmentName: String {
-        appEnvironment.cloudKitConsoleEnvironmentName
+        normalizedInfoString(for: InfoKey.cloudKitEnvironment) ?? appEnvironment.cloudKitConsoleEnvironmentName
     }
 
     static var cloudKitContainerIdentifier: String {
