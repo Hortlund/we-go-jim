@@ -789,43 +789,57 @@ struct ProfileView: View {
         }
     }
 
+    private var cloudBackupTitle: some View {
+        Text("Cloud Backup")
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(WGJTheme.textPrimary)
+    }
+
+    private var cloudBackupActions: some View {
+        HStack(spacing: 8) {
+            Button {
+                CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
+                    container: modelContext.container,
+                    isStartup: false
+                )
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(WGJCompactGhostButtonStyle())
+            .disabled(!cloudSyncEnabled || isRefreshingCloudBackupMetadata || userDataSyncStatus.state == .pending)
+            .accessibilityLabel("Refresh backup status")
+            .accessibilityIdentifier("profile-cloud-backup-refresh-button")
+
+            Button {
+                Task { await forceCloudBackup() }
+            } label: {
+                if isForcingCloudBackup {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Back Up")
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .buttonStyle(WGJCompactGhostButtonStyle())
+            .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending)
+            .accessibilityLabel("Back Up Now")
+            .accessibilityIdentifier("profile-cloud-backup-now-button")
+        }
+    }
+
     private func cloudBackupSection(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                Text("Cloud Backup")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-
-                Spacer(minLength: 12)
-
-                Button {
-                    CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
-                        container: modelContext.container,
-                        isStartup: false
-                    )
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    cloudBackupTitle.fixedSize()
+                    Spacer(minLength: 0)
+                    cloudBackupActions.fixedSize()
                 }
-                .buttonStyle(WGJCompactGhostButtonStyle())
-                .disabled(!cloudSyncEnabled || isRefreshingCloudBackupMetadata || userDataSyncStatus.state == .pending)
-                .accessibilityLabel("Refresh backup status")
-                .accessibilityIdentifier("profile-cloud-backup-refresh-button")
-
-                Button {
-                    Task {
-                        await forceCloudBackup()
-                    }
-                } label: {
-                    if isForcingCloudBackup {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Back Up Now", systemImage: "arrow.triangle.2.circlepath")
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    cloudBackupTitle
+                    cloudBackupActions
                 }
-                .buttonStyle(WGJCompactGhostButtonStyle())
-                .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending)
-                .accessibilityIdentifier("profile-cloud-backup-now-button")
             }
 
             HStack(alignment: .center, spacing: 12) {
