@@ -12,7 +12,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
         let state = makeState()
 
         state.resolveIfNeeded(resolver: { throw TestError.storeOpen })
-        await waitUntil { state.recoveryState != nil }
+        await assertEventually { state.recoveryState != nil }
 
         XCTAssertNil(state.resolvedBootstrap)
         XCTAssertEqual(state.recoveryState?.canMutateUserData, false)
@@ -21,7 +21,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
     func testRetryCanResolveDurableStore() async throws {
         let state = makeState()
         state.resolveIfNeeded(resolver: { throw TestError.storeOpen })
-        await waitUntil { state.recoveryState != nil }
+        await assertEventually { state.recoveryState != nil }
         let schema = Schema([UserProfile.self])
         let configuration = ModelConfiguration(
             "LaunchTests",
@@ -42,7 +42,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
                 persistenceMode: .durable
             )
         })
-        await waitUntil { state.resolvedBootstrap != nil }
+        await assertEventually { state.resolvedBootstrap != nil }
 
         XCTAssertEqual(state.resolvedBootstrap?.bootstrap.persistenceMode, .durable)
         XCTAssertNil(state.recoveryState)
@@ -51,7 +51,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
     func testDiagnosticModeIsExplicitAndReadOnly() async throws {
         let state = makeState()
         state.resolveIfNeeded(resolver: { throw TestError.storeOpen })
-        await waitUntil { state.recoveryState != nil }
+        await assertEventually { state.recoveryState != nil }
         let schema = Schema([UserProfile.self])
         let configuration = ModelConfiguration(
             "DiagnosticTests",
@@ -72,7 +72,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
                 persistenceMode: .volatileDiagnostic(reason: reason)
             )
         }
-        await waitUntil { state.resolvedBootstrap != nil }
+        await assertEventually { state.resolvedBootstrap != nil }
 
         XCTAssertFalse(state.resolvedBootstrap?.bootstrap.persistenceMode.canMutateUserData ?? true)
         XCTAssertNil(state.recoveryState)
@@ -116,7 +116,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
                 cloudSyncErrorDescription: nil
             )
         }
-        await waitUntil { state.resolvedBootstrap != nil }
+        await assertEventually { state.resolvedBootstrap != nil }
 
         XCTAssertEqual(publishedModes, [.durable])
     }
@@ -179,7 +179,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let value = try await FirstRunLocalBootstrapProgress.performAndMarkCompleted(defaults: defaults) {
+        let value = await FirstRunLocalBootstrapProgress.performAndMarkCompleted(defaults: defaults) {
             "ready"
         }
 
@@ -191,13 +191,5 @@ final class AppLaunchBootstrapTests: XCTestCase {
         AppLaunchBootstrapState(runtimeStateUpdater: { _ in })
     }
 
-    private func waitUntil(_ predicate: @escaping @MainActor () -> Bool) async {
-        for _ in 0..<100 {
-            if predicate() {
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        XCTFail("Condition did not become true within one second")
-    }
+
 }

@@ -110,7 +110,7 @@ nonisolated enum WorkoutCardioMetricsCalculator {
         profile: WorkoutCardioTrackingProfile
     ) -> WorkoutCardioMetricResult {
         guard let durationSeconds, durationSeconds > 0,
-              let distanceMeters, distanceMeters > 0 else {
+              let distanceMeters, distanceMeters.isFinite, distanceMeters > 0 else {
             return .empty
         }
 
@@ -122,9 +122,19 @@ nonisolated enum WorkoutCardioMetricsCalculator {
         let rowPace = duration * 500 / distanceMeters
 
         return .init(
-            paceSecondsPerDisplayUnit: [.walkRun, .treadmill].contains(profile) ? pace : nil,
-            averageSpeedPerHour: profile == .timeOnly || profile == .stairClimber || profile == .rower ? nil : speed,
-            rowingPaceSecondsPer500Meters: profile == .rower ? rowPace : nil
+            paceSecondsPerDisplayUnit: [.walkRun, .treadmill].contains(profile) ? displayablePace(pace) : nil,
+            averageSpeedPerHour: profile == .timeOnly || profile == .stairClimber || profile == .rower ? nil : finitePositive(speed),
+            rowingPaceSecondsPer500Meters: profile == .rower ? displayablePace(rowPace) : nil
         )
+    }
+
+    private static func finitePositive(_ value: Double) -> Double? {
+        value.isFinite && value > 0 ? value : nil
+    }
+
+    private static func displayablePace(_ value: Double) -> Double? {
+        // Tiny distances can overflow division or the whole-second formatter.
+        guard value > 0, Int(exactly: value.rounded()) != nil else { return nil }
+        return value
     }
 }

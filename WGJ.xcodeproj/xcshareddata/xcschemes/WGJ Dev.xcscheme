@@ -64,28 +64,14 @@
             ReferencedContainer = "container:WGJ.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
-      <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C85A31D32F367BAF00217B62"
-               BuildableName = "WGJTests.xctest"
-               BlueprintName = "WGJTests"
-               ReferencedContainer = "container:WGJ.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C85A31DD2F367BAF00217B62"
-               BuildableName = "WGJUITests.xctest"
-               BlueprintName = "WGJUITests"
-               ReferencedContainer = "container:WGJ.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
+      <TestPlans>
+         <TestPlanReference reference = "container:TestPlans/Unit.xctestplan" default = "YES">
+         </TestPlanReference>
+         <TestPlanReference reference = "container:TestPlans/UISmoke.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference reference = "container:TestPlans/Lifecycle.xctestplan">
+         </TestPlanReference>
+      </TestPlans>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Dev Preview"

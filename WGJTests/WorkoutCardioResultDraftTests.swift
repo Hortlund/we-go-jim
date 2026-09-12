@@ -2,6 +2,31 @@ import XCTest
 @testable import WGJ
 
 final class WorkoutCardioResultDraftTests: XCTestCase {
+    func testDurationAtIntegerOverflowBoundaryIsRejected() {
+        for text in [String(Double(Int.max / 60)), "1e100", "inf", "nan"] {
+            XCTAssertNil(WorkoutCardioResultDurationCodec.durationSeconds(
+                fromMinutesText: text, locale: Locale(identifier: "en_US")
+            ))
+        }
+        let safeMinutes = Double(Int.max / 60).nextDown
+        XCTAssertEqual(WorkoutCardioResultDurationCodec.durationSeconds(
+            fromMinutesText: String(safeMinutes), locale: Locale(identifier: "en_US")
+        ), Int(exactly: (safeMinutes * 60).rounded()))
+    }
+
+    func testTinyEnteredDistanceCanRenderSummaryWithoutOverflow() throws {
+        for profile in [WorkoutCardioTrackingProfile.walkRun, .rower] {
+            let result = try WorkoutCardioResultValidator.validated(
+                .fixture(actualDurationSeconds: 600, distanceText: "0.00000000000000000001", trackingProfile: profile),
+                locale: Locale(identifier: "en_US")
+            )
+            let summary = WorkoutCardioResultSummaryFormatter.summary(result, profile: profile)
+            XCTAssertTrue(summary.metrics.contains { $0.kind == .duration })
+            XCTAssertTrue(summary.metrics.contains { $0.kind == .distance })
+            XCTAssertFalse(summary.metrics.contains { $0.kind == .pace || $0.kind == .rowingPace })
+        }
+    }
+
     func testDurationOnlyResultIsValid() throws {
         let result = try WorkoutCardioResultValidator.validated(
             .fixture(actualDurationSeconds: 900)

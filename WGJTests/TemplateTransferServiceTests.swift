@@ -196,6 +196,20 @@ final class TemplateTransferServiceTests: XCTestCase {
         }
     }
 
+    func testPlainTextExportHandlesDistanceBeyondIntegerRange() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Distance", notes: "")
+        try repository.setCardioActivities(templateID: template.id, drafts: [
+            cardioDraft(name: "Run", role: .main, order: 0, goal: .distance, distance: 1e25, unit: .kilometers),
+        ])
+        let data = try TemplateTransferService(modelContext: context)
+            .exportData(templateID: template.id, format: .text)
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(text.contains("Goal: \(String(WorkoutDistanceUnit.kilometers.value(fromMeters: 1e25))) km"))
+    }
+
     func testPlainTextExportGroupsRolesAndPrintsOnlyConfiguredGoal() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

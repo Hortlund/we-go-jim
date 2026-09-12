@@ -183,7 +183,7 @@ nonisolated enum WorkoutCardioResultValidator {
     ) throws -> Double? {
         let text = draft.distanceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        guard let displayValue = parsedNumber(text, locale: locale) else {
+        guard let displayValue = LocalizedFiniteNumberParser.parse(text, locale: locale) else {
             throw WorkoutCardioResultValidationError.invalidDistance
         }
         guard displayValue > 0 else { return nil }
@@ -206,7 +206,7 @@ nonisolated enum WorkoutCardioResultValidator {
         guard draft.trackingProfile == .treadmill else { return nil }
         let text = draft.inclineText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        guard let value = parsedNumber(text, locale: locale), value.isFinite else {
+        guard let value = LocalizedFiniteNumberParser.parse(text, locale: locale), value.isFinite else {
             throw WorkoutCardioResultValidationError.invalidIncline
         }
         return min(100, max(0, value))
@@ -219,7 +219,7 @@ nonisolated enum WorkoutCardioResultValidator {
         guard draft.trackingProfile.supportsResistanceOrLevel else { return nil }
         let text = draft.resistanceLevelText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        guard let value = parsedNumber(text, locale: locale), value.isFinite else {
+        guard let value = LocalizedFiniteNumberParser.parse(text, locale: locale), value.isFinite else {
             throw WorkoutCardioResultValidationError.invalidResistanceLevel
         }
         guard value >= 0 else {
@@ -228,29 +228,7 @@ nonisolated enum WorkoutCardioResultValidator {
         return value
     }
 
-    private static func parsedNumber(_ text: String, locale: Locale) -> Double? {
-        var normalized = text
-        normalized.removeAll(where: \Character.isWhitespace)
-        guard !normalized.isEmpty else { return nil }
 
-        let decimalSeparator = locale.decimalSeparator ?? "."
-        let groupingSeparator = locale.groupingSeparator ?? ","
-        if decimalSeparator == "." {
-            if groupingSeparator != "." {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-        } else if normalized.contains(decimalSeparator) {
-            if groupingSeparator != decimalSeparator {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-            normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
-        } else if groupingSeparator != "." {
-            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-        }
-
-        guard let value = Double(normalized), value.isFinite else { return nil }
-        return value
-    }
 }
 
 nonisolated extension WorkoutCardioTrackingProfile {

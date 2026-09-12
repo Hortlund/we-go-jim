@@ -143,17 +143,34 @@ Forks should replace these URLs in `AppRuntimeConfig` before distribution.
 
 The `WGJ Dev` scheme includes both `WGJTests` and `WGJUITests`. The unit suite covers persistence boundaries, active workout restore, templates, CloudKit payloads and restore behavior, cardio, calories, metrics, projections, app routing, settings, adaptive layout policies, strict concurrency, and widget content. The UI suite covers adaptive layouts and deep-link accessibility flows.
 
-Run the unit suite:
+The `WGJ Dev` scheme has three shared test plans. `Unit` is the default for Xcode's Test action.
+
+| Plan | Coverage |
+| --- | --- |
+| `Unit` | All unit and persistence tests |
+| `UISmoke` | Search, selectors, library scrolling, history, folder editing, rotation, and profile deep links |
+| `Lifecycle` | Workout completion/template review and summary/history sharing across background/foreground transitions |
+
+Run each plan separately so UI regressions stay in smaller, identifiable batches:
 
 ```sh
 xcodebuild test \
   -project WGJ.xcodeproj \
   -scheme "WGJ Dev" \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
-  -only-testing:WGJTests
+  -testPlan Unit \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' \
+  -parallel-testing-enabled NO
 ```
 
-Run the UI suite by replacing the final selector with `-only-testing:WGJUITests`. Replace the simulator name if that device is not installed locally.
+Replace `Unit` with `UISmoke` or `Lifecycle`; run all three before merging changes that affect workout flows. Choose an installed simulator name. The rotation check runs on the selected device; choose an iPad simulator when validating iPad layouts. To narrow a plan further, append a selector such as `-only-testing:WGJTests/WorkoutCardioTrackingTests`.
+
+With XcodeBuildMCP, use `test_sim` with `extraArgs: ["-testPlan", "Unit", "-parallel-testing-enabled", "NO"]`, changing the plan for each batch. When adding a UI test, include it in the appropriate UI plan.
+
+Test helpers:
+
+- Use `AppSchema.makeInMemoryContainer(name:)` for the full, local-only schema. Keep intentionally narrow schemas in tests that verify a specific store boundary.
+- Use `assertEventually` from `WGJTests/TestSupport` for asynchronous observable-state assertions. It yields the main actor and reports failures at the calling test's location.
+- Existing workout fixture launch arguments in `WGJApp` support deterministic UI tests without touching the user's store.
 
 For a compile-only simulator check:
 
@@ -163,6 +180,16 @@ xcodebuild build \
   -scheme "WGJ Dev" \
   -destination 'generic/platform=iOS Simulator'
 ```
+
+## Release Version
+
+Edit only `Configuration/Version.xcconfig` to set `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. Project-level configuration inheritance supplies these values to the app, widget, and test bundles in Debug, Dev Preview, and Release. Avoid target-level overrides. `AppCapabilityConfigurationTests` checks the built app/test bundle values and protects the shared configuration from overrides.
+
+## Workout UI Maintenance
+
+`ActiveWorkoutView` owns the session UI state and lifecycle orchestration. Its header, docks, finish prompt, template-save sheet, exercise-settings sheet, and loading/superset views live in separate files with explicit inputs and callbacks. Keep their state ownership and placement stable when changing layout.
+
+`WorkoutSessionExerciseGridEditor` owns set editing and focus orchestration. `WorkoutExerciseDropStageCardView` owns drop-stage inputs; `WorkoutSetPresentation` holds set hints, completion presentation, and shared metric-field styling. Cardio fields share `LocalizedFiniteNumberParser`, while their validators retain their own positivity, duration caps, and unit-conversion rules. Strength-entry parsing still supports its existing partial-input behavior.
 
 ## Data And Sync Notes
 

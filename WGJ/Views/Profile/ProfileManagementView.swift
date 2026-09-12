@@ -60,7 +60,7 @@ struct ProfileManagementView: View {
                     saveProfile()
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
-                .disabled(trimmedDisplayName.isEmpty || !hasPendingChanges)
+                .disabled(trimmedDisplayName.isEmpty || !hasPendingChanges || avatarSelection.isLoading)
                 .accessibilityIdentifier("profile-save-button")
             }
             .padding(.top, 8)
@@ -84,6 +84,9 @@ struct ProfileManagementView: View {
         .onChange(of: selectedAvatarItem) { _, newItem in
             guard let newItem else { return }
             stageAvatarSelection(newItem)
+        }
+        .onChange(of: avatarSelection.isLoading) { _, isLoading in
+            if !isLoading { selectedAvatarItem = nil }
         }
         .onChange(of: avatarSelection.errorDescription) { _, errorDescription in
             guard let errorDescription else { return }
@@ -165,8 +168,12 @@ struct ProfileManagementView: View {
 
     private var changeAvatarButton: some View {
         let pickerTitle = avatarImageData == nil ? "Choose Avatar" : "Change Avatar"
+        let isLoading = avatarSelection.isLoading
         return PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-            Label(pickerTitle, systemImage: "photo")
+            HStack(spacing: 8) {
+                if isLoading { ProgressView() }
+                Label(pickerTitle, systemImage: "photo")
+            }
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
     }
@@ -253,7 +260,7 @@ struct ProfileManagementView: View {
                             cloudSyncEnabled: cloudSyncEnabled
                         )
                         await MainActor.run {
-                            guard hasLoadedProfile else { return }
+                            guard hasLoadedProfile, !avatarSelection.isLoading else { return }
                             guard displayName == savedDisplayName,
                                   athleteType == savedAthleteType,
                                   avatarImageData == savedAvatarImageData,
@@ -273,6 +280,7 @@ struct ProfileManagementView: View {
     }
 
     private func saveProfile() {
+        guard !avatarSelection.isLoading else { return }
         let calorieProfile: WorkoutCalorieProfileSnapshot
         switch calorieDetailsDraft.canonicalSnapshot(
             showsCalorieEstimates: savedShowsCalorieEstimates,
