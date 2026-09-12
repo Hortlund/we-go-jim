@@ -2078,9 +2078,18 @@ struct ActiveWorkoutView: View {
     }
 
     private var canRunNonCriticalInteractionWork: Bool {
-        ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
+        canMutateActiveSession && ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
             scenePhase: scenePhase,
             isMetricInputFocused: isMetricInputFocused
+        )
+    }
+
+    private var canMutateActiveSession: Bool {
+        ActiveWorkoutLifecycleWorkPolicy.canMutateActiveSession(
+            sessionID: sessionID,
+            coordinatorSessionID: activeWorkoutCoordinator.storedSnapshot?.session.id,
+            isEndingSession: isEndingSession,
+            completedSessionID: completedSessionID
         )
     }
 
@@ -2181,10 +2190,12 @@ struct ActiveWorkoutView: View {
             isCancelArmed = false
             guard !isEndingSession else { return }
             isEndingSession = true
+            cancelNonCriticalInteractionWorkForSceneTransition()
             rowFlushCoordinator.flushAll()
             dismissKeyboard()
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
+                scheduleForegroundNonCriticalInteractionWorkResume()
                 showError(WorkoutSessionRepositoryError.sessionNotFound)
                 return
             }
@@ -2196,6 +2207,7 @@ struct ActiveWorkoutView: View {
                 handleCompletedSessionTransition(result)
             } catch {
                 isEndingSession = false
+                scheduleForegroundNonCriticalInteractionWorkResume()
                 showError(error)
             }
         }
@@ -2319,6 +2331,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func minimizeWorkout() {
+        guard canMutateActiveSession else { return }
         isCancelArmed = false
         stageMinimizedRuntimeState()
         dismissKeyboard()
@@ -2748,6 +2761,9 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
+        // Recheck here: a background flush queued before Finish can run after
+        // completion has removed the coordinator snapshot.
+        guard canMutateActiveSession else { return true }
         let shouldBatchProjectionRefresh = checkpoint == .sceneTransition
         if shouldBatchProjectionRefresh {
             isBatchingRenderProjectionRefresh = true
@@ -2901,7 +2917,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func scheduleForegroundNonCriticalInteractionWorkResume() {
-        guard loadedExerciseStateStamp != nil else {
+        guard canRunNonCriticalInteractionWork, loadedExerciseStateStamp != nil else {
             return
         }
 
@@ -2921,7 +2937,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func persistCommittedUserEditSnapshot(writeDurableSnapshot: Bool = true) {
-        guard !isEndingSession else { return }
+        guard canMutateActiveSession else { return }
         guard let snapshot = currentRuntimeSnapshot() else {
             pendingCardioCompletionsByID = [:]
             return
