@@ -1129,7 +1129,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             index < setDrafts.count - 1 && !isLocked && !setDrafts[index + 1].isLocked
         } ?? false
 
-        return Menu {
+        return WGJActionMenuButton("Set Actions") {
             Button {
                 insertSet(afterSetID: row.id)
             } label: {
@@ -1137,23 +1137,19 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .disabled(!isSetEditingEnabled || isLocked)
 
-            Menu {
-                Button {
-                    moveSetUp(setID: row.id)
-                } label: {
-                    Label("Move up", systemImage: "arrow.up")
-                }
-                .disabled(!isSetEditingEnabled || !canMoveUp)
-
-                Button {
-                    moveSetDown(setID: row.id)
-                } label: {
-                    Label("Move down", systemImage: "arrow.down")
-                }
-                .disabled(!isSetEditingEnabled || !canMoveDown)
+            Button {
+                moveSetUp(setID: row.id)
             } label: {
-                Label("Reorder", systemImage: "arrow.up.arrow.down")
+                Label("Move up", systemImage: "arrow.up")
             }
+            .disabled(!isSetEditingEnabled || !canMoveUp)
+
+            Button {
+                moveSetDown(setID: row.id)
+            } label: {
+                Label("Move down", systemImage: "arrow.down")
+            }
+            .disabled(!isSetEditingEnabled || !canMoveDown)
 
             Button {
                 toggleWarmup(setID: row.id)
@@ -1231,7 +1227,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
-        .menuIndicator(.hidden)
+        .accessibilityLabel("Set \(row.index + 1) actions")
         .accessibilityIdentifier("workout-set-actions-button-\(row.index)")
     }
 

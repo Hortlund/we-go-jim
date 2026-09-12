@@ -115,13 +115,16 @@ struct WorkoutCardioResultEditor: View {
                         .wgjPillField()
                         .accessibilityIdentifier("cardio-result-distance-field")
 
-                    Picker("Distance unit", selection: $draft.distanceUnit) {
+                    WGJActionMenuButton("Distance unit", usesPlainButtonStyle: false) {
                         ForEach(WorkoutDistanceUnit.allCases) { unit in
-                            Text(unit.symbol).tag(unit)
+                            Button(unit.symbol) { draft.distanceUnit = unit }
                         }
+                    } label: {
+                        Label(draft.distanceUnit.symbol, systemImage: "chevron.up.chevron.down")
                     }
-                    .pickerStyle(.menu)
                     .buttonStyle(WGJGhostButtonStyle())
+                    .accessibilityLabel("Distance unit")
+                    .accessibilityValue(draft.distanceUnit.symbol)
                     .accessibilityIdentifier("cardio-result-distance-unit-picker")
                 }
             }

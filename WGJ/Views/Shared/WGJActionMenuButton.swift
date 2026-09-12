@@ -1,5 +1,7 @@
 import SwiftUI
 
+// Use for actions in scrolling content so menu presentation cannot lift the source
+// label out of its row. Keep actions flat: confirmation dialogs do not host submenus.
 struct WGJActionMenuButton<Label: View, Actions: View>: View {
     let title: String
     let titleVisibility: Visibility

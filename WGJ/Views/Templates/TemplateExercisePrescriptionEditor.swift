@@ -1616,30 +1616,26 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     }
 
     private var setMenu: some View {
-        Menu {
+        WGJActionMenuButton("Set Actions") {
             Button {
                 onInsertBelow()
             } label: {
                 Label("Insert below", systemImage: "plus")
             }
 
-            Menu {
-                Button {
-                    onMoveUp()
-                } label: {
-                    Label("Move up", systemImage: "arrow.up")
-                }
-                .disabled(row.index == 0)
-
-                Button {
-                    onMoveDown()
-                } label: {
-                    Label("Move down", systemImage: "arrow.down")
-                }
-                .disabled(!canMoveDown)
+            Button {
+                onMoveUp()
             } label: {
-                Label("Reorder", systemImage: "arrow.up.arrow.down")
+                Label("Move up", systemImage: "arrow.up")
             }
+            .disabled(row.index == 0)
+
+            Button {
+                onMoveDown()
+            } label: {
+                Label("Move down", systemImage: "arrow.down")
+            }
+            .disabled(!canMoveDown)
 
             Button {
                 onToggleWarmup()
@@ -1690,7 +1686,7 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                         .fill(WGJTheme.field)
                 )
         }
-        .menuIndicator(.hidden)
+        .accessibilityLabel("Set \(row.index + 1) actions")
         .accessibilityIdentifier("template-set-actions-button-\(row.index)")
     }
 

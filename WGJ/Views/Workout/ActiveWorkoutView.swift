@@ -689,7 +689,7 @@ struct ActiveWorkoutView: View {
             accessibilityIdentifier: "active-workout-cardio-\(activity.id)-card",
             onToggleCompletion: { toggleQuickCardioCompletion(activityID: activity.id) }
         ) {
-            Menu {
+            WGJActionMenuButton("Cardio Actions") {
                 Button("Edit Plan") { presentCardioSetup(for: activity) }
                 Button("Change Exercise") { requestCardioReplacement(for: activity) }
                 Button("Remove", role: .destructive) { requestCardioRemoval(for: activity) }
@@ -698,7 +698,6 @@ struct ActiveWorkoutView: View {
                     tint: activity.isCompleted ? WGJTheme.success : quickCardioTint(for: activity.role)
                 )
             }
-            .menuIndicator(.hidden)
             .accessibilityLabel("Cardio Actions")
             .accessibilityIdentifier("active-workout-cardio-\(activity.id)-actions-button")
         }
@@ -3627,6 +3626,10 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
     let onSkip: () -> Void
     let onSave: () -> Void
 
+    private var selectedFolderName: String {
+        folders.first(where: { $0.id == templateFolderID })?.name ?? "Unfiled"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -3638,14 +3641,23 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
                         .wgjPillField()
                         .accessibilityIdentifier("active-workout-template-name-field")
 
-                    Picker("Folder", selection: $templateFolderID) {
-                        Text("Unfiled").tag(Optional<UUID>.none)
+                    WGJActionMenuButton("Folder") {
+                        Button("Unfiled") { templateFolderID = nil }
                         ForEach(folders) { folder in
-                            Text(folder.name).tag(Optional.some(folder.id))
+                            Button(folder.name) { templateFolderID = folder.id }
                         }
+                    } label: {
+                        HStack {
+                            Text("Folder")
+                            Spacer()
+                            Text(selectedFolderName)
+                            Image(systemName: "chevron.up.chevron.down")
+                        }
+                        .foregroundStyle(WGJTheme.accentBlue)
                     }
-                    .pickerStyle(.menu)
                     .wgjPillField()
+                    .accessibilityLabel("Folder")
+                    .accessibilityValue(selectedFolderName)
                 }
                 .padding(16)
             }
