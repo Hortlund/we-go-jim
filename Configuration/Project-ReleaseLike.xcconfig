@@ -1,3 +1,5 @@
+#include "Version.xcconfig"
+
 // Shared compiler and validation settings for production and Dev Preview.
 
 ALWAYS_SEARCH_USER_PATHS = NO

@@ -197,8 +197,28 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         XCTAssertTrue(releaseLikeProject.contains("SWIFT_COMPILATION_MODE = wholemodule"))
         XCTAssertTrue(releaseLikeProject.contains("ENABLE_NS_ASSERTIONS = NO"))
         XCTAssertTrue(releaseLikeProject.contains("VALIDATE_PRODUCT = YES"))
-        XCTAssertTrue(releaseLikeApp.contains("MARKETING_VERSION = 1.4.3"))
-        XCTAssertTrue(releaseLikeWidget.contains("MARKETING_VERSION = 1.4.3"))
+        XCTAssertTrue(releaseLikeProject.contains("#include \"Version.xcconfig\""))
+        for content in [project, releaseLikeApp, releaseLikeWidget] {
+            XCTAssertFalse(content.contains("MARKETING_VERSION ="))
+            XCTAssertFalse(content.contains("CURRENT_PROJECT_VERSION ="))
+        }
+    }
+
+    func testBuiltBundlesUseSharedVersion() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Configuration/Version.xcconfig"), encoding: .utf8)
+        let entries = source.split(separator: "\n").compactMap { line -> (String, String)? in
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2 else { return nil }
+            return (parts[0], parts[1])
+        }
+        let settings = Dictionary(uniqueKeysWithValues: entries)
+        let version = try XCTUnwrap(settings["MARKETING_VERSION"])
+        let build = try XCTUnwrap(settings["CURRENT_PROJECT_VERSION"])
+        for bundle in [Bundle.main, Bundle(for: Self.self)] {
+            XCTAssertEqual(bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, version)
+            XCTAssertEqual(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String, build)
+        }
     }
 
     private func propertyList(at url: URL) throws -> [String: Any] {

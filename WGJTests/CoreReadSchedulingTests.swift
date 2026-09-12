@@ -70,10 +70,7 @@ final class CoreReadSchedulingTests: XCTestCase {
     }
 
     private func makeContainer() throws -> ModelContainer {
-        let schema = AppSchema.makeFull()
-        return try ModelContainer(for: schema, configurations: [
-            ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
-        ])
+        try AppSchema.makeInMemoryContainer(name: "CoreReadSchedulingTests")
     }
 }
 

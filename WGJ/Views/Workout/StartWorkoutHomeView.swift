@@ -816,25 +816,19 @@ struct StartWorkoutHomeView: View {
         showingFolderEditor = true
     }
 
-    private func saveFolderDraft() {
+    private func saveFolderDraft() async throws {
         let folderID = editingFolderID
         let name = folderNameDraft
         let backgroundStore = startWorkoutBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.performWrite("start-workout.folder.save") { backgroundContext in
-                    let repository = TemplateRepository(modelContext: backgroundContext)
-                    if let folderID {
-                        try repository.renameFolder(id: folderID, name: name)
-                    } else {
-                        try repository.createFolder(name: name)
-                    }
-                }
-                await handleTemplateLibraryMutationCompleted(clearFolderEditor: true)
-            } catch {
-                await showError(error)
+        try await backgroundStore.performWrite("start-workout.folder.save") { backgroundContext in
+            let repository = TemplateRepository(modelContext: backgroundContext)
+            if let folderID {
+                try repository.renameFolder(id: folderID, name: name)
+            } else {
+                try repository.createFolder(name: name)
             }
         }
+        handleTemplateLibraryMutationCompleted(clearFolderEditor: true)
     }
 
     private func moveFolder(_ folderID: UUID, by delta: Int) {

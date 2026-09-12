@@ -3,6 +3,28 @@ import XCTest
 
 @MainActor
 final class AvatarSelectionCoordinatorTests: XCTestCase {
+    func testUnavailablePhotoPreservesCurrentAvatar() async {
+        let initial = Data("initial".utf8)
+        let coordinator = AvatarSelectionCoordinator(imageData: initial, transform: { $0 })
+        coordinator.select { nil }
+        await assertEventually { !coordinator.isLoading }
+        XCTAssertEqual(coordinator.imageData, initial)
+    }
+
+    func testCanceledPhotoProviderClearsLoadingAndAllowsRetry() async {
+        let initial = Data("initial".utf8)
+        let coordinator = AvatarSelectionCoordinator(imageData: initial, transform: { $0 })
+        coordinator.select { throw CancellationError() }
+        await assertEventually { !coordinator.isLoading }
+        XCTAssertEqual(coordinator.imageData, initial)
+        XCTAssertNil(coordinator.errorDescription)
+
+        let replacement = Data("replacement".utf8)
+        coordinator.select { replacement }
+        await assertEventually { !coordinator.isLoading }
+        XCTAssertEqual(coordinator.imageData, replacement)
+    }
+
     func testLatestSelectionWinsWhenOlderLoadFinishesLast() async {
         let gate = AvatarDataGate()
         let coordinator = AvatarSelectionCoordinator(transform: { $0 })
@@ -11,7 +33,7 @@ final class AvatarSelectionCoordinatorTests: XCTestCase {
 
         coordinator.select { await gate.waitForValue() }
         coordinator.select { second }
-        await waitUntil { coordinator.imageData == second }
+        await assertEventually { coordinator.imageData == second }
         await gate.release(first)
         await Task.yield()
 
@@ -48,13 +70,7 @@ final class AvatarSelectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isLoading)
     }
 
-    private func waitUntil(_ predicate: @escaping @MainActor () -> Bool) async {
-        for _ in 0..<100 {
-            if predicate() { return }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        XCTFail("Condition did not become true")
-    }
+
 }
 
 private actor AvatarDataGate {

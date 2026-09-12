@@ -1,0 +1,39 @@
+{
+  "configurations": [
+    {
+      "id": "F9DA7D0E-0D61-464D-83E4-973DD33C826F",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:WGJ.xcodeproj",
+      "identifier": "C85A31C42F367BAE00217B62",
+      "name": "WGJ"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:WGJ.xcodeproj",
+        "identifier": "C85A31DD2F367BAF00217B62",
+        "name": "WGJUITests"
+      },
+      "parallelizable": false,
+      "selectedTests": [
+        "AdaptiveLayoutUITests/testFolderEditorCanRetryValidationFailureAndSaveOnce",
+        "AdaptiveLayoutUITests/testPrimaryStartWorkoutActionSurvivesIPadRotation",
+        "AdaptiveLayoutUITests/testExerciseSearchAndDetailReturnPreserveQuery",
+        "AdaptiveLayoutUITests/testExerciseSearchRefocusesAfterOpeningFilter",
+        "AdaptiveLayoutUITests/testActiveWorkoutStripHidesDuringExerciseSearchAndReturnsAfterDismissal",
+        "AdaptiveLayoutUITests/testExerciseProgressSelectors",
+        "AdaptiveLayoutUITests/testHistoryMainCardioSummaryOpensDetailWithoutHanging",
+        "AdaptiveLayoutUITests/testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn",
+        "AdaptiveLayoutUITests/testTemplateLibraryScrollsToOffscreenRowsAndBack",
+        "DeepLinkAccessibilityUITests"
+      ]
+    }
+  ],
+  "version": 1
+}

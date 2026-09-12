@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "id": "79A59684-EED6-4FC6-90CC-5BB35CA82766",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:WGJ.xcodeproj",
+      "identifier": "C85A31C42F367BAE00217B62",
+      "name": "WGJ"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:WGJ.xcodeproj",
+        "identifier": "C85A31D32F367BAF00217B62",
+        "name": "WGJTests"
+      },
+      "parallelizable": false
+    }
+  ],
+  "version": 1
+}

@@ -2,6 +2,33 @@ import XCTest
 @testable import WGJ
 
 final class WorkoutCardioTrackingTests: XCTestCase {
+    func testNonFiniteDistancesDoNotProduceMetrics() {
+        for distance in [Double.nan, .infinity, -.infinity] {
+            XCTAssertEqual(WorkoutCardioMetricsCalculator.calculate(
+                durationSeconds: 600, distanceMeters: distance,
+                displayUnit: .kilometers, profile: .walkRun
+            ), .empty)
+        }
+    }
+
+    func testExtremeDistancesDoNotProduceUnrepresentablePacesOrSpeeds() {
+        for distance in [Double.leastNonzeroMagnitude, 1e-20, Double.greatestFiniteMagnitude] {
+            for profile in [WorkoutCardioTrackingProfile.walkRun, .rower, .machineDistance] {
+                let result = WorkoutCardioMetricsCalculator.calculate(
+                    durationSeconds: 600, distanceMeters: distance,
+                    displayUnit: .kilometers, profile: profile
+                )
+                for pace in [result.paceSecondsPerDisplayUnit, result.rowingPaceSecondsPer500Meters].compactMap({ $0 }) {
+                    XCTAssertNotNil(Int(exactly: pace.rounded()))
+                }
+                if let speed = result.averageSpeedPerHour {
+                    XCTAssertTrue(speed.isFinite)
+                    XCTAssertGreaterThan(speed, 0)
+                }
+            }
+        }
+    }
+
     func testRolesHaveStableSectionOrder() {
         XCTAssertEqual(WorkoutCardioRole.allCases.sorted { $0.sortOrder < $1.sortOrder }, [.warmUp, .main, .finisher])
     }

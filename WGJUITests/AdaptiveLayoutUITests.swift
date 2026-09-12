@@ -6,6 +6,39 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testFolderEditorCanRetryValidationFailureAndSaveOnce() {
+        let app = launchLocalApp()
+        let newFolder = app.buttons["start-workout-new-folder-button"]
+        XCTAssertTrue(newFolder.waitForExistence(timeout: 8))
+        newFolder.tap()
+
+        let field = app.textFields["template-folder-name-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 4))
+        field.tap()
+        field.typeText(String(repeating: "A", count: 61))
+        let save = app.buttons["template-folder-save-button"]
+        save.tap()
+        let error = app.alerts["Start Workout Error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 4))
+        error.buttons["OK"].tap()
+        XCTAssertTrue(field.exists)
+
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 61) + "Sweep Folder")
+        save.tap(withNumberOfTaps: 2, numberOfTouches: 1)
+        XCTAssertTrue(field.waitForNonExistence(timeout: 8))
+        let folder = app.staticTexts.matching(identifier: "Sweep Folder")
+        XCTAssertTrue(folder.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertEqual(folder.count, 1)
+
+        newFolder.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 4))
+        XCTAssertTrue((field.value as? String ?? "").isEmpty || field.value as? String == "Push / Pull / Legs")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 4))
+    }
+
+    @MainActor
     func testPrimaryStartWorkoutActionSurvivesIPadRotation() {
         let app = XCUIApplication()
         app.launchArguments = [

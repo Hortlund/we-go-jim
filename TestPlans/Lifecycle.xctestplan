@@ -1,0 +1,33 @@
+{
+  "configurations": [
+    {
+      "id": "F3471F85-1AC6-461A-A0DC-B07D6F6FEC09",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:WGJ.xcodeproj",
+      "identifier": "C85A31C42F367BAE00217B62",
+      "name": "WGJ"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:WGJ.xcodeproj",
+        "identifier": "C85A31DD2F367BAF00217B62",
+        "name": "WGJUITests"
+      },
+      "parallelizable": false,
+      "selectedTests": [
+        "AdaptiveLayoutUITests/testHistoryWorkoutShareCanCancelAndRetryAfterBackground",
+        "AdaptiveLayoutUITests/testSummaryWorkoutShareCanCancelAndRetryAfterBackground",
+        "AdaptiveLayoutUITests/testTemplateReviewSurvivesBackgroundThenKeepTemplate",
+        "AdaptiveLayoutUITests/testTemplateReviewSurvivesBackgroundThenUpdateTemplate"
+      ]
+    }
+  ],
+  "version": 1
+}

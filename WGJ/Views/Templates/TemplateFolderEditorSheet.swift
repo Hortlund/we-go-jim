@@ -4,7 +4,10 @@ struct TemplateFolderEditorSheet: View {
     let isEditing: Bool
     @Binding var folderNameDraft: String
     let onCancel: () -> Void
-    let onSave: () -> Void
+    let onSave: () async throws -> Void
+
+    @State private var isSaving = false
+    @State private var saveError: String?
 
     private var trimmedFolderName: String {
         folderNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,6 +30,7 @@ struct TemplateFolderEditorSheet: View {
                             .foregroundStyle(WGJTheme.textSecondary)
 
                         TextField("Push / Pull / Legs", text: $folderNameDraft)
+                            .disabled(isSaving)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .submitLabel(.done)
@@ -53,6 +57,7 @@ struct TemplateFolderEditorSheet: View {
                     Button("Cancel") {
                         onCancel()
                     }
+                    .disabled(isSaving)
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -63,11 +68,14 @@ struct TemplateFolderEditorSheet: View {
                     Button {
                         submitIfPossible()
                     } label: {
-                        Text(isEditing ? "Save Folder" : "Create Folder")
-                            .frame(maxWidth: .infinity)
+                        HStack(spacing: 8) {
+                            if isSaving { ProgressView() }
+                            Text(isEditing ? "Save Folder" : "Create Folder")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(trimmedFolderName.isEmpty)
+                    .disabled(trimmedFolderName.isEmpty || isSaving)
                     .accessibilityIdentifier("template-folder-save-button")
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -76,14 +84,31 @@ struct TemplateFolderEditorSheet: View {
                 .background(WGJTheme.bgBase.opacity(0.97))
             }
         }
-        .presentationDetents([.medium])
+        .interactiveDismissDisabled(isSaving)
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .alert("Start Workout Error", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { saveError = nil }
+        } message: {
+            Text(saveError ?? "")
+        }
     }
 
     private func submitIfPossible() {
-        guard !trimmedFolderName.isEmpty else {
+        guard !isSaving, !trimmedFolderName.isEmpty else {
             return
         }
-        onSave()
+        isSaving = true
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                try await onSave()
+            } catch {
+                saveError = error.localizedDescription
+            }
+        }
     }
 }

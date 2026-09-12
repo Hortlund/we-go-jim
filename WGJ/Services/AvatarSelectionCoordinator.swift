@@ -36,23 +36,25 @@ final class AvatarSelectionCoordinator {
         errorDescription = nil
 
         loadTask = Task { [weak self] in
+            defer {
+                if let self, self.generation == expectedGeneration {
+                    self.isLoading = false
+                    self.loadTask = nil
+                }
+            }
             do {
                 let rawData = try await load()
                 guard !Task.isCancelled else { return }
-                let transformedData: Data?
-                if let rawData {
-                    transformedData = await transform(rawData) ?? rawData
-                } else {
-                    transformedData = nil
-                }
+                // A canceled/unavailable photo transfer must not remove the
+                // existing avatar. Removal is an explicit action below.
+                guard let rawData else { return }
+                let transformedData = await transform(rawData) ?? rawData
                 guard let self,
                       self.generation == expectedGeneration,
                       !Task.isCancelled else {
                     return
                 }
                 self.imageData = transformedData
-                self.isLoading = false
-                self.loadTask = nil
             } catch is CancellationError {
                 return
             } catch {
@@ -61,9 +63,7 @@ final class AvatarSelectionCoordinator {
                       !Task.isCancelled else {
                     return
                 }
-                self.isLoading = false
                 self.errorDescription = String(describing: error)
-                self.loadTask = nil
             }
         }
     }

@@ -59,26 +59,7 @@ nonisolated enum WorkoutCardioSetupNumericCodec {
     }
 
     private static func positiveNumber(from text: String, locale: Locale) -> Double? {
-        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.removeAll(where: \.isWhitespace)
-        guard !normalized.isEmpty else { return nil }
-
-        let decimalSeparator = locale.decimalSeparator ?? "."
-        let groupingSeparator = locale.groupingSeparator ?? ","
-        if decimalSeparator == "." {
-            if groupingSeparator != "." {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-        } else if normalized.contains(decimalSeparator) {
-            if groupingSeparator != decimalSeparator {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-            normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
-        } else if groupingSeparator != "." {
-            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-        }
-
-        guard let value = Double(normalized), value.isFinite, value > 0 else {
+        guard let value = LocalizedFiniteNumberParser.parse(text, locale: locale), value > 0 else {
             return nil
         }
         return value
@@ -102,35 +83,16 @@ nonisolated enum WorkoutCardioResultDurationCodec {
         fromMinutesText text: String,
         locale: Locale
     ) -> Int? {
-        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.removeAll(where: \.isWhitespace)
-        guard !normalized.isEmpty else { return nil }
-
-        let decimalSeparator = locale.decimalSeparator ?? "."
-        let groupingSeparator = locale.groupingSeparator ?? ","
-        if decimalSeparator == "." {
-            if groupingSeparator != "." {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-        } else if normalized.contains(decimalSeparator) {
-            if groupingSeparator != decimalSeparator {
-                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-            }
-            normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
-        } else if groupingSeparator != "." {
-            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
-        }
-
-        guard let minutes = Double(normalized),
-              minutes.isFinite,
+        guard let minutes = LocalizedFiniteNumberParser.parse(text, locale: locale),
               minutes > 0,
               minutes <= Double(Int.max / 60) else {
             return nil
         }
         let seconds = (minutes * 60).rounded()
-        guard seconds.isFinite, seconds >= 1, seconds <= Double(Int.max) else {
+        // Double(Int.max) rounds up beyond Int's range on 64-bit devices.
+        guard seconds >= 1, let exactSeconds = Int(exactly: seconds) else {
             return nil
         }
-        return Int(seconds)
+        return exactSeconds
     }
 }
