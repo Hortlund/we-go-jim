@@ -247,6 +247,83 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testSummaryWorkoutShareCanCancelAndRetryAfterBackground() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        finishTemplateReviewFixture(in: app)
+        let keep = app.buttons["active-workout-template-review-keep-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 8))
+        keep.tap()
+        let summaryShare = app.buttons["Share"].firstMatch
+        XCTAssertTrue(summaryShare.waitForExistence(timeout: 8))
+        summaryShare.tap()
+        verifyWorkoutShareCanCancelAndRetry(in: app)
+        let history = app.buttons["View History"]
+        XCTAssertTrue(history.waitForExistence(timeout: 8))
+        XCTAssertTrue(history.isHittable)
+        history.tap()
+        XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["50 kg x 8"].firstMatch.exists)
+    }
+
+    @MainActor
+    func testHistoryWorkoutShareCanCancelAndRetryAfterBackground() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_HISTORY_MAIN_CARDIO"])
+        app.buttons["History"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["history-session-card"].firstMatch.waitForExistence(timeout: 8))
+        app.buttons["Workout Actions"].firstMatch.tap()
+        app.buttons["Share Workout"].firstMatch.tap()
+        verifyWorkoutShareCanCancelAndRetry(in: app)
+        XCTAssertTrue(app.buttons["history-session-card"].firstMatch.isHittable)
+    }
+
+    @MainActor
+    private func verifyWorkoutShareCanCancelAndRetry(in app: XCUIApplication) {
+        let share = app.buttons["workout-share-preview-share-button"]
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+        share.tap()
+        let copy = app.cells["Copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 8), app.debugDescription)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        app.activate()
+        XCTAssertTrue(copy.waitForExistence(timeout: 8), app.debugDescription)
+        app.buttons["header.closeButton"].tap()
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+        XCTAssertTrue(share.isHittable, app.debugDescription)
+        share.tap()
+        let saveToFiles = app.cells["Save to Files"].firstMatch
+        XCTAssertTrue(saveToFiles.waitForExistence(timeout: 8))
+        saveToFiles.tap()
+        let filePicker = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"]
+        XCTAssertTrue(filePicker.waitForExistence(timeout: 8), app.debugDescription)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        app.activate()
+        XCTAssertTrue(filePicker.waitForExistence(timeout: 8))
+        let cancel = filePicker.buttons.matching(NSPredicate(format: "label == 'Cancel' OR label == 'Close'")).firstMatch
+        // Files can reopen either its browser or the last destination folder.
+        if !cancel.exists {
+            filePicker.buttons["BackButton"].tap()
+        }
+        XCTAssertTrue(cancel.waitForExistence(timeout: 4), app.debugDescription)
+        cancel.tap()
+        XCTAssertTrue(filePicker.waitForNonExistence(timeout: 8))
+        // A destination may return to the activity list instead of ending it.
+        let activityClose = app.buttons["header.closeButton"]
+        if activityClose.waitForExistence(timeout: 2) {
+            activityClose.tap()
+        }
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+        XCTAssertTrue(share.isHittable, app.debugDescription)
+        share.tap()
+        XCTAssertTrue(copy.waitForExistence(timeout: 8))
+        copy.tap()
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+        XCTAssertTrue(share.isHittable, app.debugDescription)
+        app.buttons["Close"].firstMatch.tap()
+    }
+
+    @MainActor
     func testTemplateReviewSurvivesBackgroundThenKeepTemplate() {
         verifyTemplateReviewSurvivesBackground(action: "keep")
     }
@@ -259,6 +336,47 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     private func verifyTemplateReviewSurvivesBackground(action: String) {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        finishTemplateReviewFixture(in: app)
+        let start = app.buttons["start-workout-template-start-button-review-fixture"]
+        let previewStart = app.buttons["template-preview-start-button"]
+
+        let keep = app.buttons["active-workout-template-review-keep-button"]
+        let update = app.buttons["active-workout-template-review-apply-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 10))
+        for _ in 0..<2 {
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            app.activate()
+            XCTAssertTrue(keep.waitForExistence(timeout: 8))
+            XCTAssertTrue(keep.isHittable)
+            XCTAssertTrue(update.isHittable)
+            XCTAssertFalse(app.buttons["View History"].exists)
+        }
+
+        app.buttons["active-workout-template-review-\(action)-button"].tap()
+        // The summary container identifier is inherited by its bottom buttons.
+        let history = app.buttons["View History"]
+        let didShowSummary = history.waitForExistence(timeout: 10)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Template choice after background - \(action)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(didShowSummary, app.debugDescription)
+        history.tap()
+        XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["50 kg x 8"].firstMatch.exists, app.debugDescription)
+        let startTab = app.buttons["Start Workout"].firstMatch
+        XCTAssertTrue(startTab.waitForExistence(timeout: 8))
+        startTab.tap()
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        XCTAssertTrue(previewStart.waitForExistence(timeout: 4))
+        let expectedSets = action == "apply" ? "2 working sets" : "1 working set"
+        XCTAssertTrue(app.staticTexts[expectedSets].firstMatch.waitForExistence(timeout: 4))
+    }
+
+    @MainActor
+    private func finishTemplateReviewFixture(in app: XCUIApplication) {
         let start = app.buttons["start-workout-template-start-button-review-fixture"]
         for _ in 0..<5 {
             if start.exists && start.isHittable { break }
@@ -298,40 +416,6 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let confirm = app.buttons["Finish Anyway"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 4))
         confirm.tap()
-
-        let keep = app.buttons["active-workout-template-review-keep-button"]
-        let update = app.buttons["active-workout-template-review-apply-button"]
-        XCTAssertTrue(keep.waitForExistence(timeout: 10))
-        for _ in 0..<2 {
-            XCUIDevice.shared.press(.home)
-            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
-            app.activate()
-            XCTAssertTrue(keep.waitForExistence(timeout: 8))
-            XCTAssertTrue(keep.isHittable)
-            XCTAssertTrue(update.isHittable)
-            XCTAssertFalse(app.buttons["View History"].exists)
-        }
-
-        app.buttons["active-workout-template-review-\(action)-button"].tap()
-        // The summary container identifier is inherited by its bottom buttons.
-        let history = app.buttons["View History"]
-        let didShowSummary = history.waitForExistence(timeout: 10)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Template choice after background - \(action)"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
-        XCTAssertTrue(didShowSummary, app.debugDescription)
-        history.tap()
-        XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["50 kg x 8"].firstMatch.exists, app.debugDescription)
-        let startTab = app.buttons["Start Workout"].firstMatch
-        XCTAssertTrue(startTab.waitForExistence(timeout: 8))
-        startTab.tap()
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
-        XCTAssertTrue(previewStart.waitForExistence(timeout: 4))
-        let expectedSets = action == "apply" ? "2 working sets" : "1 working set"
-        XCTAssertTrue(app.staticTexts[expectedSets].firstMatch.waitForExistence(timeout: 4))
     }
 
     @MainActor
