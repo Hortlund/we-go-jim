@@ -980,6 +980,7 @@ private struct HistorySessionCardView: View, Equatable {
                     }
                     .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue, background: WGJTheme.field))
                     .foregroundStyle(WGJTheme.accentBlue)
+                    .accessibilityLabel("Workout Actions")
                 }
 
                 ViewThatFits(in: .horizontal) {
