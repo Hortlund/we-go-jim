@@ -110,6 +110,29 @@ struct WGJApp: App {
         try seedUITestExerciseProgressIfRequested(container: container)
         try seedUITestHistoryMainCardioIfRequested(container: container)
 #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_REVIEW") {
+            let context = ModelContext(container)
+            let template = WorkoutTemplate(
+                folderID: TemplateRepository.unfiledFolderID,
+                name: "Review Fixture"
+            )
+            let exercise = TemplateExercise(
+                templateID: template.id,
+                catalogExerciseUUID: "ui-test-bench",
+                exerciseNameSnapshot: "Bench Press",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Chest",
+                template: template
+            )
+            exercise.prescribedSets = [TemplateExerciseSet(
+                templateExerciseID: exercise.id,
+                sortOrder: 0,
+                templateExercise: exercise
+            )]
+            template.exercises = [exercise]
+            context.insert(template)
+            try context.save()
+        }
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_LIBRARY") {
             let context = ModelContext(container)
             for index in 1...16 {

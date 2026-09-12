@@ -219,6 +219,35 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.storedSnapshot)
     }
 
+    func testFailedCompletionAllowsHydrationRecoveryAndSuccessfulRetry() async throws {
+        let session = ActiveWorkoutRuntimeSession(name: "Push")
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: RecordingActiveWorkoutSnapshotStore(),
+            persistence: StubActiveWorkoutPersistence(completionFailuresRemaining: 1)
+        )
+        coordinator.send(.start(session))
+
+        do {
+            _ = try await coordinator.complete(notes: "Done")
+            XCTFail("Expected the first completion write to fail")
+        } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteUnknown.rawValue)
+        }
+
+        func canResumeHydration() -> Bool {
+            ActiveWorkoutLifecycleWorkPolicy.canMutateActiveSession(
+                sessionID: session.id,
+                coordinatorSessionID: coordinator.storedSnapshot?.session.id,
+                isEndingSession: false,
+                completedSessionID: nil
+            )
+        }
+        XCTAssertEqual(coordinator.storedSnapshot?.session, session)
+        XCTAssertTrue(canResumeHydration())
+        _ = try await coordinator.complete(notes: "Done")
+        XCTAssertFalse(canResumeHydration(), "Successful completion must still block late hydration")
+    }
+
     func testUnchangedCommandsKeepRevisionAndSkipDiskWrites() async throws {
         let store = RecordingActiveWorkoutSnapshotStore()
         let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
@@ -365,14 +394,17 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
 private actor StubActiveWorkoutPersistence: ActiveWorkoutPersistence {
     private let completedSessionIDs: Set<UUID>
     private let completionDelayNanoseconds: UInt64
+    private var completionFailuresRemaining: Int
     private var completionCalls = 0
 
     init(
         completedSessionIDs: Set<UUID> = [],
-        completionDelayNanoseconds: UInt64 = 0
+        completionDelayNanoseconds: UInt64 = 0,
+        completionFailuresRemaining: Int = 0
     ) {
         self.completedSessionIDs = completedSessionIDs
         self.completionDelayNanoseconds = completionDelayNanoseconds
+        self.completionFailuresRemaining = completionFailuresRemaining
     }
 
     func isCompleted(sessionID: UUID) async throws -> Bool {
@@ -384,6 +416,10 @@ private actor StubActiveWorkoutPersistence: ActiveWorkoutPersistence {
         notes: String?
     ) async throws -> WorkoutCompletionCommitResult {
         completionCalls += 1
+        if completionFailuresRemaining > 0 {
+            completionFailuresRemaining -= 1
+            throw CocoaError(.fileWriteUnknown)
+        }
         if completionDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: completionDelayNanoseconds)
         }

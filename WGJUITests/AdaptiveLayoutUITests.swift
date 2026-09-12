@@ -247,6 +247,94 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateReviewSurvivesBackgroundThenKeepTemplate() {
+        verifyTemplateReviewSurvivesBackground(action: "keep")
+    }
+
+    @MainActor
+    func testTemplateReviewSurvivesBackgroundThenUpdateTemplate() {
+        verifyTemplateReviewSurvivesBackground(action: "apply")
+    }
+
+    @MainActor
+    private func verifyTemplateReviewSurvivesBackground(action: String) {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        let start = app.buttons["start-workout-template-start-button-review-fixture"]
+        for _ in 0..<5 {
+            if start.exists && start.isHittable { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+
+        let previewStart = app.buttons["template-preview-start-button"]
+        XCTAssertTrue(previewStart.waitForExistence(timeout: 4))
+        previewStart.tap()
+
+        let expand = app.buttons["active-workout-exercise-ui-test-bench-expand-button"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        expand.tap()
+        let setActions = app.buttons["workout-set-actions-button-0"].firstMatch
+        for _ in 0..<5 {
+            if setActions.exists && setActions.isHittable { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(setActions.waitForExistence(timeout: 8))
+        setActions.tap()
+        app.buttons["Insert below"].firstMatch.tap()
+
+        let weight = app.textFields["workout-set-0-weight-field"]
+        XCTAssertTrue(weight.waitForExistence(timeout: 4))
+        weight.tap()
+        weight.typeText("50")
+        let reps = app.textFields["workout-set-0-reps-field"]
+        reps.tap()
+        reps.typeText("8")
+        app.buttons["workout-set-0-completion-button"].tap()
+
+        let finish = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 4))
+        finish.tap()
+        let confirm = app.buttons["Finish Anyway"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 4))
+        confirm.tap()
+
+        let keep = app.buttons["active-workout-template-review-keep-button"]
+        let update = app.buttons["active-workout-template-review-apply-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 10))
+        for _ in 0..<2 {
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            app.activate()
+            XCTAssertTrue(keep.waitForExistence(timeout: 8))
+            XCTAssertTrue(keep.isHittable)
+            XCTAssertTrue(update.isHittable)
+            XCTAssertFalse(app.buttons["View History"].exists)
+        }
+
+        app.buttons["active-workout-template-review-\(action)-button"].tap()
+        // The summary container identifier is inherited by its bottom buttons.
+        let history = app.buttons["View History"]
+        let didShowSummary = history.waitForExistence(timeout: 10)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Template choice after background - \(action)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(didShowSummary, app.debugDescription)
+        history.tap()
+        XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["50 kg x 8"].firstMatch.exists, app.debugDescription)
+        let startTab = app.buttons["Start Workout"].firstMatch
+        XCTAssertTrue(startTab.waitForExistence(timeout: 8))
+        startTab.tap()
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        XCTAssertTrue(previewStart.waitForExistence(timeout: 4))
+        let expectedSets = action == "apply" ? "2 working sets" : "1 working set"
+        XCTAssertTrue(app.staticTexts[expectedSets].firstMatch.waitForExistence(timeout: 4))
+    }
+
+    @MainActor
     private func launchLocalApp(additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

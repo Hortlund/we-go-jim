@@ -1,5 +1,18 @@
 import SwiftUI
 
+nonisolated enum ActiveWorkoutLifecycleWorkPolicy {
+    // The completed workout remains on screen while the user chooses whether to
+    // update its template, but it is no longer an editable coordinator session.
+    static func canMutateActiveSession(
+        sessionID: UUID,
+        coordinatorSessionID: UUID?,
+        isEndingSession: Bool,
+        completedSessionID: UUID?
+    ) -> Bool {
+        !isEndingSession && completedSessionID == nil && coordinatorSessionID == sessionID
+    }
+}
+
 nonisolated enum ActiveWorkoutSceneTransitionPolicy {
     static func shouldFlushLocalDraft(scenePhase: ScenePhase) -> Bool {
         scenePhase != .active

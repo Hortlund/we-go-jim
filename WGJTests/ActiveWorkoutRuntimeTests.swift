@@ -715,6 +715,28 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         )
     }
 
+    func testFinishedWorkoutCannotResumeDraftOrHydrationWork() {
+        let sessionID = UUID()
+        func permitsWork(ending: Bool, completed: UUID?, coordinator: UUID?) -> Bool {
+            ActiveWorkoutLifecycleWorkPolicy.canMutateActiveSession(
+                sessionID: sessionID,
+                coordinatorSessionID: coordinator,
+                isEndingSession: ending,
+                completedSessionID: completed
+            )
+        }
+
+        XCTAssertTrue(permitsWork(ending: false, completed: nil, coordinator: sessionID))
+        // Finish owns the last flush even while the coordinator is still committing.
+        XCTAssertFalse(permitsWork(ending: true, completed: nil, coordinator: sessionID))
+        // The template review retains the display draft after the coordinator clears.
+        XCTAssertFalse(permitsWork(ending: true, completed: sessionID, coordinator: nil))
+        // Error recovery or a stale queued callback must not revive a completed draft.
+        XCTAssertFalse(permitsWork(ending: false, completed: sessionID, coordinator: nil))
+        XCTAssertFalse(permitsWork(ending: false, completed: nil, coordinator: nil))
+        XCTAssertFalse(permitsWork(ending: false, completed: nil, coordinator: UUID()))
+    }
+
     func testMetricInputKeyboardClearanceAppearsAsSoonAsInputGainsFocus() {
         XCTAssertEqual(ActiveWorkoutKeyboardChromePolicy.metricInputClearanceHeight, 56)
         XCTAssertTrue(
