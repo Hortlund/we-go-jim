@@ -462,7 +462,7 @@ struct ActiveWorkoutCardioActivityCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                Menu {
+                WGJActionMenuButton("Cardio Actions") {
                     Button("Edit Plan", action: onEditPlan)
                     Button("Change Exercise", action: onChangeExercise)
                     Button("Remove", role: .destructive, action: onRemove)
@@ -473,7 +473,6 @@ struct ActiveWorkoutCardioActivityCard: View {
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
-                .menuIndicator(.hidden)
                 .accessibilityLabel("Cardio Actions")
                 .accessibilityIdentifier("active-workout-cardio-\(presentation.id)-actions-button")
             }

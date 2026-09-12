@@ -1338,14 +1338,13 @@ private struct HistoryExerciseLoadingCard: View, Equatable {
                 Spacer(minLength: 12)
 
                 VStack(spacing: 8) {
-                    Menu {
+                    WGJActionMenuButton("Exercise Actions") {
                         Button(role: .destructive, action: onDelete) {
                             Label("Delete exercise", systemImage: "trash")
                         }
                     } label: {
                         headerIcon(symbol: "ellipsis.circle")
                     }
-                    .menuIndicator(.hidden)
                     .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-actions-button")
 
                     Button(action: onCollapse) {
@@ -1449,14 +1448,13 @@ private struct HistoryCollapsedExerciseCard: View, Equatable {
                 Spacer(minLength: 12)
 
                 VStack(spacing: 8) {
-                    Menu {
+                    WGJActionMenuButton("Exercise Actions") {
                         Button(role: .destructive, action: onDelete) {
                             Label("Delete exercise", systemImage: "trash")
                         }
                     } label: {
                         headerIcon(symbol: "ellipsis.circle")
                     }
-                    .menuIndicator(.hidden)
                     .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-actions-button")
 
                     Button(action: onExpand) {
@@ -1690,14 +1688,13 @@ private struct HistoryExerciseDetailEditorCard: View {
             Spacer(minLength: 12)
 
             VStack(spacing: 8) {
-                Menu {
+                WGJActionMenuButton("Exercise Actions") {
                     Button(role: .destructive, action: onExerciseDelete) {
                         Label("Delete exercise", systemImage: "trash")
                     }
                 } label: {
                     headerIcon(symbol: "ellipsis.circle")
                 }
-                .menuIndicator(.hidden)
                 .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-actions-button")
 
                 Button {
@@ -1729,7 +1726,7 @@ private struct HistoryExerciseDetailEditorCard: View {
                     }
                     .buttonStyle(.plain)
 
-                    Menu {
+                    WGJActionMenuButton("Default Rest") {
                         ForEach(restPresets, id: \.self) { value in
                             Button(formattedRest(value)) {
                                 updateRest(value)
@@ -1739,7 +1736,6 @@ private struct HistoryExerciseDetailEditorCard: View {
                         Label(formattedRest(localRestSeconds), systemImage: "timer")
                             .monospacedDigit()
                     }
-                    .menuIndicator(.hidden)
 
                     Button {
                         updateRest(localRestSeconds + 15)
@@ -1845,7 +1841,7 @@ private struct HistoryExerciseDetailEditorCard: View {
 
                 Spacer(minLength: 8)
 
-                Menu {
+                WGJActionMenuButton("Set Actions") {
                     Button(draft.isWarmup ? "Mark Working Set" : "Mark Warmup") {
                         updateSet(draft.id) { $0.isWarmup.toggle() }
                     }
@@ -1867,7 +1863,6 @@ private struct HistoryExerciseDetailEditorCard: View {
                                 .fill(WGJTheme.field)
                         )
                 }
-                .menuIndicator(.hidden)
                 .accessibilityLabel("\(exerciseName), set \(index + 1), actions")
                 .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-set-\(index + 1)-actions-button")
             }

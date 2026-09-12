@@ -2040,13 +2040,21 @@ private struct CustomExerciseEditorView: View {
             }
 
             if isCardioCategory {
-                Picker("Tracking", selection: cardioTrackingProfileBinding) {
+                WGJActionMenuButton("Tracking") {
                     ForEach(WorkoutCardioTrackingProfile.allCases) { profile in
-                        Text(cardioTrackingProfileTitle(profile)).tag(profile)
+                        Button(cardioTrackingProfileTitle(profile)) {
+                            cardioTrackingProfileBinding.wrappedValue = profile
+                        }
                     }
+                } label: {
+                    Label(
+                        cardioTrackingProfileTitle(cardioTrackingProfileBinding.wrappedValue),
+                        systemImage: "chevron.up.chevron.down"
+                    )
+                    .foregroundStyle(WGJTheme.accentBlue)
                 }
-                .pickerStyle(.menu)
-                .tint(WGJTheme.accentBlue)
+                .accessibilityLabel("Tracking")
+                .accessibilityValue(cardioTrackingProfileTitle(cardioTrackingProfileBinding.wrappedValue))
                 .accessibilityIdentifier("custom-cardio-tracking-profile")
             }
 

@@ -63,7 +63,7 @@ struct ExerciseDetailStatsSection: View {
         availabilityByMetric: [ExerciseProgressMetric: ExerciseProgressAvailability]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Menu {
+            WGJActionMenuButton("Metric", message: selectedMetric.title) {
                 ForEach(ExerciseProgressMetric.allCases) { metric in
                     Button {
                         selectedMetric = metric
@@ -89,6 +89,7 @@ struct ExerciseDetailStatsSection: View {
                 .wgjCardContainer(strong: true)
             }
             .accessibilityIdentifier("exercise-progress-metric-selector")
+            .accessibilityValue(selectedMetric.title)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
