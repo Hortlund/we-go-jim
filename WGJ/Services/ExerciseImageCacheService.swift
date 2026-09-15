@@ -44,7 +44,7 @@ nonisolated final class ExerciseImageCacheService {
     }
 
     func image(for snapshot: ExerciseCatalogImageSnapshot?) async -> UIImage? {
-        guard let snapshot else {
+        guard !Task.isCancelled, let snapshot else {
             return nil
         }
 
@@ -58,13 +58,14 @@ nonisolated final class ExerciseImageCacheService {
         }
 
         let fileURL = makeFileURL(for: localPath)
-        guard fileManager.fileExists(atPath: fileURL.path),
-              let data = await readData(from: fileURL),
+        guard let data = await readData(from: fileURL),
+              !Task.isCancelled,
               let image = await decodeImage(from: data)
         else {
             return nil
         }
 
+        guard !Task.isCancelled else { return nil }
         Self.sharedMemoryImageCache.insert(
             image,
             for: cacheToken,
@@ -149,7 +150,8 @@ actor ExerciseImageDecodeWorker {
     static let shared = ExerciseImageDecodeWorker()
 
     func decodeImage(from data: Data, maxPixelSize: Int) -> UIImage? {
-        ExerciseImageCacheService.decodeImageSynchronously(
+        guard !Task.isCancelled else { return nil }
+        return ExerciseImageCacheService.decodeImageSynchronously(
             from: data,
             maxPixelSize: maxPixelSize
         )
@@ -163,7 +165,8 @@ actor ExerciseImageDiskWorker {
     private static let diskCacheTrimTargetBytes = 48 * 1024 * 1024
 
     func readData(from fileURL: URL) -> Data? {
-        try? Data(contentsOf: fileURL)
+        guard !Task.isCancelled else { return nil }
+        return try? Data(contentsOf: fileURL)
     }
 
     func trimDiskCache(at cacheDirectoryURL: URL) {

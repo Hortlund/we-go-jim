@@ -248,19 +248,27 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
     private static func latestSameTemplateSelection(
         from sessions: [WorkoutProgressSessionInput]
     ) -> (previous: WorkoutProgressSessionInput, current: WorkoutProgressSessionInput, mode: WorkoutProgressComparisonMode)? {
-        for current in sessions {
-            guard let templateID = current.templateID else { continue }
-            guard let previous = sessions.first(where: { candidate in
-                candidate.id != current.id
-                    && candidate.templateID == templateID
-                    && candidate.completedAt < current.completedAt
-            }) else {
+        // Callers supply newest-first sessions. Remember the newest entry for
+        // each template and its first strictly older run in one pass.
+        var newestByTemplate: [UUID: (index: Int, session: WorkoutProgressSessionInput)] = [:]
+        var bestPair: (index: Int, previous: WorkoutProgressSessionInput, current: WorkoutProgressSessionInput)?
+        for (index, session) in sessions.enumerated() {
+            guard let templateID = session.templateID else { continue }
+            guard let newest = newestByTemplate[templateID] else {
+                newestByTemplate[templateID] = (index, session)
                 continue
             }
-            return orderedSelection(current, previous, mode: .sameTemplate)
+            guard session.id != newest.session.id,
+                  session.completedAt < newest.session.completedAt else { continue }
+            if newest.index == 0 {
+                return orderedSelection(newest.session, session, mode: .sameTemplate)
+            }
+            if newest.index < (bestPair?.index ?? Int.max) {
+                bestPair = (newest.index, session, newest.session)
+            }
         }
-
-        return nil
+        guard let bestPair else { return nil }
+        return orderedSelection(bestPair.current, bestPair.previous, mode: .sameTemplate)
     }
 
     private static func orderedSelection(
@@ -830,6 +838,7 @@ extension WorkoutProgressSessionInput {
     }
 
     nonisolated init(session: WorkoutSession, repository: WorkoutSessionRepository) throws {
+        let source = try HistoryProjectionSnapshotBuilder.loadSource(for: session, repository: repository)
         self.init(
             id: session.id,
             templateID: session.templateID,
@@ -839,10 +848,15 @@ extension WorkoutProgressSessionInput {
             durationSeconds: session.durationSeconds,
             prHitsCount: session.prHitsCount,
             archivedAt: session.archivedAt,
-            exercises: try repository.sessionExercises(sessionID: session.id)
-                .map { exercise in
-                    try WorkoutProgressExerciseInput(exercise: exercise, repository: repository)
-                }
+            exercises: source.exercises.map { row in
+                WorkoutProgressExerciseInput(
+                    id: row.exercise.id,
+                    catalogExerciseUUID: row.exercise.catalogExerciseUUID,
+                    exerciseName: row.exercise.exerciseNameSnapshot,
+                    sortOrder: row.exercise.sortOrder,
+                    sets: row.sets.map(WorkoutProgressSetInput.init(set:))
+                )
+            }
         )
     }
 

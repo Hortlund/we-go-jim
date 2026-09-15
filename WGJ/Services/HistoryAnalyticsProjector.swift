@@ -52,8 +52,12 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
         repository: WorkoutSessionRepository
     ) throws -> Source {
         let exercises = try repository.sessionExercises(sessionID: session.id)
-        return Source(session: session, exercises: try exercises.map { exercise in
-            (exercise, try repository.sessionSets(sessionExerciseID: exercise.id))
+        let setsByExerciseID = Dictionary(
+            grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
+            by: \.sessionExerciseID
+        )
+        return Source(session: session, exercises: exercises.map { exercise in
+            (exercise, setsByExerciseID[exercise.id, default: []])
         })
     }
 

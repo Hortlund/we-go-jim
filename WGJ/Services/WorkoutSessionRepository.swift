@@ -538,8 +538,13 @@ nonisolated final class WorkoutSessionRepository {
     }
 
     func archivedSessions() throws -> [WorkoutSession] {
-        try completedSessions(includeArchived: true)
-            .filter { $0.archivedAt != nil }
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.statusRaw == completedStatus && session.archivedAt != nil
+            }
+        )
+        return try modelContext.fetch(descriptor)
             .sorted { lhs, rhs in
                 let lhsArchivedAt = lhs.archivedAt ?? .distantPast
                 let rhsArchivedAt = rhs.archivedAt ?? .distantPast
@@ -1026,8 +1031,12 @@ nonisolated final class WorkoutSessionRepository {
 
         var maps: [String: [Int: WorkoutPreviousSetSnapshot]] = [:]
         maps.reserveCapacity(exercisesByCatalogUUID.count)
+        let setsByExerciseID = Dictionary(
+            grouping: try sessionSets(sessionExerciseIDs: Set(exercisesByCatalogUUID.values.map(\.id))),
+            by: \.sessionExerciseID
+        )
         for (catalogExerciseUUID, exercise) in exercisesByCatalogUUID {
-            let orderedSets = try sessionSets(sessionExerciseID: exercise.id)
+            let orderedSets = setsByExerciseID[exercise.id, default: []]
             maps[catalogExerciseUUID] = Dictionary(orderedSets.map { set in
                 (
                     set.sortOrder,
@@ -1523,10 +1532,10 @@ nonisolated final class WorkoutSessionRepository {
 
         guard !latestSessionIDByExercise.isEmpty else { return [:] }
 
-        var exercisesBySessionID: [UUID: [WorkoutSessionExercise]] = [:]
-        for sessionID in Set(latestSessionIDByExercise.values) {
-            exercisesBySessionID[sessionID] = try sessionExercises(sessionID: sessionID)
-        }
+        let exercisesBySessionID = Dictionary(
+            grouping: try sessionExercises(sessionIDs: Set(latestSessionIDByExercise.values)),
+            by: \.sessionID
+        )
 
         var resolved: [String: WorkoutSessionExercise] = [:]
         resolved.reserveCapacity(latestSessionIDByExercise.count)
@@ -1550,7 +1559,7 @@ nonisolated final class WorkoutSessionRepository {
         before date: Date,
         excludingSessionID: UUID?
     ) throws -> [String: UUID] {
-        let facts = try historyProjectionRepository.allFacts()
+        let facts = try historyProjectionRepository.facts(forExercises: requested)
         let visibleSessionIDs = Set(
             try completedSessions(
                 before: date,
@@ -1583,10 +1592,21 @@ nonisolated final class WorkoutSessionRepository {
         guard !requested.isEmpty else { return [:] }
 
         let sessions = try completedSessions(before: date, excludingSessionID: excludingSessionID)
+        guard !sessions.isEmpty else { return [:] }
+        let requestedUUIDs = Array(requested)
+        let descriptor = FetchDescriptor<WorkoutSessionExercise>(
+            predicate: #Predicate { exercise in
+                requestedUUIDs.contains(exercise.catalogExerciseUUID)
+            }
+        )
+        let exercisesBySessionID = Dictionary(
+            grouping: try modelContext.fetch(descriptor),
+            by: \.sessionID
+        )
         var chosenSessionByExercise: [String: UUID] = [:]
 
         for session in sessions {
-            for exercise in try sessionExercises(sessionID: session.id) {
+            for exercise in exercisesBySessionID[session.id, default: []] {
                 guard requested.contains(exercise.catalogExerciseUUID) else { continue }
                 guard chosenSessionByExercise[exercise.catalogExerciseUUID] == nil else { continue }
                 chosenSessionByExercise[exercise.catalogExerciseUUID] = session.id

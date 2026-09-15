@@ -464,16 +464,19 @@ struct HistoryOverviewView: View {
 
         do {
             let backgroundStore = historyBackgroundStore
+            let existingSessions = controller.completedSessions
+            let baseSnapshotRevision = controller.snapshotRevision
             let loaded = try await backgroundStore.performRead("history-overview.snapshot.load-more") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.loadPage(
                     modelContext: backgroundContext,
                     after: pageCursor,
-                    pageSize: Self.historyPageSize
+                    pageSize: Self.historyPageSize,
+                    existingSessions: existingSessions
                 )
             }
             guard pageLoadGeneration.isCurrent(loadGeneration) else { return }
             guard selectedDayFilter == nil else { return }
-            controller.appendPage(loaded)
+            controller.applyAppendedPage(loaded, basedOn: baseSnapshotRevision)
         } catch is CancellationError {
             return
         } catch {
@@ -593,6 +596,7 @@ nonisolated struct HistoryOverviewPreparedSnapshots: Sendable {
 @MainActor
 @Observable
 final class HistoryOverviewController {
+    private(set) var snapshotRevision: UInt64 = 0
     var completedSessions: [HistoryOverviewSessionSnapshot] = []
     var snapshot = HistoryOverviewSnapshot.empty
     var calendarWorkoutCountsByDay: [Date: Int] = [:]
@@ -607,6 +611,7 @@ final class HistoryOverviewController {
     }
 
     func apply(_ loaded: HistoryOverviewLoadedSnapshot) {
+        snapshotRevision &+= 1
         completedSessions = loaded.completedSessions
         preparedSnapshots = loaded.preparedSnapshots
         snapshot = preparedSnapshots.snapshot(for: loaded.selectedDayFilter)
@@ -615,14 +620,19 @@ final class HistoryOverviewController {
         hasMorePages = loaded.hasMorePages
     }
 
-    func appendPage(_ loaded: HistoryOverviewLoadedSnapshot) {
-        var existingIDs = Set(completedSessions.map(\.id))
-        completedSessions.append(contentsOf: loaded.completedSessions.filter { existingIDs.insert($0.id).inserted })
-        preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(sessions: completedSessions)
+    @discardableResult
+    func applyAppendedPage(_ loaded: HistoryOverviewLoadedSnapshot, basedOn revision: UInt64) -> Bool {
+        // A reload may have published while this page was being prepared.
+        // Only replace the exact snapshot used as the page's starting point.
+        guard snapshotRevision == revision else { return false }
+        snapshotRevision &+= 1
+        completedSessions = loaded.completedSessions
+        preparedSnapshots = loaded.preparedSnapshots
         snapshot = preparedSnapshots.snapshot(for: nil)
         calendarWorkoutCountsByDay.merge(loaded.calendarWorkoutCountsByDay) { current, _ in current }
         loadedCalendarMonths.formUnion(loaded.loadedCalendarMonths)
         hasMorePages = loaded.hasMorePages
+        return true
     }
 
     func hasCalendarCounts(for month: Date) -> Bool {
@@ -693,16 +703,21 @@ nonisolated enum HistoryOverviewSnapshotLoader {
     nonisolated static func loadPage(
         modelContext: ModelContext,
         after cursor: WorkoutSessionPageCursor,
-        pageSize: Int
+        pageSize: Int,
+        existingSessions: [HistoryOverviewSessionSnapshot] = []
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
         let caloriePresentationPolicy = caloriePresentationPolicy(modelContext: modelContext)
         let page = try repository.completedSessions(after: cursor, limit: pageSize + 1)
-        let completedSessions = try snapshots(
+        let pageSessions = try snapshots(
             from: Array(page.prefix(pageSize)),
             repository: repository,
             caloriePresentationPolicy: caloriePresentationPolicy
         )
+        // Merge and format away from the main actor; the caller checks its
+        // generation before publishing this complete replacement snapshot.
+        var existingIDs = Set(existingSessions.map(\.id))
+        let completedSessions = existingSessions + pageSessions.filter { existingIDs.insert($0.id).inserted }
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
             sessions: completedSessions
         )

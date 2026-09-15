@@ -2,6 +2,51 @@ import XCTest
 @testable import WGJ
 
 final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
+    func testSelectionMatchesReferenceAcrossLargeMixedHistoryAndTimestampTies() {
+        let templates = (0..<31).map { _ in UUID() }
+        let sessions = (0..<2_000).map { index in
+            session(
+                id: UUID(),
+                templateID: index.isMultiple(of: 7) ? nil : templates[index % templates.count],
+                name: "Workout",
+                completedAt: Double(2_000 - index / 3)
+            )
+        }
+        for offset in stride(from: 0, to: sessions.count - 2, by: 37) {
+            let remaining = Array(sessions.dropFirst(offset))
+            let expected = remaining.lazy.compactMap { current -> (UUID, UUID)? in
+                guard let templateID = current.templateID,
+                      let previous = remaining.first(where: {
+                          $0.id != current.id && $0.templateID == templateID
+                              && $0.completedAt < current.completedAt
+                      }) else { return nil }
+                return (previous.id, current.id)
+            }.first
+            let actual = WorkoutProgressSnapshotBuilder.selection(
+                from: remaining, selectedPreviousSessionID: nil, selectedCurrentSessionID: nil
+            )
+            XCTAssertEqual(actual?.previous.id, expected?.0)
+            XCTAssertEqual(actual?.current.id, expected?.1)
+        }
+    }
+
+    func testSelectionSkipsEqualDateRunsAndPrefersNewestCurrentOverNewestPrevious() {
+        let firstTemplate = UUID()
+        let secondTemplate = UUID()
+        let sessions = [
+            session(id: UUID(), templateID: firstTemplate, name: "A", completedAt: 500),
+            session(id: UUID(), templateID: firstTemplate, name: "A tied", completedAt: 500),
+            session(id: UUID(), templateID: secondTemplate, name: "B", completedAt: 400),
+            session(id: UUID(), templateID: secondTemplate, name: "B older", completedAt: 300),
+            session(id: UUID(), templateID: firstTemplate, name: "A older", completedAt: 100),
+        ]
+        let selection = WorkoutProgressSnapshotBuilder.selection(
+            from: sessions, selectedPreviousSessionID: nil, selectedCurrentSessionID: nil
+        )
+        XCTAssertEqual(selection?.current.id, sessions[0].id)
+        XCTAssertEqual(selection?.previous.id, sessions[4].id)
+    }
+
     func testDefaultSelectionUsesLatestTwoVisibleSameTemplateSessions() {
         let sharedTemplateID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let olderSameTemplate = session(

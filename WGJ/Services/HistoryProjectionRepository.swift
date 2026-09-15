@@ -139,6 +139,23 @@ nonisolated final class HistoryProjectionRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func facts(forExercises exerciseUUIDs: Set<String>) throws -> [CompletedSetFact] {
+        guard !exerciseUUIDs.isEmpty else { return [] }
+        let requested = Array(exerciseUUIDs)
+        let descriptor = FetchDescriptor<CompletedSetFact>(
+            predicate: #Predicate { fact in
+                requested.contains(fact.catalogExerciseUUID)
+            },
+            sortBy: [
+                SortDescriptor(\CompletedSetFact.completedAt, order: .reverse),
+                SortDescriptor(\CompletedSetFact.catalogExerciseUUID, order: .forward),
+                SortDescriptor(\CompletedSetFact.sessionID, order: .forward),
+                SortDescriptor(\CompletedSetFact.setIndex, order: .forward),
+            ]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
     private func apply(
         drafts: [CompletedSetFactDraft],
         to existingFacts: [CompletedSetFact],
