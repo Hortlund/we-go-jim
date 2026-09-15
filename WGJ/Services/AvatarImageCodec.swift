@@ -75,39 +75,48 @@ final class AvatarThumbnailCacheService {
 enum AvatarImageCodec {
     nonisolated private static let fullImageFallbackLimitBytes = 1 * 1024 * 1024
 
+    /// Keep image decoding and encoding on the concurrent executor, while
+    /// preserving the caller's cancellation and task-local values.
+    @concurrent
     static func thumbnail(from data: Data, maxPixelSize: CGFloat) async -> UIImage? {
-        await Task.detached(priority: .utility) {
-            let options = [kCGImageSourceShouldCache: false] as CFDictionary
-            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return fallbackImage(from: data)
-            }
-
-            let thumbnailOptions = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: false,
-            ] as CFDictionary
-
-            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
-                return UIImage(cgImage: cgImage)
-            }
-
-            return fallbackImage(from: data)
-        }
-        .value
+        guard !Task.isCancelled else { return nil }
+        return makeThumbnail(from: data, maxPixelSize: maxPixelSize)
     }
 
+    @concurrent
     static func compressedAvatarData(
         from data: Data,
         maxPixelSize: CGFloat,
         compressionQuality: CGFloat = 0.82
     ) async -> Data? {
-        guard let thumbnail = await thumbnail(from: data, maxPixelSize: maxPixelSize) else {
-            return data
+        guard !Task.isCancelled else { return nil }
+        guard let thumbnail = makeThumbnail(from: data, maxPixelSize: maxPixelSize) else {
+            return nil
         }
+        guard !Task.isCancelled else { return nil }
+        let quality = compressionQuality.isFinite ? min(max(compressionQuality, 0), 1) : 0.82
+        let encoded = thumbnail.jpegData(compressionQuality: quality)
+        return Task.isCancelled ? nil : encoded
+    }
 
-        return thumbnail.jpegData(compressionQuality: compressionQuality) ?? data
+    nonisolated private static func makeThumbnail(from data: Data, maxPixelSize: CGFloat) -> UIImage? {
+        guard maxPixelSize.isFinite, maxPixelSize >= 1, maxPixelSize <= CGFloat(Int32.max) else {
+            return nil
+        }
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+            return fallbackImage(from: data)
+        }
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+        if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
+            return UIImage(cgImage: cgImage)
+        }
+        return fallbackImage(from: data)
     }
 
     nonisolated private static func fallbackImage(from data: Data) -> UIImage? {

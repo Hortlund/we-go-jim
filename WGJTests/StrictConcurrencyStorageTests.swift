@@ -89,6 +89,25 @@ final class StrictConcurrencyStorageTests: XCTestCase {
         XCTAssertEqual(cache.currentRevision(for: container), 100)
     }
 
+    func testClearingHistoryCacheRejectsSnapshotBuiltBeforeClear() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: "HistoryCacheClear")
+        let cache = HistoryAnalyticsCache()
+        func snapshot(count: Int) -> MetricsSnapshotCache {
+            MetricsSnapshotCache(
+                completedSessionCount: count, bestPRByExercise: [:], bestBodyweightByExercise: [:],
+                countsByWeek: [:], countsByDay: [:], muscleScoresByWeek: [:],
+                exerciseFrequencyByUUID: [:], exerciseHistoryByUUID: [:],
+                totalDurationSeconds: 0, totalPRHits: 0, firstWorkoutDate: nil
+            )
+        }
+        _ = try cache.cachedMetricsSnapshot(for: container) {
+            cache.clear()
+            return snapshot(count: 99)
+        }
+        let current = try cache.cachedMetricsSnapshot(for: container) { snapshot(count: 0) }
+        XCTAssertEqual(current.completedSessionCount, 0)
+    }
+
     func testHistoryProjectionRetriesUseBoundedBackoff() {
         XCTAssertEqual(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 1), 1)
         XCTAssertEqual(HistoryProjectionRetryPolicy.delay(forRetryAttempt: 2), 4)

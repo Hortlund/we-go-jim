@@ -530,10 +530,6 @@ nonisolated final class TemplateTransferService {
             )
         )
 
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.removeItem(at: fileURL)
-        }
-
         try data.write(to: fileURL, options: .atomic)
         return fileURL
     }
@@ -946,6 +942,9 @@ nonisolated final class TemplateTransferService {
     private func exportDirectoryURL() throws -> URL {
         let directoryURL = fileManager.temporaryDirectory
             .appendingPathComponent("WGJTemplateExports", isDirectory: true)
+            // A presented share sheet owns its export even if another export
+            // uses the same template name before the first activity finishes.
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(
             at: directoryURL,
             withIntermediateDirectories: true,

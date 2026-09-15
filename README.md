@@ -12,7 +12,7 @@
 
 WGJ is local-first. Templates, active workout progress, completed workouts, profile data, and history are stored on-device with SwiftData. A private CloudKit record provides best-effort backup and restore at explicit save boundaries; it is not used as a live SwiftData sync layer and does not sit in the workout interaction path.
 
-The current deployment target is **iOS/iPadOS 18.0 or later**.
+The current deployment target is **iOS/iPadOS 18.0 or later**, built with the iOS 27 SDK.
 
 <p align="center">
   <img src="AppStoreScreenshots/03-start-workout.png" alt="Start Workout screen" width="30%">
@@ -93,7 +93,8 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 
 ## Requirements
 
-- Xcode 26 is recommended for the current project and optional Foundation Models support.
+- Xcode 27 with the Swift 6.4 compiler is the validated development toolchain.
+- Swift language mode remains `6.0` (Swift 6); the compiler version is selected by Xcode, not by setting `SWIFT_VERSION` to `6.4`.
 - The app deployment target is iOS/iPadOS 18.0.
 - Swift Package Manager access is required once to resolve [MuscleMap](https://github.com/melihcolpan/MuscleMap), currently pinned through `Package.resolved`.
 - A personal Apple development team is required for device builds and for CloudKit, app-group, notification, and widget capabilities in a fork.
@@ -158,7 +159,7 @@ xcodebuild test \
   -project WGJ.xcodeproj \
   -scheme "WGJ Dev" \
   -testPlan Unit \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=latest' \
   -parallel-testing-enabled NO
 ```
 
@@ -171,6 +172,8 @@ Test helpers:
 - Use `AppSchema.makeInMemoryContainer(name:)` for the full, local-only schema. Keep intentionally narrow schemas in tests that verify a specific store boundary.
 - Use `assertEventually` from `WGJTests/TestSupport` for asynchronous observable-state assertions. It yields the main actor and reports failures at the calling test's location.
 - Existing workout fixture launch arguments in `WGJApp` support deterministic UI tests without touching the user's store.
+
+Tests use the scheme’s **Debug** configuration. Do not override it with **Dev Preview**: that optimized run configuration intentionally omits `ENABLE_TESTABILITY`.
 
 For a compile-only simulator check:
 

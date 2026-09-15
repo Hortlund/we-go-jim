@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import OSLog
 import SwiftData
 
@@ -162,7 +163,7 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
 
 }
 
-nonisolated final class HistoryAnalyticsCache: @unchecked Sendable {
+nonisolated final class HistoryAnalyticsCache: Sendable {
     static let shared = HistoryAnalyticsCache()
 
     private struct Entry {
@@ -170,59 +171,52 @@ nonisolated final class HistoryAnalyticsCache: @unchecked Sendable {
         let snapshot: MetricsSnapshotCache
     }
 
-    private let lock = NSLock()
-    private var revisionByContainerID: [ObjectIdentifier: Int] = [:]
-    private var metricsSnapshotsByContainerID: [ObjectIdentifier: Entry] = [:]
+    private struct State {
+        var generation: UInt64 = 0
+        var revisions: [ObjectIdentifier: Int] = [:]
+        var snapshots: [ObjectIdentifier: Entry] = [:]
+    }
+
+    private let state = Mutex(State())
 
     func invalidate(container: ModelContainer) {
-        let containerID = ObjectIdentifier(container)
-        lock.lock()
-        defer { lock.unlock() }
-
-        revisionByContainerID[containerID, default: 0] += 1
-        metricsSnapshotsByContainerID.removeValue(forKey: containerID)
+        let id = ObjectIdentifier(container)
+        state.withLock {
+            $0.revisions[id, default: 0] += 1
+            $0.snapshots.removeValue(forKey: id)
+        }
     }
 
     func clear() {
-        lock.lock()
-        metricsSnapshotsByContainerID.removeAll()
-        revisionByContainerID.removeAll()
-        lock.unlock()
+        state.withLock {
+            $0.generation &+= 1
+            $0.snapshots.removeAll()
+            $0.revisions.removeAll()
+        }
     }
 
     func currentRevision(for container: ModelContainer) -> Int {
-        let containerID = ObjectIdentifier(container)
-        lock.lock()
-        defer { lock.unlock() }
-        return revisionByContainerID[containerID, default: 0]
+        state.withLock { $0.revisions[ObjectIdentifier(container), default: 0] }
     }
 
     func cachedMetricsSnapshot(
         for container: ModelContainer,
         build: () throws -> MetricsSnapshotCache
     ) throws -> MetricsSnapshotCache {
-        let containerID = ObjectIdentifier(container)
-
-        lock.lock()
-        let revision = revisionByContainerID[containerID, default: 0]
-        if let entry = metricsSnapshotsByContainerID[containerID],
-           entry.revision == revision
-        {
-            lock.unlock()
-            return entry.snapshot
+        let id = ObjectIdentifier(container)
+        let (generation, revision, cached) = state.withLock { state in
+            let revision = state.revisions[id, default: 0]
+            let entry = state.snapshots[id]
+            return (state.generation, revision, entry?.revision == revision ? entry?.snapshot : nil)
         }
-        lock.unlock()
+        if let cached { return cached }
 
+        // Building can query SwiftData; never run it while holding the cache lock.
         let snapshot = try build()
-
-        lock.lock()
-        defer { lock.unlock() }
-        let latestRevision = revisionByContainerID[containerID, default: 0]
-        if latestRevision == revision {
-            metricsSnapshotsByContainerID[containerID] = Entry(
-                revision: revision,
-                snapshot: snapshot
-            )
+        state.withLock { state in
+            guard state.generation == generation,
+                  state.revisions[id, default: 0] == revision else { return }
+            state.snapshots[id] = Entry(revision: revision, snapshot: snapshot)
         }
         return snapshot
     }

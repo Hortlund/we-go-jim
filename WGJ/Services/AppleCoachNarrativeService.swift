@@ -24,7 +24,6 @@ actor AppleCoachNarrativeService {
     private let followUpGenerator: FollowUpGenerator
     private struct SharedResolution: Sendable {
         let summary: CoachNarrativeSummary
-        let shouldPersist: Bool
     }
 
     private final class SharedResolutionAwaitState: @unchecked Sendable {
@@ -108,8 +107,13 @@ actor AppleCoachNarrativeService {
         }
     }
 
-    private var inFlightRequests: [String: Task<SharedResolution, Error>] = [:]
-    private var inFlightWaiters: [String: Set<UUID>] = [:]
+    private struct SharedRequest {
+        let id: UUID
+        let task: Task<SharedResolution, Error>
+    }
+
+    private var inFlightRequests: [String: SharedRequest] = [:]
+    private var inFlightWaiters: [UUID: Set<UUID>] = [:]
 
     init(
         cache: any CoachNarrativeCaching,
@@ -127,39 +131,17 @@ actor AppleCoachNarrativeService {
         try await resolveRecap(for: snapshot, forceRefresh: false)
     }
 
-    func recapForDisplay(
-        for snapshot: WeeklyCoachInsightSnapshot,
-        now: Date = .now,
-        maxAge: TimeInterval = AppleCoachNarrativeService.recapRefreshMaxAge
-    ) async throws -> CoachNarrativeSummary {
-        let cached = try await cache.recap(
+    /// Display is a local cache read. The caller owns any subsequent generation
+    /// so leaving the screen or backgrounding the app can cancel that work.
+    func recapForDisplay(for snapshot: WeeklyCoachInsightSnapshot) async throws -> CoachNarrativeSummary {
+        try Task.checkCancellation()
+        if let cached = try await cache.recap(
             weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
-        )
-        let shouldRefresh = try await cache.needsRecapRefresh(
-            weekStart: snapshot.weekStart,
-            revisionKey: snapshot.revisionKey,
-            now: now,
-            maxAge: maxAge
-        )
-
-        if shouldRefresh, let cached {
-            scheduleRecapRefresh(for: snapshot)
+        ) {
             return cached
         }
-
-        if shouldRefresh {
-            let fallbackSummary = fallbackRecap(for: snapshot)
-            try await cache.saveRecap(
-                fallbackSummary,
-                weekStart: snapshot.weekStart,
-                revisionKey: snapshot.revisionKey
-            )
-            scheduleRecapRefresh(for: snapshot)
-            return fallbackSummary
-        }
-
-        return try await resolveRecap(for: snapshot, forceRefresh: shouldRefresh)
+        return fallbackRecap(for: snapshot)
     }
 
     func refreshRecapIfNeeded(
@@ -174,19 +156,6 @@ actor AppleCoachNarrativeService {
             maxAge: maxAge
         )
         return try await resolveRecap(for: snapshot, forceRefresh: shouldRefresh)
-    }
-
-    private func scheduleRecapRefresh(for snapshot: WeeklyCoachInsightSnapshot) {
-        let cacheKey = CachedCoachNarrative.makeCacheKey(
-            weekStart: snapshot.weekStart,
-            revisionKey: snapshot.revisionKey
-        )
-        guard inFlightRequests[cacheKey] == nil else { return }
-
-        Task { [weak self] in
-            guard let self else { return }
-            _ = try? await self.resolveRecap(for: snapshot, forceRefresh: true)
-        }
     }
 
     private func resolveRecap(
@@ -273,15 +242,11 @@ actor AppleCoachNarrativeService {
     }
 
     private func awaitResolvedSummary(
-        from task: Task<SharedResolution, Error>,
-        cacheKey: String,
-        persist: @escaping @Sendable (CoachNarrativeSummary) async throws -> Void
+        from request: SharedRequest,
+        cacheKey: String
     ) async throws -> CoachNarrativeSummary {
-        let resolution = try await awaitSharedTask(task, cacheKey: cacheKey)
+        let resolution = try await awaitSharedTask(request, cacheKey: cacheKey)
         try Task.checkCancellation()
-        if resolution.shouldPersist {
-            try await persist(resolution.summary)
-        }
         return resolution.summary
     }
 
@@ -295,8 +260,7 @@ actor AppleCoachNarrativeService {
         if let task = inFlightRequests[cacheKey] {
             return try await awaitResolvedSummary(
                 from: task,
-                cacheKey: cacheKey,
-                persist: persist
+                cacheKey: cacheKey
             )
         }
 
@@ -310,58 +274,63 @@ actor AppleCoachNarrativeService {
             return fallbackSummary
         }
 
+        let requestID = UUID()
         let task = Task<SharedResolution, Error> {
             defer {
-                inFlightRequests[cacheKey] = nil
-                inFlightWaiters[cacheKey] = nil
+                if inFlightRequests[cacheKey]?.id == requestID {
+                    inFlightRequests[cacheKey] = nil
+                }
+                inFlightWaiters[requestID] = nil
             }
 
             do {
                 if let generated = try await generate() {
-                    try await ensureSharedRequestStillObserved(cacheKey: cacheKey)
-                    return SharedResolution(summary: generated, shouldPersist: true)
+                    try await ensureSharedRequestStillObserved(requestID: requestID)
+                    try await persist(generated)
+                    return SharedResolution(summary: generated)
                 }
             } catch let cancellation as CancellationError {
                 throw cancellation
             }
 
-            try await ensureSharedRequestStillObserved(cacheKey: cacheKey)
+            try await ensureSharedRequestStillObserved(requestID: requestID)
 
             if let cachedFallback {
-                return SharedResolution(summary: cachedFallback, shouldPersist: false)
+                return SharedResolution(summary: cachedFallback)
             }
 
             let fallbackSummary = fallback()
-            return SharedResolution(summary: fallbackSummary, shouldPersist: true)
+            try await persist(fallbackSummary)
+            return SharedResolution(summary: fallbackSummary)
         }
-        inFlightRequests[cacheKey] = task
+        let request = SharedRequest(id: requestID, task: task)
+        inFlightRequests[cacheKey] = request
         return try await awaitResolvedSummary(
-            from: task,
-            cacheKey: cacheKey,
-            persist: persist
+            from: request,
+            cacheKey: cacheKey
         )
     }
 
-    private func ensureSharedRequestStillObserved(cacheKey: String) async throws {
+    private func ensureSharedRequestStillObserved(requestID: UUID) async throws {
         try Task.checkCancellation()
         await Task.yield()
         try Task.checkCancellation()
 
-        guard inFlightWaiters[cacheKey]?.isEmpty == false else {
+        guard inFlightWaiters[requestID]?.isEmpty == false else {
             throw CancellationError()
         }
     }
 
     private func awaitSharedTask(
-        _ task: Task<SharedResolution, Error>,
+        _ request: SharedRequest,
         cacheKey: String
     ) async throws -> SharedResolution {
         let waiterID = UUID()
-        inFlightWaiters[cacheKey, default: []].insert(waiterID)
+        inFlightWaiters[request.id, default: []].insert(waiterID)
         let awaitState = SharedResolutionAwaitState()
         let valueTask = Task {
             do {
-                awaitState.resume(returning: try await task.value)
+                awaitState.resume(returning: try await request.task.value)
             } catch {
                 awaitState.resume(throwing: error)
             }
@@ -373,6 +342,7 @@ actor AppleCoachNarrativeService {
                 releaseWaiter(
                     waiterID,
                     for: cacheKey,
+                    requestID: request.id,
                     cancelTaskIfUnobserved: awaitState.wasCancelled
                 )
             }
@@ -387,22 +357,25 @@ actor AppleCoachNarrativeService {
     private func releaseWaiter(
         _ waiterID: UUID,
         for cacheKey: String,
+        requestID: UUID,
         cancelTaskIfUnobserved: Bool
     ) {
-        guard var waiters = inFlightWaiters[cacheKey] else {
+        guard var waiters = inFlightWaiters[requestID] else {
             return
         }
 
         let removed = waiters.remove(waiterID) != nil
         if waiters.isEmpty {
-            inFlightWaiters[cacheKey] = nil
-            if removed, cancelTaskIfUnobserved {
-                inFlightRequests[cacheKey]?.cancel()
+            inFlightWaiters[requestID] = nil
+            if removed, cancelTaskIfUnobserved,
+               let request = inFlightRequests[cacheKey], request.id == requestID {
+                inFlightRequests[cacheKey] = nil
+                request.task.cancel()
             }
             return
         }
 
-        inFlightWaiters[cacheKey] = waiters
+        inFlightWaiters[requestID] = waiters
     }
 
     private static nonisolated func generatedSummary<Input>(
@@ -662,7 +635,8 @@ actor AppleCoachNarrativeService {
                 return nil
             }
 
-            let session = LanguageModelSession(instructions: instructions)
+            try Task.checkCancellation()
+            let session = LanguageModelSession(model: SystemLanguageModel.default, instructions: instructions)
             let response = try await session.respond(
                 to: trimmedPrompt,
                 generating: GeneratedCoachNarrative.self

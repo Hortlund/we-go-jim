@@ -2,6 +2,33 @@ import XCTest
 
 final class DeepLinkAccessibilityUITests: XCTestCase {
     @MainActor
+    func testAllRootTabsRemainSelectableAfterRepeatedNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_SKIP_SPLASH", "UITEST_IN_MEMORY_STORE", "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]
+        app.launch()
+        let continueLocally = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(continueLocally.waitForExistence(timeout: 8))
+        continueLocally.tap()
+
+        let destinations: [(String, XCUIElement)] = [
+            ("Profile", app.buttons["profile-manage-button"]),
+            ("History", app.buttons["history-calendar-button"]),
+            ("Progress", app.staticTexts["Log two workouts to compare progress"].firstMatch),
+            ("Exercises", app.textFields["exercises-search-field"]),
+            ("Start Workout", app.buttons["start-workout-empty-button"]),
+        ]
+        for _ in 0..<2 {
+            for (title, content) in destinations {
+                let tab = app.buttons[title].firstMatch
+                XCTAssertTrue(tab.waitForExistence(timeout: 5), title)
+                tab.tap()
+                XCTAssertTrue(content.waitForExistence(timeout: 8), "Missing content for \(title)")
+                XCTAssertEqual(app.state, .runningForeground)
+            }
+        }
+    }
+
+    @MainActor
     func testColdWeeklyGoalLinkRoutesToExactSectionOnce() {
         let app = XCUIApplication()
         app.launchArguments = [

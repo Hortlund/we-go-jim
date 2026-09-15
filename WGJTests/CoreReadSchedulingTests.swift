@@ -69,6 +69,36 @@ final class CoreReadSchedulingTests: XCTestCase {
         XCTAssertNotEqual(state, pending, "A later mutation must refresh even during an earlier read")
     }
 
+    func testOldJobCompletionCannotRemoveReplacement() async throws {
+        let store = AppBackgroundStore(container: try makeContainer())
+        let key = AppBackgroundJobKey.feature("replacement-test")
+        let firstStarted = expectation(description: "First job started")
+        let secondStarted = expectation(description: "Replacement started")
+        let firstGate = DispatchSemaphore(value: 0)
+        let secondGate = DispatchSemaphore(value: 0)
+        defer { firstGate.signal(); secondGate.signal() }
+        let extraExecution = ReadExecutionProbe()
+
+        let first = await store.scheduleCoalesced(key: key) { _ in
+            firstStarted.fulfill()
+            _ = firstGate.wait(timeout: .now() + 10)
+        }
+        await fulfillment(of: [firstStarted], timeout: 5)
+        let replacement = await store.scheduleCoalesced(key: key, cancelExisting: true) { _ in
+            secondStarted.fulfill()
+            _ = secondGate.wait(timeout: .now() + 10)
+        }
+        await fulfillment(of: [secondStarted], timeout: 5)
+        firstGate.signal()
+        await first.value
+
+        let coalesced = await store.scheduleCoalesced(key: key) { _ in extraExecution.execute() }
+        secondGate.signal()
+        await replacement.value
+        await coalesced.value
+        XCTAssertEqual(extraExecution.count, 0, "The replacement must remain registered until it finishes")
+    }
+
     private func makeContainer() throws -> ModelContainer {
         try AppSchema.makeInMemoryContainer(name: "CoreReadSchedulingTests")
     }

@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import Synchronization
 
 nonisolated enum AccountUnavailableReason: Equatable, Sendable {
     case noAccount
@@ -76,20 +77,72 @@ nonisolated struct AccountStatusService: AccountStatusProviding, Sendable {
     }
 }
 
+/// CloudKit callbacks may outlive cancellation. A task group would wait for
+/// that callback when leaving its scope, defeating the startup timeout.
 nonisolated func accountStatusWithTimeout(
     provider: any AccountStatusProviding,
     timeout: Duration
 ) async -> AccountStatus {
-    await withTaskGroup(of: AccountStatus.self) { group in
-        group.addTask {
-            await provider.fetchAccountStatus()
+    guard timeout > .zero, !Task.isCancelled else { return .unavailable(.unknown) }
+    let race = AccountStatusRace()
+    return await withTaskCancellationHandler {
+        await withCheckedContinuation { continuation in
+            race.install(continuation)
+            let request = Task {
+                guard !Task.isCancelled else { return }
+                race.finish(await provider.fetchAccountStatus())
+            }
+            let deadline = Task {
+                do {
+                    try await Task.sleep(for: timeout)
+                    race.finish(.unavailable(.unknown))
+                } catch { }
+            }
+            race.track([request, deadline])
         }
-        group.addTask {
-            try? await Task.sleep(for: timeout)
-            return .unavailable(.unknown)
+    } onCancel: {
+        race.finish(.unavailable(.unknown))
+    }
+}
+
+private nonisolated final class AccountStatusRace: Sendable {
+    private struct State {
+        var result: AccountStatus?
+        var continuation: CheckedContinuation<AccountStatus, Never>?
+        var tasks: [Task<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    func install(_ continuation: CheckedContinuation<AccountStatus, Never>) {
+        let result = state.withLock { state -> AccountStatus? in
+            if let result = state.result { return result }
+            state.continuation = continuation
+            return nil as AccountStatus?
         }
-        let result = await group.next() ?? .unavailable(.unknown)
-        group.cancelAll()
-        return result
+        if let result { continuation.resume(returning: result) }
+    }
+
+    func track(_ tasks: [Task<Void, Never>]) {
+        let isFinished = state.withLock { state in
+            guard state.result == nil else { return true }
+            state.tasks = tasks
+            return false
+        }
+        if isFinished { tasks.forEach { $0.cancel() } }
+    }
+
+    func finish(_ result: AccountStatus) {
+        let pending = state.withLock { state -> (CheckedContinuation<AccountStatus, Never>?, [Task<Void, Never>]) in
+            guard state.result == nil else { return (nil, []) }
+            state.result = result
+            let pending = (state.continuation, state.tasks)
+            state.continuation = nil
+            state.tasks = []
+            return pending
+        }
+        // Resume and cancel outside the lock: cancellation handlers can reenter.
+        pending.0?.resume(returning: result)
+        pending.1.forEach { $0.cancel() }
     }
 }

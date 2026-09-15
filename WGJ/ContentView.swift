@@ -29,6 +29,7 @@ struct ContentView: View {
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
     @State private var isPerformingDeferredMaintenance = false
     @State private var startupCloudBackupStatusCheckTask: Task<Void, Never>?
+    @State private var coachWarmupTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
@@ -85,6 +86,9 @@ struct ContentView: View {
             } else {
                 resetResumeCriticalMaintenanceCycle()
             }
+            if newPhase == .background {
+                coachWarmupTask?.cancel()
+            }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
@@ -121,6 +125,7 @@ struct ContentView: View {
             updateIdleTimerState()
         }
         .onDisappear {
+            coachWarmupTask?.cancel()
             workoutIdleTimerController.reset()
         }
         .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged).receive(on: RunLoop.main)) { _ in
@@ -727,17 +732,18 @@ struct ContentView: View {
     }
 
     private func scheduleCoachWarmupIfNeeded() {
+        guard scenePhase == .active, coachWarmupTask == nil else { return }
         let backgroundStore = rootBackgroundStore
-        Task {
-            let snapshot = try? await backgroundStore.perform(
+        coachWarmupTask = Task {
+            defer { coachWarmupTask = nil }
+            let snapshot = try? await backgroundStore.performRead(
                 "profile.coach.warmup.snapshot"
             ) { backgroundContext in
                 try Self.coachWarmupSnapshot(modelContext: backgroundContext)
             }
-            guard let snapshot else { return }
-            let cache = await backgroundStore.narrativeCache()
-            _ = try? await AppleCoachNarrativeService(cache: cache)
-                .refreshRecapIfNeeded(for: snapshot)
+            guard let snapshot, !Task.isCancelled, scenePhase == .active else { return }
+            let service = await backgroundStore.narrativeService()
+            _ = try? await service.refreshRecapIfNeeded(for: snapshot)
         }
     }
 

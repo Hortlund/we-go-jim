@@ -11,6 +11,15 @@ final class AvatarSelectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.imageData, initial)
     }
 
+    func testFailedTransformPreservesCurrentAvatarAndReportsError() async {
+        let initial = Data("initial".utf8)
+        let coordinator = AvatarSelectionCoordinator(imageData: initial, transform: { _ in nil })
+        coordinator.select { Data("invalid photo".utf8) }
+        await assertEventually { !coordinator.isLoading }
+        XCTAssertEqual(coordinator.imageData, initial)
+        XCTAssertNotNil(coordinator.errorDescription)
+    }
+
     func testCanceledPhotoProviderClearsLoadingAndAllowsRetry() async {
         let initial = Data("initial".utf8)
         let coordinator = AvatarSelectionCoordinator(imageData: initial, transform: { $0 })

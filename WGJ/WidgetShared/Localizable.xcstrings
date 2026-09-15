@@ -1713,6 +1713,9 @@
     "This permanently removes the workout from history." : {
 
     },
+    "This photo could not be processed. Please choose another image." : {
+      "comment" : "Shown when a selected profile photo cannot be decoded or compressed."
+    },
     "This removes %@ from your exercises. Built-in exercises cannot be deleted." : {
 
     },

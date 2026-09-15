@@ -1,36 +1,29 @@
 import Foundation
 import ImageIO
+import Synchronization
 import UIKit
 
-/// Swift does not model `NSCache` as Sendable. All access is serialized by
-/// this lock-backed wrapper; cached images are treated as immutable values.
-nonisolated final class ExerciseImageMemoryCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private let cache: NSCache<NSString, UIImage>
+/// Mutex owns the non-Sendable cache and checks that it cannot escape the lock.
+nonisolated final class ExerciseImageMemoryCache: Sendable {
+    private let cache: Mutex<NSCache<NSString, UIImage>>
 
     init(countLimit: Int = 48, totalCostLimit: Int = 12 * 1024 * 1024) {
-        let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = countLimit
-        cache.totalCostLimit = totalCostLimit
-        self.cache = cache
+        let storage = NSCache<NSString, UIImage>()
+        storage.countLimit = countLimit
+        storage.totalCostLimit = totalCostLimit
+        cache = Mutex(storage)
     }
 
     func image(for key: String) -> UIImage? {
-        lock.lock()
-        defer { lock.unlock() }
-        return cache.object(forKey: key as NSString)
+        cache.withLock { $0.object(forKey: key as NSString) }
     }
 
     func insert(_ image: UIImage, for key: String, cost: Int) {
-        lock.lock()
-        cache.setObject(image, forKey: key as NSString, cost: cost)
-        lock.unlock()
+        cache.withLock { $0.setObject(image, forKey: key as NSString, cost: cost) }
     }
 
     func removeAll() {
-        lock.lock()
-        cache.removeAllObjects()
-        lock.unlock()
+        cache.withLock { $0.removeAllObjects() }
     }
 }
 
@@ -122,7 +115,7 @@ nonisolated final class ExerciseImageCacheService {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceShouldCacheImmediately: true,
         ] as CFDictionary
 
         if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {

@@ -61,6 +61,7 @@ struct ProfileView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
@@ -174,6 +175,14 @@ struct ProfileView: View {
         }
         .task(id: appWarmupState.profileInvalidationVersion) {
             await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                cancelCoachBriefLoad()
+                cancelCoachFollowUpLoads()
+            } else if phase == .active, isTabActive, shouldRenderDashboardContent {
+                scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
+            }
         }
         .onDisappear {
             cancelDashboardRender(isTabExit: true)
@@ -1294,7 +1303,7 @@ struct ProfileView: View {
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelCoachBriefLoad()
-        guard shouldRenderDashboardContent else {
+        guard isTabActive, scenePhase == .active, shouldRenderDashboardContent else {
             coachBriefLoadState = .idle
             return
         }
@@ -1319,6 +1328,20 @@ struct ProfileView: View {
                     dashboardContent.coachBrief = coachBrief
                     coachBriefLoadState = coachBrief == nil ? .failed : .idle
                     persistWarmProfileSnapshotIfNeeded()
+                }
+                if let coachBrief {
+                    let refreshed = try await controller.refreshCoachBriefPresentation(
+                        coachBrief, backgroundStore: backgroundStore
+                    )
+                    try Task.checkCancellation()
+                    await MainActor.run {
+                        guard coachBriefLoadToken == token else { return }
+                        dashboardContent.coachBrief = refreshed
+                        persistWarmProfileSnapshotIfNeeded()
+                    }
+                }
+                await MainActor.run {
+                    guard coachBriefLoadToken == token else { return }
                     coachBriefLoadTask = nil
                     coachBriefLoadToken = nil
                 }
@@ -1331,8 +1354,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     guard coachBriefLoadToken == token else { return }
-                    dashboardContent.coachBrief = nil
-                    coachBriefLoadState = .failed
+                    coachBriefLoadState = dashboardContent.coachBrief == nil ? .failed : .idle
                     coachBriefLoadTask = nil
                     coachBriefLoadToken = nil
                 }
@@ -1344,9 +1366,11 @@ struct ProfileView: View {
         coachBriefLoadTask?.cancel()
         coachBriefLoadTask = nil
         coachBriefLoadToken = nil
+        coachBriefLoadState = .idle
     }
 
     private func loadCoachFollowUp(_ kind: CoachFollowUpKind) {
+        guard isTabActive, scenePhase == .active else { return }
         guard let coachBrief = dashboardContent.coachBrief else { return }
         guard coachFollowUpSummaries[kind] == nil else { return }
         guard !loadingCoachFollowUps.contains(kind) else { return }
@@ -1634,227 +1658,6 @@ struct ProfileView: View {
         showingError = true
     }
 
-}
-
-@MainActor
-@Observable
-final class ProfileViewController {
-    nonisolated private struct TrendSeriesLoadResult: Sendable {
-        let trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
-        let cache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries]
-    }
-
-    private var trendSeriesCache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries] = [:]
-    private var trendSeriesCacheOwner: UUID?
-
-    func invalidateTrendSeriesCache() {
-        trendSeriesCache.removeAll()
-        trendSeriesCacheOwner = nil
-    }
-
-    func setTrendSeriesCacheOwner(_ owner: UUID?) {
-        trendSeriesCacheOwner = owner
-    }
-
-    func loadPublishedProfileIdentity(
-        cloudSyncEnabled: Bool,
-        backgroundStore: AppBackgroundStore
-    ) async throws -> ProfileIdentitySnapshot {
-        let preferredDisplayName = cloudSyncEnabled
-            ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
-            : nil
-        return try await backgroundStore.perform("profile.identity") { backgroundContext in
-            try ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                preferredDisplayName: preferredDisplayName
-            )
-        }
-    }
-
-    func loadDashboardContent(
-        profile: ProfileIdentitySnapshot,
-        backgroundStore: AppBackgroundStore
-    ) async throws -> ProfileDashboardContent {
-        let enabled = try await backgroundStore.perform("profile.widgets.prepare") { context in
-            try ProfileWidgetRepository(modelContext: context).enabledConfigurationSnapshots()
-        }
-        return try await backgroundStore.performRead("profile.dashboard") { backgroundContext in
-            let metricsService = WorkoutMetricsService(
-                modelContext: backgroundContext,
-                calendar: WeeklyGoalWeekPolicy.calendar()
-            )
-            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
-            var nextContent = ProfileDashboardContent.make(
-                enabledWidgets: enabled,
-                dashboard: dashboard,
-                trendSeriesByWidgetID: [:]
-            )
-            nextContent.weeklyGoal = profile.weeklyWorkoutGoal
-            return nextContent
-        }
-    }
-
-    func loadTrendSeries(
-        enabledWidgets: [ProfileWidgetConfigSnapshot],
-        cacheOwner: UUID,
-        backgroundStore: AppBackgroundStore
-    ) async throws -> [UUID: ExerciseMetricSeries] {
-        let cachedSeries = trendSeriesCache
-        let result = try await backgroundStore.performRead("profile.trends") { backgroundContext in
-            let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
-            var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
-            var nextCache = cachedSeries
-            var currentCacheKeys: Set<ProfileDashboardTrendSeriesCacheKey> = []
-
-            for config in enabledWidgets {
-                guard config.kind.isExerciseTrend else { continue }
-                guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-                let cacheKey = ProfileDashboardTrendSeriesCacheKey(
-                    metric: config.exerciseTrendMetric,
-                    catalogExerciseUUID: selectedExerciseUUID
-                )
-                currentCacheKeys.insert(cacheKey)
-
-                if let cachedSeries = nextCache[cacheKey] {
-                    trendSeriesByWidgetID[config.id] = cachedSeries.withPreferredName(
-                        config.selectedExerciseNameSnapshot
-                    )
-                    continue
-                }
-
-                let series = try metricsService.exerciseMetricTrend(
-                    for: selectedExerciseUUID,
-                    metric: config.exerciseTrendMetric,
-                    preferredExerciseName: config.selectedExerciseNameSnapshot,
-                    limit: 8
-                )
-
-                nextCache[cacheKey] = series
-                trendSeriesByWidgetID[config.id] = series
-            }
-
-            nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
-
-            return TrendSeriesLoadResult(
-                trendSeriesByWidgetID: trendSeriesByWidgetID,
-                cache: nextCache
-            )
-        }
-        if trendSeriesCacheOwner == cacheOwner {
-            trendSeriesCache = result.cache
-        }
-        return result.trendSeriesByWidgetID
-    }
-
-    func loadCoachBriefPresentation(
-        enabledWidgets: [ProfileWidgetConfigSnapshot],
-        backgroundStore: AppBackgroundStore
-    ) async throws -> ProfileCoachPresentation? {
-        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
-            return nil
-        }
-
-        let snapshot = try await backgroundStore.performRead("profile.coach.presentation.snapshot") {
-            backgroundContext in
-            try WGJPerformance.measure("profile.coach.snapshot") {
-                try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
-            }
-        }
-        let cache = await backgroundStore.narrativeCache()
-        let recap = try await AppleCoachNarrativeService(cache: cache).recapForDisplay(for: snapshot)
-        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
-    }
-
-    func loadCoachFollowUpSummary(
-        kind: CoachFollowUpKind,
-        snapshot: WeeklyCoachInsightSnapshot,
-        backgroundStore: AppBackgroundStore
-    ) async throws -> CoachNarrativeSummary {
-        let cache = await backgroundStore.narrativeCache()
-        return try await AppleCoachNarrativeService(cache: cache).followUp(
-            for: kind,
-            snapshot: snapshot
-        )
-    }
-}
-
-private extension ExerciseMetricSeries {
-    nonisolated func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
-        let trimmed = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return self }
-
-        return ExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: trimmed,
-            loadUnit: loadUnit,
-            points: points
-        )
-    }
-}
-
-nonisolated private struct ProfileDashboardTrendSeriesCacheKey: Hashable, Sendable {
-    let metric: ProfileExerciseTrendMetric
-    let catalogExerciseUUID: String
-}
-
-nonisolated struct ProfileDashboardContent: Sendable {
-    var enabledWidgets: [ProfileWidgetConfigSnapshot]
-    var personalRecords: [WorkoutPRRecord]
-    var weeklyProgress: [WeeklyWorkoutProgressPoint]
-    var weeklyMuscleHeatmap: ProfileWeeklyMuscleHeatmapSnapshot
-    var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
-    var coachBrief: ProfileCoachPresentation?
-    var weeklyGoal: Int
-    var overviewStats: ProfileOverviewStats
-    var topExercises: [ProfileTopExerciseStat]
-    var activityDays: [ProfileActivityDay]
-    var activityDayRows: [[ProfileActivityDay]]
-    var maxActivityDayWorkoutCount: Int
-    var hasActivityDayWorkouts: Bool
-
-    static let empty = ProfileDashboardContent(
-        enabledWidgets: [],
-        personalRecords: [],
-        weeklyProgress: [],
-        weeklyMuscleHeatmap: .empty,
-        trendSeriesByWidgetID: [:],
-        coachBrief: nil,
-        weeklyGoal: 4,
-        overviewStats: .empty,
-        topExercises: [],
-        activityDays: [],
-        activityDayRows: [],
-        maxActivityDayWorkoutCount: 1,
-        hasActivityDayWorkouts: false
-    )
-
-    nonisolated static func make(
-        enabledWidgets: [ProfileWidgetConfigSnapshot],
-        dashboard: ProfileDashboardSnapshot,
-        trendSeriesByWidgetID: [UUID: ExerciseMetricSeries],
-        coachBrief: ProfileCoachPresentation? = nil
-    ) -> ProfileDashboardContent {
-        let activityDayRows = stride(from: 0, to: dashboard.activityDays.count, by: 7).map { startIndex in
-            Array(dashboard.activityDays[startIndex ..< min(startIndex + 7, dashboard.activityDays.count)])
-        }
-        let maxActivityDayWorkoutCount = max(1, dashboard.activityDays.map(\.workoutCount).max() ?? 0)
-        let hasActivityDayWorkouts = dashboard.activityDays.contains { $0.workoutCount > 0 }
-
-        return ProfileDashboardContent(
-            enabledWidgets: enabledWidgets,
-            personalRecords: Array(dashboard.personalRecords.prefix(5)),
-            weeklyProgress: dashboard.weeklyProgress,
-            weeklyMuscleHeatmap: dashboard.weeklyMuscleHeatmap,
-            trendSeriesByWidgetID: trendSeriesByWidgetID,
-            coachBrief: coachBrief,
-            weeklyGoal: max(1, dashboard.weeklyGoal),
-            overviewStats: dashboard.overviewStats,
-            topExercises: Array(dashboard.topExercises.prefix(3)),
-            activityDays: dashboard.activityDays,
-            activityDayRows: activityDayRows,
-            maxActivityDayWorkoutCount: maxActivityDayWorkoutCount,
-            hasActivityDayWorkouts: hasActivityDayWorkouts
-        )
-    }
 }
 
 private struct ProfileQuickStatTile: View {

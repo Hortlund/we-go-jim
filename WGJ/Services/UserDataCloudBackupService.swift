@@ -76,7 +76,7 @@ extension UserDataCloudBackupContentSummary {
     }
 }
 
-protocol UserDataCloudBackupStoring: Sendable {
+nonisolated protocol UserDataCloudBackupStoring: Sendable {
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws
     func deleteBackup() async throws
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord?
