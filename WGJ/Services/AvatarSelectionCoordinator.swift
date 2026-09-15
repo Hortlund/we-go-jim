@@ -48,10 +48,14 @@ final class AvatarSelectionCoordinator {
                 // A canceled/unavailable photo transfer must not remove the
                 // existing avatar. Removal is an explicit action below.
                 guard let rawData else { return }
-                let transformedData = await transform(rawData) ?? rawData
+                let transformedData = await transform(rawData)
                 guard let self,
                       self.generation == expectedGeneration,
                       !Task.isCancelled else {
+                    return
+                }
+                guard let transformedData else {
+                    self.errorDescription = String(localized: "This photo could not be processed. Please choose another image.")
                     return
                 }
                 self.imageData = transformedData

@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-struct AppBackgroundJobKey: Hashable, Sendable {
+nonisolated struct AppBackgroundJobKey: Hashable, Sendable {
     let feature: String
     let identifier: String?
 
@@ -21,16 +21,22 @@ struct AppBackgroundJobKey: Hashable, Sendable {
 
 actor AppBackgroundStore {
     private let container: ModelContainer
-    private let coachNarrativeStore: CoachNarrativeStore
-    private var runningJobs: [AppBackgroundJobKey: Task<Void, Never>] = [:]
+    private let coachNarrativeService: AppleCoachNarrativeService
+    private struct RunningJob {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
+    private var runningJobs: [AppBackgroundJobKey: RunningJob] = [:]
 
     init(container: ModelContainer) {
         self.container = container
-        self.coachNarrativeStore = CoachNarrativeStore(modelContainer: container)
+        let cache = CoachNarrativeStore(modelContainer: container)
+        self.coachNarrativeService = AppleCoachNarrativeService(cache: cache)
     }
 
-    func narrativeCache() -> CoachNarrativeStore {
-        coachNarrativeStore
+    func narrativeService() -> AppleCoachNarrativeService {
+        coachNarrativeService
     }
 
     /// Cancellable reads only. Persisting operations continue to use perform/performWrite.
@@ -80,38 +86,46 @@ actor AppBackgroundStore {
         return result
     }
 
+    @discardableResult
     func scheduleCoalesced(
         key: AppBackgroundJobKey,
         operationName: StaticString? = nil,
         priority: TaskPriority = .utility,
         cancelExisting: Bool = false,
         _ operation: @Sendable @escaping (ModelContext) -> Void
-    ) {
+    ) -> Task<Void, Never> {
         if cancelExisting {
-            runningJobs[key]?.cancel()
+            runningJobs[key]?.task.cancel()
             runningJobs[key] = nil
-        } else if runningJobs[key] != nil {
-            return
+        } else if let existing = runningJobs[key] {
+            return existing.task
         }
 
         let container = self.container
+        let jobID = UUID()
         let task = Task.detached(priority: priority) { [weak self] in
-            _ = operationName
-
-            let context = Self.makeContext(container: container)
-            operation(context)
-            await self?.finishJob(for: key)
+            // Cancellation can skip queued maintenance, but never interrupts a
+            // synchronous persistence operation once it has started.
+            if !Task.isCancelled {
+                WGJPerformance.measure(operationName ?? "store.maintenance.execute") {
+                    let context = Self.makeContext(container: container)
+                    operation(context)
+                }
+            }
+            await self?.finishJob(for: key, id: jobID)
         }
 
-        runningJobs[key] = task
+        runningJobs[key] = RunningJob(id: jobID, task: task)
+        return task
     }
 
     func cancelJob(_ key: AppBackgroundJobKey) {
-        runningJobs[key]?.cancel()
+        runningJobs[key]?.task.cancel()
         runningJobs[key] = nil
     }
 
-    private func finishJob(for key: AppBackgroundJobKey) {
+    private func finishJob(for key: AppBackgroundJobKey, id: UUID) {
+        guard runningJobs[key]?.id == id else { return }
         runningJobs[key] = nil
     }
 

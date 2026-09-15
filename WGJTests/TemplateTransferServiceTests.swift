@@ -4,6 +4,26 @@ import XCTest
 
 @MainActor
 final class TemplateTransferServiceTests: XCTestCase {
+    func testRepeatedExportsKeepEarlierSharedFileIntact() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let template = WorkoutTemplate(folderID: TemplateRepository.unfiledFolderID, name: "Same Name")
+        context.insert(template)
+        try context.save()
+        let service = TemplateTransferService(modelContext: context)
+        let firstURL = try service.writeExportFile(templateID: template.id)
+        defer { try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent()) }
+        let original = try Data(contentsOf: firstURL)
+        template.notes = "Changed after the first share sheet opened"
+        try context.save()
+        let secondURL = try service.writeExportFile(templateID: template.id)
+        defer { try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent()) }
+        XCTAssertNotEqual(firstURL, secondURL)
+        XCTAssertEqual(firstURL.lastPathComponent, secondURL.lastPathComponent)
+        XCTAssertEqual(try Data(contentsOf: firstURL), original)
+        XCTAssertNotEqual(try Data(contentsOf: secondURL), original)
+    }
+
     func testTemplateRepositoryDoesNotExposeDeprecatedPhaseAdapters() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

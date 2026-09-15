@@ -77,6 +77,7 @@ struct MainTabView: View {
                         .exercises,
                         title: "Exercises",
                         systemImage: "dumbbell.fill",
+                        role: .search,
                         activeWorkoutOverlayBottomInset: overlayBottomInset
                     ) {
                         NavigationStack {
@@ -146,18 +147,17 @@ struct MainTabView: View {
 
     private func rootTab<Content: View>(
         _ tab: AppMainTab,
-        title: String,
+        title: LocalizedStringKey,
         systemImage: String,
+        role: TabRole? = nil,
         activeWorkoutOverlayBottomInset: CGFloat,
         @ViewBuilder content: @escaping () -> Content
-    ) -> some View {
-        content()
-            .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
-            .environment(\.isTabActive, tabState.selectedTab == tab)
-            .tabItem {
-                Label(title, systemImage: systemImage)
-            }
-            .tag(tab)
+    ) -> some TabContent<AppMainTab> {
+        Tab(title, systemImage: systemImage, value: tab, role: role) {
+            content()
+                .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
+                .environment(\.isTabActive, tabState.selectedTab == tab)
+        }
     }
 
     @ViewBuilder

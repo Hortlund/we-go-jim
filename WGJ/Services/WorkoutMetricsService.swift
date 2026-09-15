@@ -1467,7 +1467,7 @@ nonisolated final class WorkoutMetricsService {
     ) throws -> [String: PriorSetMetricPeaks] {
         guard !catalogExerciseUUIDs.isEmpty else { return [:] }
 
-        let facts = try historyProjectionRepository.allFacts()
+        let facts = try historyProjectionRepository.facts(forExercises: catalogExerciseUUIDs)
         let visibleSessionIDs = try visibleCompletedSessionIDs()
         var peaksByExerciseUUID: [String: PriorSetMetricPeaks] = [:]
 
