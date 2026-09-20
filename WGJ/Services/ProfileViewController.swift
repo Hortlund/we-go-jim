@@ -5,16 +5,21 @@ import SwiftData
 @MainActor
 @Observable
 final class ProfileViewController {
+    nonisolated private enum TrendReadError: Error { case revisionChanged }
+
     nonisolated private struct TrendSeriesLoadResult: Sendable {
         let trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
-        let cache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries]
+        let cache: [ExerciseTrendRequest: ExerciseMetricSeries]
+        let revision: HistoryRevision
     }
 
-    private var trendSeriesCache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+    private var trendSeriesCache: [ExerciseTrendRequest: ExerciseMetricSeries] = [:]
     private var trendSeriesCacheOwner: UUID?
+    private var trendSeriesRevision: HistoryRevision?
 
     func invalidateTrendSeriesCache() {
         trendSeriesCache.removeAll()
+        trendSeriesRevision = nil
         trendSeriesCacheOwner = nil
     }
 
@@ -24,16 +29,16 @@ final class ProfileViewController {
 
     func loadPublishedProfileIdentity(
         cloudSyncEnabled: Bool,
-        backgroundStore: AppBackgroundStore
+        backgroundStore: AppBackgroundStore,
+        displayNameProvider: any ProfileDefaultDisplayNameProviding = ICloudProfileDefaultDisplayNameProvider()
     ) async throws -> ProfileIdentitySnapshot {
-        let preferredDisplayName = cloudSyncEnabled
-            ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
-            : nil
-        return try await backgroundStore.perform("profile.identity") { backgroundContext in
-            try ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                preferredDisplayName: preferredDisplayName
-            )
+        let profile = try await backgroundStore.perform("profile.identity") { context in
+            try ProfileRepository(modelContext: context).bootstrapProfileIdentitySnapshot(preferredDisplayName: nil)
         }
+        if cloudSyncEnabled {
+            await backgroundStore.scheduleProfileNameUpgrade(profile: profile, provider: displayNameProvider)
+        }
+        return profile
     }
 
     func loadDashboardContent(
@@ -48,7 +53,7 @@ final class ProfileViewController {
                 modelContext: backgroundContext,
                 calendar: WeeklyGoalWeekPolicy.calendar()
             )
-            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
+            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8, enabledWidgets: Set(enabled.map(\.kind)))
             var nextContent = ProfileDashboardContent.make(
                 enabledWidgets: enabled,
                 dashboard: dashboard,
@@ -65,50 +70,42 @@ final class ProfileViewController {
         backgroundStore: AppBackgroundStore
     ) async throws -> [UUID: ExerciseMetricSeries] {
         let cachedSeries = trendSeriesCache
-        let result = try await backgroundStore.performRead("profile.trends") { backgroundContext in
-            let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
-            var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
-            var nextCache = cachedSeries
-            var currentCacheKeys: Set<ProfileDashboardTrendSeriesCacheKey> = []
-
-            for config in enabledWidgets {
-                guard config.kind.isExerciseTrend else { continue }
-                guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-                let cacheKey = ProfileDashboardTrendSeriesCacheKey(
-                    metric: config.exerciseTrendMetric,
-                    catalogExerciseUUID: selectedExerciseUUID
-                )
-                currentCacheKeys.insert(cacheKey)
-
-                if let cachedSeries = nextCache[cacheKey] {
-                    trendSeriesByWidgetID[config.id] = cachedSeries.withPreferredName(
-                        config.selectedExerciseNameSnapshot
-                    )
-                    continue
+        let cachedRevision = trendSeriesRevision
+        while true {
+            let result: TrendSeriesLoadResult
+            do {
+                result = try await backgroundStore.performRead("profile.trends") { context in
+                    let revision = HistoryAnalyticsCache.shared.token(for: context.container)
+                    let requests = Set(enabledWidgets.compactMap { config -> ExerciseTrendRequest? in
+                        guard config.kind.isExerciseTrend, let exercise = config.selectedCatalogExerciseUUID else { return nil }
+                        return ExerciseTrendRequest(catalogExerciseUUID: exercise, metric: config.exerciseTrendMetric)
+                    })
+                    var cache = cachedRevision == revision ? cachedSeries.filter { requests.contains($0.key) } : [:]
+                    let missing = requests.subtracting(cache.keys)
+                    let fetched = try WorkoutMetricsService(modelContext: context).exerciseMetricTrends(requests: missing)
+                    cache.merge(fetched) { _, new in new }
+                    // A concurrent edit/restore must not publish a snapshot under the new revision.
+                    guard HistoryAnalyticsCache.shared.token(for: context.container) == revision else { throw TrendReadError.revisionChanged }
+                    var series: [UUID: ExerciseMetricSeries] = [:]
+                    for config in enabledWidgets {
+                        guard config.kind.isExerciseTrend, let exercise = config.selectedCatalogExerciseUUID else { continue }
+                        series[config.id] = cache[ExerciseTrendRequest(catalogExerciseUUID: exercise, metric: config.exerciseTrendMetric)]?
+                            .withPreferredName(config.selectedExerciseNameSnapshot)
+                    }
+                    return TrendSeriesLoadResult(trendSeriesByWidgetID: series, cache: cache, revision: revision)
                 }
-
-                let series = try metricsService.exerciseMetricTrend(
-                    for: selectedExerciseUUID,
-                    metric: config.exerciseTrendMetric,
-                    preferredExerciseName: config.selectedExerciseNameSnapshot,
-                    limit: 8
-                )
-
-                nextCache[cacheKey] = series
-                trendSeriesByWidgetID[config.id] = series
+            } catch TrendReadError.revisionChanged {
+                // Projection maintenance may finish between queries. Retry a fresh
+                // context after yielding instead of leaving a blank/stale widget.
+                try await Task.sleep(for: .milliseconds(50))
+                continue
             }
-
-            nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
-
-            return TrendSeriesLoadResult(
-                trendSeriesByWidgetID: trendSeriesByWidgetID,
-                cache: nextCache
-            )
+            if trendSeriesCacheOwner == cacheOwner {
+                trendSeriesCache = result.cache
+                trendSeriesRevision = result.revision
+            }
+            return result.trendSeriesByWidgetID
         }
-        if trendSeriesCacheOwner == cacheOwner {
-            trendSeriesCache = result.cache
-        }
-        return result.trendSeriesByWidgetID
     }
 
     func loadCoachBriefPresentation(
@@ -151,23 +148,4 @@ final class ProfileViewController {
             snapshot: snapshot
         )
     }
-}
-
-private extension ExerciseMetricSeries {
-    nonisolated func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
-        let trimmed = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return self }
-
-        return ExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: trimmed,
-            loadUnit: loadUnit,
-            points: points
-        )
-    }
-}
-
-nonisolated private struct ProfileDashboardTrendSeriesCacheKey: Hashable, Sendable {
-    let metric: ProfileExerciseTrendMetric
-    let catalogExerciseUUID: String
 }

@@ -22,6 +22,9 @@ nonisolated struct AppBackgroundJobKey: Hashable, Sendable {
 actor AppBackgroundStore {
     private let container: ModelContainer
     private let coachNarrativeService: AppleCoachNarrativeService
+    private let coachNarrativeCache: CoachNarrativeStore
+    private var profileNameTask: Task<Void, Never>?
+    private var lastProfileNameAttempt: (id: UUID, date: Date)?
     private struct RunningJob {
         let id: UUID
         let task: Task<Void, Never>
@@ -32,7 +35,41 @@ actor AppBackgroundStore {
     init(container: ModelContainer) {
         self.container = container
         let cache = CoachNarrativeStore(modelContainer: container)
+        self.coachNarrativeCache = cache
         self.coachNarrativeService = AppleCoachNarrativeService(cache: cache)
+    }
+
+    /// Optional enrichment never delays the local profile or dashboard. Coalesce
+    /// attempts across warmup/reloads, and retry unavailable names at most every 5 minutes.
+    @discardableResult
+    func scheduleProfileNameUpgrade(profile: ProfileIdentitySnapshot,
+                                    provider: any ProfileDefaultDisplayNameProviding = ICloudProfileDefaultDisplayNameProvider()) -> Task<Void, Never>? {
+        guard ProfileRepository.needsCloudDisplayName(profile.displayName) else { return nil }
+        if let profileNameTask { return profileNameTask }
+        if let last = lastProfileNameAttempt, last.id == profile.id, Date().timeIntervalSince(last.date) < 300 { return nil }
+        lastProfileNameAttempt = (profile.id, .now)
+        profileNameTask = Task {
+            defer { profileNameTask = nil }
+            let revision = await AppRuntimeState.shared.cloudBackupSessionRevision
+            guard let name = await provider.defaultDisplayName(), !Task.isCancelled else { return }
+            guard await AppRuntimeState.shared.cloudBackupSessionRevision == revision else { return }
+            do {
+                let context = makeContext()
+                let repository = ProfileRepository(modelContext: context)
+                guard let current = try repository.currentProfileSnapshot(), current.id == profile.id,
+                      ProfileRepository.needsCloudDisplayName(current.displayName) else { return }
+                let updated = try repository.bootstrapProfileIdentitySnapshot(preferredDisplayName: name)
+                if updated.displayName != current.displayName {
+                    NotificationCenter.default.post(name: .wgjProfileIdentityDidChange, object: nil)
+                }
+            } catch { /* Optional identity enrichment can retry at a later boundary. */ }
+        }
+        return profileNameTask
+    }
+
+    func pruneCoachCache() async throws {
+        // The narrative cache uses its own model actor, keeping pruning off UI reads.
+        try await coachNarrativeCache.prune()
     }
 
     func narrativeService() -> AppleCoachNarrativeService {
@@ -142,4 +179,8 @@ actor AppBackgroundStore {
 
 extension EnvironmentValues {
     @Entry var appBackgroundStore: AppBackgroundStore? = nil
+}
+
+extension Notification.Name {
+    nonisolated static let wgjProfileIdentityDidChange = Notification.Name("wgjProfileIdentityDidChange")
 }

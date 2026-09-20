@@ -1,12 +1,37 @@
 import Foundation
 import SwiftData
 
+nonisolated struct DashboardMetricsRequest: Hashable, Sendable {
+    let calendar: Calendar
+    var records = true
+    var frequency = true
+    var history = true
+    var allMuscleWeeks = true
+    var muscleWeek: Date?
+
+    static func full(calendar: Calendar = .current) -> Self { Self(calendar: calendar) }
+
+    static func profile(widgets: Set<ProfileWidgetKind>, calendar: Calendar, now: Date = .now) -> Self {
+        Self(calendar: calendar, records: widgets.contains(.prs), frequency: true, history: false,
+             allMuscleWeeks: false,
+             muscleWeek: widgets.contains(.weeklyMuscleHeatmap)
+                ? calendar.dateInterval(of: .weekOfYear, for: now)?.start : nil)
+    }
+}
+
 /// Dashboard reads session headers and one row per performed exercise, not every set.
 nonisolated struct DashboardMetricsRepository {
     let context: ModelContext
     let calendar: Calendar
 
-    func snapshot() throws -> MetricsSnapshotCache {
+    func snapshot(request: DashboardMetricsRequest? = nil) throws -> MetricsSnapshotCache {
+        let request = request ?? .full(calendar: calendar)
+        let muscleEnd = request.muscleWeek.flatMap { calendar.date(byAdding: .weekOfYear, value: 1, to: $0) }
+        func needsMuscles(_ date: Date) -> Bool {
+            if request.allMuscleWeeks { return true }
+            guard let start = request.muscleWeek, let end = muscleEnd else { return false }
+            return date >= start && date < end
+        }
         let repository = WorkoutSessionRepository(modelContext: context)
         let sessions = try repository.completedSessions()
         let visible = Set(sessions.map(\.id))
@@ -14,11 +39,14 @@ nonisolated struct DashboardMetricsRepository {
             $0.projectionVersion != HistoryProjectionRepository.currentVersion || $0.projectionSourceUpdatedAt != $0.updatedAt
         }
         let dirtyIDs = Set(dirty.map(\.id))
-        let rows = try context.fetch(FetchDescriptor<ExerciseSessionSummary>(predicate: #Predicate { !$0.isArchived }))
-        var entries: [(String, CompletedExerciseHistoryEntry)] = try rows.compactMap { row in
-            guard visible.contains(row.sessionID), !dirtyIDs.contains(row.sessionID) else { return nil }
-            return (row.catalogExerciseUUID, try JSONDecoder().decode(CompletedExerciseHistoryEntry.self, from: row.payload))
-        }
+        var descriptor = FetchDescriptor<ExerciseSessionSummary>(
+            predicate: #Predicate { !$0.isArchived }, sortBy: [SortDescriptor(\.completedAt, order: .reverse)])
+        // Payloads are faulted only for requested metrics or the latest exercise name.
+        descriptor.propertiesToFetch = [\.key, \.sessionID, \.catalogExerciseUUID, \.completedAt]
+        let needsAllPayloads = request.records || request.history || request.allMuscleWeeks
+        if needsAllPayloads { descriptor.propertiesToFetch.append(\.payload) }
+        let rows = try context.fetch(descriptor)
+        var entries: [(String, CompletedExerciseHistoryEntry)] = []
         if !dirtyIDs.isEmpty {
             let exercises = try repository.sessionExercises(sessionIDs: dirtyIDs)
             let sets = try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id)))
@@ -41,39 +69,78 @@ nonisolated struct DashboardMetricsRepository {
             }
         }
 
-        let mappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: context, catalogExerciseUUIDs: Set(entries.map(\.0)))
         var best: [String: WorkoutPRRecord] = [:]
         var bodyweight: [String: BodyweightExerciseBestRecord] = [:]
         var frequency: [String: CollectedExerciseFrequency] = [:]
         var history: [String: [CompletedExerciseHistoryEntry]] = [:]
         var muscles: [Date: [ExerciseBodyMapRegion: Double]] = [:]
-        for (exercise, entry) in entries {
-            history[exercise, default: []].append(entry)
-            let old = frequency[exercise]
-            frequency[exercise] = CollectedExerciseFrequency(
-                exerciseName: old.map { $0.lastPerformedAt > entry.completedAt ? $0.exerciseName : entry.exerciseName } ?? entry.exerciseName,
-                sessionCount: (old?.sessionCount ?? 0) + 1,
-                lastPerformedAt: max(old?.lastPerformedAt ?? .distantPast, entry.completedAt)
-            )
-            if let weight = entry.bestWeight, let reps = entry.bestReps, let value = entry.weightedOneRepMaxInKilograms {
-                let old = best[exercise]
-                let oldValue = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.estimatedOneRepMax, unit: $0.loadUnit) } ?? -1
-                if value > oldValue || (value == oldValue && entry.completedAt > (old?.achievedAt ?? .distantPast)) {
-                    best[exercise] = WorkoutPRRecord(id: exercise, catalogExerciseUUID: exercise,
-                        exerciseName: entry.exerciseName, estimatedOneRepMax: WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
-                        weight: weight, reps: reps, loadUnit: entry.weightedOneRepMaxUnit, achievedAt: entry.completedAt)
+        let heatmapExerciseIDs = Set(rows.filter {
+            needsMuscles($0.completedAt)
+        }.map(\.catalogExerciseUUID)).union(entries.filter {
+            needsMuscles($0.1.completedAt)
+        }.map(\.0))
+        let mappings = heatmapExerciseIDs.isEmpty ? [:] : try WorkoutMuscleHeatmapBuilder.catalogMappings(
+            modelContext: context, catalogExerciseUUIDs: heatmapExerciseIDs)
+
+        func ingest(_ exercise: String, date: Date, entry: CompletedExerciseHistoryEntry?) {
+            if request.frequency {
+                let old = frequency[exercise]
+                frequency[exercise] = CollectedExerciseFrequency(
+                    exerciseName: old.map { $0.lastPerformedAt >= date ? $0.exerciseName : (entry?.exerciseName ?? $0.exerciseName) }
+                        ?? entry?.exerciseName ?? exercise,
+                    sessionCount: (old?.sessionCount ?? 0) + 1,
+                    lastPerformedAt: max(old?.lastPerformedAt ?? .distantPast, date))
+            }
+            guard let entry else { return }
+            if request.history { history[exercise, default: []].append(entry) }
+            if request.records {
+                if let weight = entry.bestWeight, let reps = entry.bestReps, let value = entry.weightedOneRepMaxInKilograms {
+                    let old = best[exercise]
+                    let oldValue = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.estimatedOneRepMax, unit: $0.loadUnit) } ?? -1
+                    if value > oldValue || (value == oldValue && date > (old?.achievedAt ?? .distantPast)) {
+                        best[exercise] = WorkoutPRRecord(id: exercise, catalogExerciseUUID: exercise,
+                            exerciseName: entry.exerciseName, estimatedOneRepMax: WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+                            weight: weight, reps: reps, loadUnit: entry.weightedOneRepMaxUnit, achievedAt: date)
+                    }
+                }
+                if let reps = entry.bestBodyweightReps {
+                    let old = bodyweight[exercise]
+                    if reps > (old?.reps ?? 0) || (reps == old?.reps && date > (old?.achievedAt ?? .distantPast)) {
+                        bodyweight[exercise] = BodyweightExerciseBestRecord(catalogExerciseUUID: exercise,
+                            exerciseName: entry.exerciseName, reps: reps, achievedAt: date)
+                    }
                 }
             }
-            if let reps = entry.bestBodyweightReps {
-                let old = bodyweight[exercise]
-                if reps > (old?.reps ?? 0) || (reps == old?.reps && entry.completedAt > (old?.achievedAt ?? .distantPast)) {
-                    bodyweight[exercise] = BodyweightExerciseBestRecord(catalogExerciseUUID: exercise, exerciseName: entry.exerciseName, reps: reps, achievedAt: entry.completedAt)
-                }
+            if needsMuscles(date) {
+                let week = request.muscleWeek ?? weekStart(date)
+                let scores = WorkoutMuscleHeatmapBuilder.scores(forCatalogExerciseUUID: exercise,
+                    catalogMappings: mappings, fallbackMuscleSummary: entry.muscleSummary)
+                for (region, score) in scores { muscles[week, default: [:]][region, default: 0] += score * Double(entry.completedSetCount) }
             }
-            let week = weekStart(entry.completedAt)
-            let scores = WorkoutMuscleHeatmapBuilder.scores(forCatalogExerciseUUID: exercise, catalogMappings: mappings, fallbackMuscleSummary: entry.muscleSummary)
-            for (region, score) in scores { muscles[week, default: [:]][region, default: 0] += score * Double(entry.completedSetCount) }
         }
+        let validRows = rows.filter { visible.contains($0.sessionID) && !dirtyIDs.contains($0.sessionID) }
+        var seenExercises: Set<String> = []
+        let payloadKeys = Set(validRows.compactMap { row -> String? in
+            let latest = seenExercises.insert(row.catalogExerciseUUID).inserted
+            return needsAllPayloads || needsMuscles(row.completedAt)
+                || (request.frequency && latest) ? row.key : nil
+        })
+        // Fetch the selected payloads together, avoiding one fault/query per visible row.
+        let payloadRows: [ExerciseSessionSummary]
+        if needsAllPayloads { payloadRows = validRows }
+        else if payloadKeys.isEmpty { payloadRows = [] }
+        else {
+            var payloadDescriptor = FetchDescriptor<ExerciseSessionSummary>(predicate: #Predicate { payloadKeys.contains($0.key) })
+            payloadDescriptor.propertiesToFetch = [\.key, \.payload]
+            payloadRows = try context.fetch(payloadDescriptor)
+        }
+        let payloads = Dictionary(payloadRows.map { ($0.key, $0.payload) }, uniquingKeysWith: { first, _ in first })
+        let decoder = JSONDecoder()
+        for row in validRows {
+            let entry = try payloads[row.key].map { try decoder.decode(CompletedExerciseHistoryEntry.self, from: $0) }
+            ingest(row.catalogExerciseUUID, date: row.completedAt, entry: entry)
+        }
+        for (exercise, entry) in entries { ingest(exercise, date: entry.completedAt, entry: entry) }
         for key in history.keys { history[key]?.sort { $0.completedAt > $1.completedAt } }
         var countsByWeek: [Date: Int] = [:]
         var countsByDay: [Date: Int] = [:]

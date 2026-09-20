@@ -1,23 +1,34 @@
 import Foundation
 import SwiftData
+import Synchronization
 
 nonisolated final class WeeklyCoachInsightService {
     private static let baselineWindowCount = 6
     private static let maxSignalCount = 3
 
     private let calendar: Calendar
-    private let historyProjectionRepository: HistoryProjectionRepository
+    private let modelContext: ModelContext
+    private struct CacheKey: Hashable {
+        let revision: HistoryRevision
+        let calendar: Calendar
+        let week: Date
+    }
+    private static let snapshots = Mutex<[ObjectIdentifier: (CacheKey, WeeklyCoachInsightSnapshot)]>([:])
 
     init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.calendar = calendar
-        self.historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
+        self.modelContext = modelContext
     }
 
     func weeklyInsightSnapshot(asOf referenceDate: Date = .now) throws -> WeeklyCoachInsightSnapshot {
         let currentWeekStart = weekStart(for: referenceDate)
         let currentWeekEnd = calendar.date(byAdding: .day, value: 7, to: currentWeekStart) ?? currentWeekStart
 
-        let facts = try projectedFacts()
+        let key = CacheKey(revision: HistoryAnalyticsCache.shared.token(for: modelContext.container), calendar: calendar, week: currentWeekStart)
+        if !modelContext.hasChanges, let cached = Self.snapshots.withLock({ $0[key.revision.containerID] }), cached.0 == key {
+            return cached.1
+        }
+        let facts = try projectedFacts(currentWeekStart: currentWeekStart, currentWeekEnd: currentWeekEnd)
         let buckets = try weeklyBuckets(
             from: facts,
             currentWeekStart: currentWeekStart,
@@ -90,11 +101,40 @@ nonisolated final class WeeklyCoachInsightService {
             followUpKinds: followUpKinds
         )
 
+        if !modelContext.hasChanges, HistoryAnalyticsCache.shared.token(for: modelContext.container) == key.revision {
+            Self.snapshots.withLock {
+                if $0.count >= 16 { $0.removeAll() }
+                $0[key.revision.containerID] = (key, snapshot)
+            }
+        }
         return snapshot
     }
 
-    private func projectedFacts() throws -> [CompletedSetFact] {
-        try historyProjectionRepository.allFacts()
+    /// Jump across empty weeks using a one-row date query, then hydrate only the
+    /// current week and the six most recent populated baseline weeks.
+    func projectedFacts(currentWeekStart: Date, currentWeekEnd: Date) throws -> [CompletedSetFact] {
+        func facts(start: Date, end: Date) throws -> [CompletedSetFact] {
+            try modelContext.fetch(FetchDescriptor<CompletedSetFact>(predicate: #Predicate {
+                !$0.isWarmup && !$0.isArchived && $0.completedAt >= start && $0.completedAt < end
+            }))
+        }
+        var result = try facts(start: currentWeekStart, end: currentWeekEnd)
+        var before = currentWeekStart
+        for _ in 0..<Self.baselineWindowCount {
+            try Task.checkCancellation()
+            let cutoff = before
+            var latest = FetchDescriptor<CompletedSetFact>(predicate: #Predicate {
+                !$0.isWarmup && !$0.isArchived && $0.completedAt < cutoff
+            }, sortBy: [SortDescriptor(\.completedAt, order: .reverse)])
+            latest.fetchLimit = 1
+            latest.propertiesToFetch = [\.completedAt]
+            guard let date = try modelContext.fetch(latest).first?.completedAt else { break }
+            let start = weekStart(for: date)
+            let end = calendar.date(byAdding: .day, value: 7, to: start) ?? before
+            result.append(contentsOf: try facts(start: start, end: end))
+            before = start
+        }
+        return result
     }
 
     private func weeklyBuckets(

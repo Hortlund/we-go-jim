@@ -466,7 +466,7 @@ nonisolated final class WorkoutMetricsService {
     private let historyProjectionRepository: HistoryProjectionRepository
     private var cachedGoal: Int?
     private var cachedMetricsSnapshot: MetricsSnapshotCache?
-    private var cachedMetricsSnapshotRevision: Int?
+    private var cachedMetricsSnapshotRevision: HistoryRevision?
 
     init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.modelContext = modelContext
@@ -760,190 +760,47 @@ nonisolated final class WorkoutMetricsService {
         }
     }
 
-    func exerciseOneRepMaxTrend(
-        for catalogExerciseUUID: String,
-        preferredExerciseName: String? = nil,
-        limit: Int = 8
-    ) throws -> ExerciseMetricSeries {
-        let safeLimit = max(1, limit)
-        var recentPoints: [CollectedExerciseMetricPoint] = []
-        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if exerciseName?.isEmpty == true {
-            exerciseName = nil
-        }
-
-        let entries = try ExerciseHistoryRepository(context: modelContext).entries(for: catalogExerciseUUID, limit: safeLimit, metric: .oneRepMax)
-        for entry in entries {
-            guard let bestOneRepMaxInKilograms = entry.weightedOneRepMaxInKilograms else { continue }
-            if exerciseName == nil {
-                exerciseName = entry.exerciseName
-            }
-            recentPoints.append(
-                CollectedExerciseMetricPoint(
-                    completedAt: entry.completedAt,
-                    normalizedValue: bestOneRepMaxInKilograms,
-                    sourceUnit: entry.weightedOneRepMaxUnit
-                )
-            )
-
-            if recentPoints.count == safeLimit {
-                break
-            }
-        }
-
-        return buildExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: exerciseName ?? "Exercise",
-            points: recentPoints
-        )
+    func exerciseOneRepMaxTrend(for catalogExerciseUUID: String, preferredExerciseName: String? = nil, limit: Int = 8) throws -> ExerciseMetricSeries {
+        try exerciseMetricTrend(for: catalogExerciseUUID, metric: .oneRepMax, preferredExerciseName: preferredExerciseName, limit: limit)
     }
 
-    func exerciseVolumeTrend(
-        for catalogExerciseUUID: String,
-        preferredExerciseName: String? = nil,
-        limit: Int = 8
-    ) throws -> ExerciseMetricSeries {
-        let safeLimit = max(1, limit)
-        var recentPoints: [CollectedExerciseMetricPoint] = []
-        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if exerciseName?.isEmpty == true {
-            exerciseName = nil
-        }
-
-        let entries = try ExerciseHistoryRepository(context: modelContext).entries(for: catalogExerciseUUID, limit: safeLimit, metric: .volume)
-        for entry in entries {
-            guard let totalVolumeInKilograms = entry.totalWeightedVolumeInKilograms else { continue }
-            if exerciseName == nil {
-                exerciseName = entry.exerciseName
-            }
-            recentPoints.append(
-                CollectedExerciseMetricPoint(
-                    completedAt: entry.completedAt,
-                    normalizedValue: totalVolumeInKilograms,
-                    sourceUnit: entry.weightedVolumeUnit
-                )
-            )
-
-            if recentPoints.count == safeLimit {
-                break
-            }
-        }
-
-        return buildExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: exerciseName ?? "Exercise",
-            points: recentPoints
-        )
+    func exerciseVolumeTrend(for catalogExerciseUUID: String, preferredExerciseName: String? = nil, limit: Int = 8) throws -> ExerciseMetricSeries {
+        try exerciseMetricTrend(for: catalogExerciseUUID, metric: .volume, preferredExerciseName: preferredExerciseName, limit: limit)
     }
 
-    func exerciseMaxWeightTrend(
-        for catalogExerciseUUID: String,
-        preferredExerciseName: String? = nil,
-        limit: Int = 8
-    ) throws -> ExerciseMetricSeries {
-        let safeLimit = max(1, limit)
-        var recentPoints: [CollectedExerciseMetricPoint] = []
-        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if exerciseName?.isEmpty == true {
-            exerciseName = nil
-        }
-
-        let entries = try ExerciseHistoryRepository(context: modelContext).entries(for: catalogExerciseUUID, limit: safeLimit, metric: .maxWeight)
-        for entry in entries {
-            guard let maxWeightInKilograms = entry.maxWeightInKilograms else { continue }
-            if exerciseName == nil {
-                exerciseName = entry.exerciseName
-            }
-            recentPoints.append(
-                CollectedExerciseMetricPoint(
-                    completedAt: entry.completedAt,
-                    normalizedValue: maxWeightInKilograms,
-                    sourceUnit: entry.maxWeightUnit
-                )
-            )
-
-            if recentPoints.count == safeLimit {
-                break
-            }
-        }
-
-        return buildExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: exerciseName ?? "Exercise",
-            points: recentPoints
-        )
+    func exerciseMaxWeightTrend(for catalogExerciseUUID: String, preferredExerciseName: String? = nil, limit: Int = 8) throws -> ExerciseMetricSeries {
+        try exerciseMetricTrend(for: catalogExerciseUUID, metric: .maxWeight, preferredExerciseName: preferredExerciseName, limit: limit)
     }
 
-    func exerciseMaxRepsTrend(
-        for catalogExerciseUUID: String,
-        preferredExerciseName: String? = nil,
-        limit: Int = 8
-    ) throws -> ExerciseMetricSeries {
-        let safeLimit = max(1, limit)
-        var recentPoints: [CollectedExerciseMetricPoint] = []
-        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if exerciseName?.isEmpty == true {
-            exerciseName = nil
-        }
-
-        let entries = try ExerciseHistoryRepository(context: modelContext).entries(for: catalogExerciseUUID, limit: safeLimit, metric: .maxReps)
-        for entry in entries {
-            guard let maxReps = entry.maxReps else { continue }
-            if exerciseName == nil {
-                exerciseName = entry.exerciseName
-            }
-            recentPoints.append(
-                CollectedExerciseMetricPoint(
-                    completedAt: entry.completedAt,
-                    normalizedValue: Double(maxReps),
-                    sourceUnit: .bodyweight
-                )
-            )
-
-            if recentPoints.count == safeLimit {
-                break
-            }
-        }
-
-        return buildExerciseMetricSeries(
-            catalogExerciseUUID: catalogExerciseUUID,
-            exerciseName: exerciseName ?? "Exercise",
-            points: recentPoints
-        )
+    func exerciseMaxRepsTrend(for catalogExerciseUUID: String, preferredExerciseName: String? = nil, limit: Int = 8) throws -> ExerciseMetricSeries {
+        try exerciseMetricTrend(for: catalogExerciseUUID, metric: .maxReps, preferredExerciseName: preferredExerciseName, limit: limit)
     }
 
-    func exerciseMetricTrend(
-        for catalogExerciseUUID: String,
-        metric: ProfileExerciseTrendMetric,
-        preferredExerciseName: String? = nil,
-        limit: Int = 8
-    ) throws -> ExerciseMetricSeries {
-        switch metric {
-        case .oneRepMax:
-            return try exerciseOneRepMaxTrend(
-                for: catalogExerciseUUID,
-                preferredExerciseName: preferredExerciseName,
-                limit: limit
-            )
-        case .maxWeight:
-            return try exerciseMaxWeightTrend(
-                for: catalogExerciseUUID,
-                preferredExerciseName: preferredExerciseName,
-                limit: limit
-            )
-        case .volume:
-            return try exerciseVolumeTrend(
-                for: catalogExerciseUUID,
-                preferredExerciseName: preferredExerciseName,
-                limit: limit
-            )
-        case .maxReps:
-            return try exerciseMaxRepsTrend(
-                for: catalogExerciseUUID,
-                preferredExerciseName: preferredExerciseName,
-                limit: limit
-            )
-        }
+    func exerciseMetricTrend(for catalogExerciseUUID: String, metric: ProfileExerciseTrendMetric,
+                             preferredExerciseName: String? = nil, limit: Int = 8) throws -> ExerciseMetricSeries {
+        let request = ExerciseTrendRequest(catalogExerciseUUID: catalogExerciseUUID, metric: metric)
+        let result = try exerciseMetricTrends(requests: [request], limit: limit)[request]!
+        return result.withPreferredName(preferredExerciseName)
+    }
+
+    func exerciseMetricTrends(requests: Set<ExerciseTrendRequest>, limit: Int = 8) throws -> [ExerciseTrendRequest: ExerciseMetricSeries] {
+        let histories = try ExerciseHistoryRepository(context: modelContext).trendEntries(requests: requests, limit: limit)
+        return Dictionary(uniqueKeysWithValues: requests.map { request in
+            let entries = histories[request, default: []]
+            let points = entries.compactMap { entry -> CollectedExerciseMetricPoint? in
+                let value: Double?
+                let unit: TemplateLoadUnit
+                switch request.metric {
+                case .oneRepMax: value = entry.weightedOneRepMaxInKilograms; unit = entry.weightedOneRepMaxUnit
+                case .volume: value = entry.totalWeightedVolumeInKilograms; unit = entry.weightedVolumeUnit
+                case .maxWeight: value = entry.maxWeightInKilograms; unit = entry.maxWeightUnit
+                case .maxReps: value = entry.maxReps.map(Double.init); unit = .bodyweight
+                }
+                return value.map { CollectedExerciseMetricPoint(completedAt: entry.completedAt, normalizedValue: $0, sourceUnit: unit) }
+            }
+            return (request, buildExerciseMetricSeries(catalogExerciseUUID: request.catalogExerciseUUID,
+                exerciseName: entries.first?.exerciseName ?? "Exercise", points: points))
+        })
     }
 
     func exerciseDetailStats(
@@ -1063,11 +920,14 @@ nonisolated final class WorkoutMetricsService {
         )
     }
 
-    func profileDashboardSnapshot(prLimit: Int = 8, weeks: Int = 8) throws -> ProfileDashboardSnapshot {
+    func profileDashboardSnapshot(prLimit: Int = 8, weeks: Int = 8, enabledWidgets: Set<ProfileWidgetKind>? = nil) throws -> ProfileDashboardSnapshot {
         let safePRLimit = max(1, prLimit)
         let safeWeeks = max(1, weeks)
         let profileGoal = try currentGoal()
-        let snapshot = try metricsSnapshot()
+        let request = DashboardMetricsRequest.profile(widgets: enabledWidgets ?? Set(ProfileWidgetKind.allCases), calendar: calendar)
+        let snapshot = try HistoryAnalyticsCache.shared.cachedMetricsSnapshot(for: modelContext.container, request: request) {
+            try DashboardMetricsRepository(context: modelContext, calendar: calendar).snapshot(request: request)
+        }
         let nowWeek = weekStart(for: Date())
         var weeksToInclude: [Date] = []
         weeksToInclude.reserveCapacity(safeWeeks)
@@ -1141,20 +1001,20 @@ nonisolated final class WorkoutMetricsService {
     }
 
     private func metricsSnapshot() throws -> MetricsSnapshotCache {
-        let revisionAtStart = HistoryAnalyticsCache.shared.currentRevision(for: modelContext.container)
+        let revisionAtStart = HistoryAnalyticsCache.shared.token(for: modelContext.container)
         if let cachedMetricsSnapshot, cachedMetricsSnapshotRevision == revisionAtStart {
             return cachedMetricsSnapshot
         }
 
         let snapshot = try HistoryAnalyticsCache.shared.cachedMetricsSnapshot(
-            for: modelContext.container
+            for: modelContext.container, request: .full(calendar: calendar)
         ) {
             try WGJPerformance.measure("metrics.snapshot") {
                 try buildMetricsSnapshot()
             }
         }
 
-        let revisionAtEnd = HistoryAnalyticsCache.shared.currentRevision(for: modelContext.container)
+        let revisionAtEnd = HistoryAnalyticsCache.shared.token(for: modelContext.container)
         if revisionAtEnd == revisionAtStart {
             cachedMetricsSnapshot = snapshot
             cachedMetricsSnapshotRevision = revisionAtEnd
@@ -1659,5 +1519,19 @@ extension CompletedSetFact {
 private extension String {
     nonisolated var nonEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+extension ExerciseMetricSeries {
+    nonisolated func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
+        let trimmed = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return self }
+
+        return ExerciseMetricSeries(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseName: trimmed,
+            loadUnit: loadUnit,
+            points: points
+        )
     }
 }

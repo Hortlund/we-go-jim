@@ -1,7 +1,7 @@
 import CloudKit
 import Foundation
 
-nonisolated protocol ProfileDefaultDisplayNameProviding {
+nonisolated protocol ProfileDefaultDisplayNameProviding: Sendable {
     func defaultDisplayName() async -> String?
 }
 

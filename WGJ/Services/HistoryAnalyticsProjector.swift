@@ -178,6 +178,13 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
 
 }
 
+/// Includes reset generation so a restore cannot reuse a pre-restore revision zero.
+nonisolated struct HistoryRevision: Hashable, Sendable {
+    let containerID: ObjectIdentifier
+    let generation: UInt64
+    let revision: Int
+}
+
 nonisolated final class HistoryAnalyticsCache: Sendable {
     static let shared = HistoryAnalyticsCache()
 
@@ -189,7 +196,7 @@ nonisolated final class HistoryAnalyticsCache: Sendable {
     private struct State {
         var generation: UInt64 = 0
         var revisions: [ObjectIdentifier: Int] = [:]
-        var snapshots: [ObjectIdentifier: Entry] = [:]
+        var snapshots: [ObjectIdentifier: [DashboardMetricsRequest: Entry]] = [:]
     }
 
     private let state = Mutex(State())
@@ -210,18 +217,24 @@ nonisolated final class HistoryAnalyticsCache: Sendable {
         }
     }
 
+    func token(for container: ModelContainer) -> HistoryRevision {
+        state.withLock { HistoryRevision(containerID: ObjectIdentifier(container), generation: $0.generation,
+            revision: $0.revisions[ObjectIdentifier(container), default: 0]) }
+    }
+
     func currentRevision(for container: ModelContainer) -> Int {
         state.withLock { $0.revisions[ObjectIdentifier(container), default: 0] }
     }
 
     func cachedMetricsSnapshot(
         for container: ModelContainer,
+        request: DashboardMetricsRequest = .full(),
         build: () throws -> MetricsSnapshotCache
     ) throws -> MetricsSnapshotCache {
         let id = ObjectIdentifier(container)
         let (generation, revision, cached) = state.withLock { state in
             let revision = state.revisions[id, default: 0]
-            let entry = state.snapshots[id]
+            let entry = state.snapshots[id]?[request]
             return (state.generation, revision, entry?.revision == revision ? entry?.snapshot : nil)
         }
         if let cached { return cached }
@@ -231,7 +244,9 @@ nonisolated final class HistoryAnalyticsCache: Sendable {
         state.withLock { state in
             guard state.generation == generation,
                   state.revisions[id, default: 0] == revision else { return }
-            state.snapshots[id] = Entry(revision: revision, snapshot: snapshot)
+            // Limit variants across widget configuration and calendar/week changes.
+            if state.snapshots[id, default: [:]].count >= 4 { state.snapshots[id] = [:] }
+            state.snapshots[id, default: [:]][request] = Entry(revision: revision, snapshot: snapshot)
         }
         return snapshot
     }

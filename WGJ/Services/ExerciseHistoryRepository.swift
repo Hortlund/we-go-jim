@@ -48,12 +48,44 @@ nonisolated enum ExerciseHistorySummaryBuilder {
 nonisolated struct ExerciseHistoryRepository {
     let context: ModelContext
 
-    func entries(for exerciseUUID: String, limit: Int? = nil, metric: ProfileExerciseTrendMetric? = nil) throws -> [CompletedExerciseHistoryEntry] {
+    func dirtySessions() throws -> [WorkoutSession] {
         let completed = WorkoutSessionStatus.completed.rawValue
         let version = HistoryProjectionRepository.currentVersion
-        let dirty = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate {
+        return try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate {
             $0.statusRaw == completed && ($0.projectionVersion < version || $0.projectionSourceUpdatedAt != $0.updatedAt)
         }))
+    }
+
+    func entries(for exerciseUUID: String, limit: Int? = nil, metric: ProfileExerciseTrendMetric? = nil) throws -> [CompletedExerciseHistoryEntry] {
+        let dirty = try dirtySessions()
+        let fallback = try fallbackEntries(for: exerciseUUID, dirty: dirty)
+        var decoded: [String: CompletedExerciseHistoryEntry] = [:]
+        return try entries(for: exerciseUUID, limit: limit, metric: metric, dirty: dirty,
+                           fallback: fallback, decoded: &decoded)
+    }
+
+    /// Keep SQL limits per metric: newer reps-only sessions must not hide older weighted points.
+    /// Freshness is checked once for the batch, canonical fallback once per exercise, and
+    /// overlapping summary payloads are decoded once across metrics.
+    func trendEntries(requests: Set<ExerciseTrendRequest>, limit: Int) throws -> [ExerciseTrendRequest: [CompletedExerciseHistoryEntry]] {
+        guard !requests.isEmpty else { return [:] }
+        let dirty = try dirtySessions()
+        var result: [ExerciseTrendRequest: [CompletedExerciseHistoryEntry]] = [:]
+        var decoded: [String: CompletedExerciseHistoryEntry] = [:]
+        for (exercise, group) in Dictionary(grouping: requests, by: \.catalogExerciseUUID) {
+            try Task.checkCancellation()
+            let fallback = try fallbackEntries(for: exercise, dirty: dirty)
+            for request in group {
+                result[request] = try entries(for: exercise, limit: limit, metric: request.metric,
+                    dirty: dirty, fallback: fallback, decoded: &decoded)
+            }
+        }
+        return result
+    }
+
+    private func entries(for exerciseUUID: String, limit: Int?, metric: ProfileExerciseTrendMetric?,
+                         dirty: [WorkoutSession], fallback: [UUID: CompletedExerciseHistoryEntry],
+                         decoded: inout [String: CompletedExerciseHistoryEntry]) throws -> [CompletedExerciseHistoryEntry] {
         let kind: Int
         switch metric {
         case .oneRepMax: kind = 1
@@ -72,10 +104,30 @@ nonisolated struct ExerciseHistoryRepository {
         )
         if let limit { descriptor.fetchLimit = max(1, limit) + dirty.count }
         let summaries = try context.fetch(descriptor)
-        var entries = try Dictionary(summaries.map {
-            ($0.sessionID, try JSONDecoder().decode(CompletedExerciseHistoryEntry.self, from: $0.payload))
-        }, uniquingKeysWith: { first, _ in first })
-
+        let dirtyIDs = Set(dirty.map(\.id))
+        var entries = fallback
+        let decoder = JSONDecoder()
+        for row in summaries where !dirtyIDs.contains(row.sessionID) {
+            if decoded[row.key] == nil {
+                decoded[row.key] = try decoder.decode(CompletedExerciseHistoryEntry.self, from: row.payload)
+            }
+            entries[row.sessionID] = decoded[row.key]
+        }
+        let ordered = entries.values.filter { entry in
+            guard let metric else { return true }
+            switch metric {
+            case .oneRepMax: return entry.weightedOneRepMaxInKilograms != nil
+            case .maxWeight: return entry.maxWeightInKilograms != nil
+            case .volume: return entry.totalWeightedVolumeInKilograms != nil
+            case .maxReps: return entry.maxReps != nil
+            }
+        }.sorted {
+            $0.completedAt == $1.completedAt ? $0.sessionID.uuidString < $1.sessionID.uuidString : $0.completedAt > $1.completedAt
+        }
+        return limit.map { Array(ordered.prefix(max(1, $0))) } ?? ordered
+    }
+    private func fallbackEntries(for exerciseUUID: String, dirty: [WorkoutSession]) throws -> [UUID: CompletedExerciseHistoryEntry] {
+        var entries: [UUID: CompletedExerciseHistoryEntry] = [:]
         let dirtyIDs = Set(dirty.map(\.id))
         if !dirtyIDs.isEmpty {
             let exercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>(predicate: #Predicate {
@@ -99,7 +151,6 @@ nonisolated struct ExerciseHistoryRepository {
             }))
             let persistedBySession = Dictionary(grouping: persisted, by: \.sessionID)
             for session in dirty {
-                entries.removeValue(forKey: session.id)
                 guard session.archivedAt == nil else { continue }
                 let rows = exercisesBySession[session.id, default: []]
                 let facts: [CompletedSetFact]
@@ -116,17 +167,12 @@ nonisolated struct ExerciseHistoryRepository {
                 )[exerciseUUID]
             }
         }
-        let ordered = entries.values.filter { entry in
-            guard let metric else { return true }
-            switch metric {
-            case .oneRepMax: return entry.weightedOneRepMaxInKilograms != nil
-            case .maxWeight: return entry.maxWeightInKilograms != nil
-            case .volume: return entry.totalWeightedVolumeInKilograms != nil
-            case .maxReps: return entry.maxReps != nil
-            }
-        }.sorted {
-            $0.completedAt == $1.completedAt ? $0.sessionID.uuidString < $1.sessionID.uuidString : $0.completedAt > $1.completedAt
-        }
-        return limit.map { Array(ordered.prefix(max(1, $0))) } ?? ordered
+        return entries
     }
+
+}
+
+nonisolated struct ExerciseTrendRequest: Hashable, Sendable {
+    let catalogExerciseUUID: String
+    let metric: ProfileExerciseTrendMetric
 }

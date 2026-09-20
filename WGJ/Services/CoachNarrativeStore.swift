@@ -29,6 +29,10 @@ nonisolated protocol CoachNarrativeCaching: Sendable {
 
 @ModelActor
 actor CoachNarrativeStore: CoachNarrativeCaching {
+    func prune() throws {
+        _ = try CoachNarrativeCacheRepository(modelContext: modelContext).prune()
+    }
+
     func recap(weekStart: Date, revisionKey: String) throws -> CoachNarrativeSummary? {
         try CoachNarrativeCacheRepository(modelContext: modelContext)
             .recap(forWeekStart: weekStart, revisionKey: revisionKey)

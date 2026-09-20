@@ -330,6 +330,11 @@ nonisolated final class ProfileRepository {
         return currentName != preferredDisplayName
     }
 
+    static func needsCloudDisplayName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == localDefaultDisplayName
+    }
+
     private func shouldAttemptCloudDisplayNameUpgrade(
         for profile: UserProfile,
         cloudSyncEnabled: Bool
