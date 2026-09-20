@@ -6,6 +6,55 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testThemeSelectionPersistsAndKeepsSettingsNavigation() {
+        let app = launchLocalApp()
+
+        func openThemePicker() {
+            let profile = app.buttons["Profile"].firstMatch
+            XCTAssertTrue(profile.waitForExistence(timeout: 8))
+            profile.tap()
+            let settings = app.buttons["profile-settings-tile"]
+            for _ in 0..<10 where !settings.isHittable { app.swipeUp() }
+            XCTAssertTrue(settings.isHittable)
+            settings.tap()
+            let themes = app.buttons["settings-app-theme-tile"]
+            XCTAssertTrue(themes.waitForExistence(timeout: 5))
+            themes.tap()
+            XCTAssertTrue(app.buttons["app-theme-original"].waitForExistence(timeout: 5))
+        }
+
+        openThemePicker()
+        for theme in ["mintCondition", "wheyTooPurple", "sunsOutGunsOut", "electricStrength"] {
+            let option = app.buttons["app-theme-\(theme)"]
+            for _ in 0..<4 where !option.isHittable { app.swipeUp() }
+            XCTAssertTrue(option.isHittable)
+            option.tap()
+            XCTAssertEqual(option.value as? String, "Selected")
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Theme-\(theme)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+
+        app.terminate()
+        app.launch()
+        let continueLocally = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(continueLocally.waitForExistence(timeout: 8))
+        continueLocally.tap()
+        openThemePicker()
+        let selected = app.buttons["app-theme-electricStrength"]
+        for _ in 0..<4 where !selected.isHittable { app.swipeUp() }
+        XCTAssertEqual(selected.value as? String, "Selected")
+
+        let original = app.buttons["app-theme-original"]
+        for _ in 0..<4 where !original.isHittable { app.swipeDown() }
+        original.tap()
+        XCTAssertEqual(original.value as? String, "Selected")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["settings-app-theme-tile"].waitForExistence(timeout: 4))
+    }
+
+    @MainActor
     func testFolderEditorCanRetryValidationFailureAndSaveOnce() {
         let app = launchLocalApp()
         let newFolder = app.buttons["start-workout-new-folder-button"]

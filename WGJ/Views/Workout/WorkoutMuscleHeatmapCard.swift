@@ -92,16 +92,18 @@ struct WorkoutMuscleHeatmapCard: View {
 }
 
 private extension BodyViewStyle {
-    static let wgjWorkoutHeatmap = BodyViewStyle(
-        defaultFillColor: WGJTheme.cardElevated.opacity(0.92),
-        strokeColor: WGJTheme.outline.opacity(0.42),
-        strokeWidth: 0.5,
-        selectionColor: WGJTheme.accentBlue,
-        selectionStrokeColor: WGJTheme.accentCyan.opacity(0.92),
-        selectionStrokeWidth: 1.1,
-        headColor: WGJTheme.cardElevated.opacity(0.92),
-        hairColor: WGJTheme.textSecondary.opacity(0.38)
-    )
+    static var wgjWorkoutHeatmap: BodyViewStyle {
+        BodyViewStyle(
+            defaultFillColor: WGJTheme.cardElevated.opacity(0.92),
+            strokeColor: WGJTheme.outline.opacity(0.42),
+            strokeWidth: 0.5,
+            selectionColor: WGJTheme.accentBlue,
+            selectionStrokeColor: WGJTheme.accentCyan.opacity(0.92),
+            selectionStrokeWidth: 1.1,
+            headColor: WGJTheme.cardElevated.opacity(0.92),
+            hairColor: WGJTheme.textSecondary.opacity(0.38)
+        )
+    }
 }
 
 private extension ExerciseBodyMapRegion {
