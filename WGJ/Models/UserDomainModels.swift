@@ -1165,6 +1165,7 @@ final class TemplateFolder {
 
 @Model
 final class WorkoutTemplate {
+    #Index<WorkoutTemplate>([\.id])
     var id: UUID = UUID()
     var folderID: UUID = UUID()
     var name: String = ""
@@ -1204,6 +1205,7 @@ final class WorkoutTemplate {
 
 @Model
 final class TemplateSupersetGroup {
+    #Index<TemplateSupersetGroup>([\.templateID])
     var id: UUID = UUID()
     var templateID: UUID = UUID()
     var roundRestSeconds: Int = 120
@@ -1233,6 +1235,7 @@ final class TemplateSupersetGroup {
 
 @Model
 final class TemplateCardioBlock {
+    #Index<TemplateCardioBlock>([\.templateID])
     var id: UUID = UUID()
     var templateID: UUID = UUID()
     var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
@@ -1324,6 +1327,7 @@ final class TemplateCardioBlock {
 
 @Model
 final class TemplateExercise {
+    #Index<TemplateExercise>([\.id], [\.templateID, \.sortOrder])
     var id: UUID = UUID()
     var templateID: UUID = UUID()
     var catalogExerciseUUID: String = ""
@@ -1412,6 +1416,7 @@ final class TemplateExercise {
 
 @Model
 final class TemplateExerciseComponent {
+    #Index<TemplateExerciseComponent>([\.templateExerciseID])
     var id: UUID = UUID()
     var templateExerciseID: UUID = UUID()
     var catalogExerciseUUID: String = ""
@@ -1451,6 +1456,7 @@ final class TemplateExerciseComponent {
 
 @Model
 final class TemplateExerciseSet {
+    #Index<TemplateExerciseSet>([\.id], [\.templateExerciseID, \.sortOrder])
     var id: UUID = UUID()
     var templateExerciseID: UUID = UUID()
     var sortOrder: Int = 0
@@ -1518,6 +1524,7 @@ final class TemplateExerciseSet {
 
 @Model
 final class TemplateExerciseDropStage {
+    #Index<TemplateExerciseDropStage>([\.templateExerciseSetID])
     var id: UUID = UUID()
     var templateExerciseSetID: UUID = UUID()
     var sortOrder: Int = 0
@@ -2007,6 +2014,9 @@ final class ActiveWorkoutDraftDropStage {
 
 @Model
 final class WorkoutSession {
+    var projectionVersion: Int = 0
+    var projectionSourceUpdatedAt: Date = Date(timeIntervalSince1970: 0)
+    #Index<WorkoutSession>([\.id], [\.statusRaw, \.archivedAt, \.endedAt], [\.projectionVersion])
     var id: UUID = UUID()
     var templateID: UUID?
     var name: String = ""
@@ -2075,6 +2085,7 @@ final class WorkoutSession {
 
 @Model
 final class WorkoutSessionCardioBlock {
+    #Index<WorkoutSessionCardioBlock>([\.sessionID], [\.catalogExerciseUUID])
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
     var sourceTemplateCardioID: UUID?
@@ -2187,6 +2198,7 @@ final class WorkoutSessionCardioBlock {
 
 @Model
 final class WorkoutSessionExercise {
+    #Index<WorkoutSessionExercise>([\.id], [\.sessionID, \.sortOrder], [\.catalogExerciseUUID])
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
     var templateExerciseID: UUID?
@@ -2292,6 +2304,7 @@ final class WorkoutSessionExercise {
 
 @Model
 final class WorkoutSessionSupersetGroup {
+    #Index<WorkoutSessionSupersetGroup>([\.sessionID])
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
     var roundRestSeconds: Int = 120
@@ -2321,6 +2334,7 @@ final class WorkoutSessionSupersetGroup {
 
 @Model
 final class WorkoutSessionSet {
+    #Index<WorkoutSessionSet>([\.id], [\.sessionExerciseID, \.sortOrder])
     var id: UUID = UUID()
     var sessionExerciseID: UUID = UUID()
     var sortOrder: Int = 0
@@ -2390,6 +2404,7 @@ final class WorkoutSessionSet {
 
 @Model
 final class WorkoutSessionDropStage {
+    #Index<WorkoutSessionDropStage>([\.sessionSetID, \.sortOrder])
     var id: UUID = UUID()
     var sessionSetID: UUID = UUID()
     var sortOrder: Int = 0
@@ -2448,6 +2463,10 @@ final class WorkoutSessionDropStage {
 
 @Model
 final class CompletedSetFact {
+    var parentSetID: UUID?
+    var muscleSummarySnapshot: String = ""
+    var isArchived: Bool = false
+    #Index<CompletedSetFact>([\.catalogExerciseUUID, \.completedAt], [\.sessionID])
     @Attribute(.unique) var sessionSetID: UUID = UUID()
     var sessionID: UUID = UUID()
     var sessionExerciseID: UUID = UUID()

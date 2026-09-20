@@ -241,14 +241,15 @@ nonisolated private final class WorkoutCompletionMaterializer {
         completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
         applyCalorieEstimate(to: completedSession, referenceDate: completedAt)
+        _ = try HistoryProjectionRepository(modelContext: modelContext).rebuildFacts(forSessionID: completedSession.id, persistChanges: false)
 
         try WGJPerformance.measure("workout-completion.save") {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         let container = modelContext.container
-        // Derived facts are recovered by maintenance after the summary closes, or on
-        // the next launch/resume. The saved session is the durable source of truth.
+        // Canonical rows and their small projection commit at the same local boundary.
+        // Maintenance remains a recovery path, not a prerequisite for accurate reads.
         WorkoutHistoryChangeBroadcaster.post()
         boundaryEffects.scheduleBackup(container, .workoutCompleted)
 

@@ -7,6 +7,8 @@ nonisolated enum ExerciseProgressMetric: String, CaseIterable, Identifiable, Has
     case sessionVolume
     case totalReps
     case workoutFrequency
+    case duration
+    case distance
 
     var id: String { rawValue }
 
@@ -18,6 +20,8 @@ nonisolated enum ExerciseProgressMetric: String, CaseIterable, Identifiable, Has
         case .sessionVolume: "Session Volume"
         case .totalReps: "Total Reps"
         case .workoutFrequency: "Workout Frequency"
+        case .duration: "Duration"
+        case .distance: "Distance"
         }
     }
 
@@ -46,7 +50,7 @@ nonisolated enum ExerciseProgressRange: String, CaseIterable, Identifiable, Hash
     }
 }
 
-nonisolated struct ExerciseProgressSession: Equatable, Sendable {
+nonisolated struct ExerciseProgressSession: Hashable, Sendable {
     let sessionID: UUID
     let completedAt: Date
     let estimatedOneRepMaxKilograms: Double?
@@ -56,9 +60,11 @@ nonisolated struct ExerciseProgressSession: Equatable, Sendable {
     let totalReps: Int
     let completedSetCount: Int
     let displayUnit: TemplateLoadUnit
+    var durationSeconds: Double? = nil
+    var distanceMeters: Double? = nil
 }
 
-nonisolated struct ExerciseProgressDataset: Equatable, Sendable {
+nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
     let exerciseUUID: String
     let exerciseName: String
     let sessions: [ExerciseProgressSession]
@@ -138,6 +144,10 @@ extension ExerciseProgressProjection {
             return "\(WGJFormatters.integerString(value)) \(displayUnit.shortLabel)"
         case .bestSetReps, .totalReps:
             return "\(Int(value.rounded())) reps"
+        case .duration:
+            return "\(WGJFormatters.oneDecimalString(value / 60)) min"
+        case .distance:
+            return "\(WGJFormatters.oneDecimalString(value / 1000)) km"
         case .workoutFrequency:
             let count = Int(value.rounded())
             return "\(count) workout" + (count == 1 ? "" : "s") + "/week"

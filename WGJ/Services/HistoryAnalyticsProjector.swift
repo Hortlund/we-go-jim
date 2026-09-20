@@ -5,27 +5,13 @@ import SwiftData
 
 nonisolated enum HistoryProjectionSnapshotBuilder {
     static func projectedFacts(from session: WorkoutSession) -> [CompletedSetFactDraft] {
-        let completedAt = session.endedAt ?? session.startedAt
-        let sourceSessionUpdatedAt = sourceSessionUpdatedAt(for: session)
-        let orderedExercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-
-        return orderedExercises.flatMap { exercise in
-            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            return orderedSets.compactMap { set in
-                projectedFact(
-                    from: set,
-                    session: session,
-                    exercise: exercise,
-                    completedAt: completedAt,
-                    sourceSessionUpdatedAt: sourceSessionUpdatedAt
-                )
-            }
-        }
+        Source(session: session, exercises: (session.exercises ?? []).map { ($0, $0.sets ?? []) }).projectedFacts()
     }
 
     struct Source {
         let session: WorkoutSession
         let exercises: [(exercise: WorkoutSessionExercise, sets: [WorkoutSessionSet])]
+        var dropStagesBySetID: [UUID: [WorkoutSessionDropStage]]? = nil
 
         var updatedAt: Date {
             exercises.reduce(session.updatedAt) { latest, row in
@@ -37,11 +23,27 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
             let sourceUpdatedAt = updatedAt
             let completedAt = session.endedAt ?? session.startedAt
             return exercises.flatMap { row in
-                row.sets.compactMap { set in
-                    HistoryProjectionSnapshotBuilder.projectedFact(
+                row.sets.flatMap { set -> [CompletedSetFactDraft] in
+                    var result = HistoryProjectionSnapshotBuilder.projectedFact(
                         from: set, session: session, exercise: row.exercise,
                         completedAt: completedAt, sourceSessionUpdatedAt: sourceUpdatedAt
-                    )
+                    ).map { [$0] } ?? []
+                    for stage in dropStagesBySetID?[set.id] ?? set.dropStages ?? [] {
+                        let values = WorkoutSessionSet(
+                            id: stage.id, sessionExerciseID: row.exercise.id, sortOrder: set.sortOrder,
+                            isWarmup: set.isWarmup, targetLoadUnit: stage.targetLoadUnit,
+                            actualReps: stage.actualReps, actualWeight: stage.actualWeight,
+                            actualLoadUnit: stage.actualLoadUnit, isCompleted: stage.isCompleted
+                        )
+                        if var fact = HistoryProjectionSnapshotBuilder.projectedFact(
+                            from: values, session: session, exercise: row.exercise,
+                            completedAt: completedAt, sourceSessionUpdatedAt: sourceUpdatedAt
+                        ) {
+                            fact.parentSetID = set.id
+                            result.append(fact)
+                        }
+                    }
+                    return result
                 }
             }
         }
@@ -56,9 +58,10 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
             grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
             by: \.sessionExerciseID
         )
+        let stages = try repository.sessionDropStages(setIDs: Set(setsByExerciseID.values.flatMap { $0.map(\.id) }))
         return Source(session: session, exercises: exercises.map { exercise in
             (exercise, setsByExerciseID[exercise.id, default: []])
-        })
+        }, dropStagesBySetID: Dictionary(grouping: stages, by: \.sessionSetID))
     }
 
     static func projectedFacts(
@@ -146,7 +149,8 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                     reps: reps,
                     unit: normalizedActualLoad.unit
                 ),
-                sourceSessionUpdatedAt: sourceSessionUpdatedAt
+                sourceSessionUpdatedAt: sourceSessionUpdatedAt,
+                muscleSummarySnapshot: exercise.muscleSummarySnapshot
             )
 
         case .bodyweight:
@@ -166,7 +170,8 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 normalizedWeightKg: nil,
                 estimatedOneRepMaxKg: nil,
                 volumeKg: nil,
-                sourceSessionUpdatedAt: sourceSessionUpdatedAt
+                sourceSessionUpdatedAt: sourceSessionUpdatedAt,
+                muscleSummarySnapshot: exercise.muscleSummarySnapshot
             )
         }
     }
@@ -300,7 +305,7 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
 
         if didMutate {
             do {
-                try backgroundContext.save()
+                try backgroundContext.saveWithRecoveryProtection()
                 HistoryAnalyticsCache.shared.invalidate(container: container)
             } catch {
                 failedSessionIDs.formUnion(processedSessionIDs)

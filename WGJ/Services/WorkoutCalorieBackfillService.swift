@@ -9,7 +9,7 @@ nonisolated struct WorkoutCalorieBackfillResult: Equatable, Sendable {
 nonisolated struct WorkoutCalorieBackfillDependencies {
     let saveBatch: (ModelContext) throws -> Void
 
-    init(saveBatch: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
+    init(saveBatch: @escaping (ModelContext) throws -> Void = { try $0.saveWithRecoveryProtection() }) {
         self.saveBatch = saveBatch
     }
 }

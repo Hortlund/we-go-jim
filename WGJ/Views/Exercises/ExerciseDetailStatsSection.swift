@@ -16,6 +16,7 @@ struct ExerciseDetailStatsSection: View {
     @State private var selectedRange: ExerciseProgressRange = .sixMonths
     @State private var chartSelectionRevision = 0
     @State private var configuredDatasetID: String?
+    @State private var presentation: ExerciseProgressPresentation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -37,8 +38,27 @@ struct ExerciseDetailStatsSection: View {
     }
 
     private func readyContent(_ dataset: ExerciseProgressDataset) -> some View {
-        let projection = projection(for: dataset)
-        let availabilityByMetric = availabilityByMetric(for: dataset)
+        let request = ExerciseProgressPresentationRequest(dataset: dataset, metric: selectedMetric,
+            range: selectedRange, day: Calendar.current.startOfDay(for: .now))
+        return Group {
+            if let presentation, presentation.request == request {
+                projectedContent(presentation)
+            } else { loadingContent }
+        }
+        .task(id: request) {
+            let calendar = Calendar.current
+            let now = Date()
+            let result = await Task.detached(priority: .userInitiated) {
+                ExerciseProgressPresentation.build(request, calendar: calendar, now: now)
+            }.value
+            guard !Task.isCancelled else { return }
+            presentation = result
+        }
+    }
+
+    private func projectedContent(_ presentation: ExerciseProgressPresentation) -> some View {
+        let projection = presentation.projection
+        let availabilityByMetric = presentation.availability
         return VStack(alignment: .leading, spacing: 14) {
             controls(availabilityByMetric: availabilityByMetric)
             if let summary = projection.summary {
@@ -181,16 +201,6 @@ struct ExerciseDetailStatsSection: View {
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .wgjCardContainer()
-    }
-
-    private func projection(for dataset: ExerciseProgressDataset, metric: ExerciseProgressMetric? = nil) -> ExerciseProgressProjection {
-        ExerciseProgressProjector.project(
-            dataset: dataset,
-            metric: metric ?? selectedMetric,
-            range: selectedRange,
-            now: .now,
-            calendar: .current
-        )
     }
 
     private func availabilityByMetric(

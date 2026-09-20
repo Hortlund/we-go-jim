@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 
 nonisolated final class HistoryProjectionRepository {
+    static let currentVersion = 5
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
 
@@ -21,29 +22,95 @@ nonisolated final class HistoryProjectionRepository {
             repository: sessionRepository
         )
         let existingFacts = try facts(forSessionID: sessionID)
-        let didChange = apply(drafts: drafts, to: existingFacts, sessionID: sessionID)
+        var didChange = apply(drafts: drafts, to: existingFacts, sessionID: sessionID)
+        let summaries = try modelContext.fetch(FetchDescriptor<ExerciseSessionSummary>(predicate: #Predicate { $0.sessionID == sessionID }))
+        let projected = drafts.map { $0.makeModel() }
+        let oldCardio = try modelContext.fetch(FetchDescriptor<CompletedCardioFact>(predicate: #Predicate { $0.sessionID == sessionID }))
+        let activities = try sessionRepository.sessionCardioBlocks(sessionID: sessionID).filter { $0.isCompleted && ($0.actualDurationSeconds ?? 0) > 0 }
+        let oldByID = Dictionary(oldCardio.map { ($0.activityID, $0) }, uniquingKeysWith: { first, _ in first })
+        let activityIDs = Set(activities.map(\.id))
+        for old in oldCardio where !activityIDs.contains(old.activityID) { modelContext.delete(old); didChange = true }
+        var cardio: [CompletedCardioFact] = []
+        for activity in activities {
+            if let old = oldByID[activity.id] {
+                let duration = Double(activity.actualDurationSeconds ?? 0)
+                let date = session.endedAt ?? session.startedAt
+                if old.durationSeconds != duration || old.distanceMeters != activity.actualDistanceMeters
+                    || old.completedAt != date || old.isArchived != (session.archivedAt != nil)
+                    || old.exerciseName != activity.exerciseNameSnapshot || old.catalogExerciseUUID != activity.catalogExerciseUUID {
+                    old.durationSeconds = duration; old.distanceMeters = activity.actualDistanceMeters
+                    old.completedAt = date; old.isArchived = session.archivedAt != nil
+                    old.exerciseName = activity.exerciseNameSnapshot; old.catalogExerciseUUID = activity.catalogExerciseUUID
+                    didChange = true
+                }
+                cardio.append(old)
+            } else {
+                let fact = CompletedCardioFact(activity: activity, session: session)
+                modelContext.insert(fact); cardio.append(fact); didChange = true
+            }
+        }
+        let entries = ExerciseHistorySummaryBuilder.entries(facts: projected, cardio: cardio)
+        let existingByExercise = Dictionary(summaries.map { ($0.catalogExerciseUUID, $0) }, uniquingKeysWith: { first, _ in first })
+        for row in summaries where entries[row.catalogExerciseUUID] == nil {
+            modelContext.delete(row)
+            didChange = true
+        }
+        for (exerciseUUID, entry) in entries {
+            let payload = try BackupArchiveCodec.json(entry)
+            if let row = existingByExercise[exerciseUUID] {
+                if row.payload != payload || row.sourceUpdatedAt != session.updatedAt || row.isArchived != (session.archivedAt != nil) {
+                    row.payload = payload
+                    row.oneRepMax = entry.weightedOneRepMaxInKilograms
+                    row.maxWeight = entry.maxWeightInKilograms
+                    row.volume = entry.totalWeightedVolumeInKilograms
+                    row.maxReps = entry.maxReps
+                    row.completedAt = entry.completedAt
+                    row.sourceUpdatedAt = session.updatedAt
+                    row.isArchived = session.archivedAt != nil
+                    didChange = true
+                }
+            } else {
+                modelContext.insert(try ExerciseSessionSummary(entry: entry, exerciseUUID: exerciseUUID, session: session))
+                didChange = true
+            }
+        }
+        for fact in try facts(forSessionID: sessionID) {
+            if fact.isArchived != (session.archivedAt != nil) {
+                fact.isArchived = session.archivedAt != nil
+                didChange = true
+            }
+        }
+        if session.projectionVersion != Self.currentVersion || session.projectionSourceUpdatedAt != session.updatedAt {
+            session.projectionVersion = Self.currentVersion
+            session.projectionSourceUpdatedAt = session.updatedAt
+            didChange = true
+        }
 
         if didChange, persistChanges {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
         if didChange {
             HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         }
 
-        return didChange ? drafts.count : 0
+        return didChange ? max(1, drafts.count) : 0
     }
 
     @discardableResult
     func deleteFacts(forSessionID sessionID: UUID, persistChanges: Bool = true) throws -> Int {
         let existingFacts = try facts(forSessionID: sessionID)
-        guard !existingFacts.isEmpty else { return 0 }
+        let summaries = try modelContext.fetch(FetchDescriptor<ExerciseSessionSummary>(predicate: #Predicate { $0.sessionID == sessionID }))
+        let cardio = try modelContext.fetch(FetchDescriptor<CompletedCardioFact>(predicate: #Predicate { $0.sessionID == sessionID }))
+        guard !existingFacts.isEmpty || !summaries.isEmpty || !cardio.isEmpty else { return 0 }
+        for row in cardio { modelContext.delete(row) }
+        for row in summaries { modelContext.delete(row) }
 
         for fact in existingFacts {
             modelContext.delete(fact)
         }
 
         if persistChanges {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
 
@@ -52,66 +119,46 @@ nonisolated final class HistoryProjectionRepository {
 
     @discardableResult
     func backfillIfNeeded(persistChanges: Bool = true) throws -> Int {
-        let completedSessions = try sessionRepository.completedSessions(includeArchived: true)
-        let validSessionIDs = Set(completedSessions.map(\.id))
-        let existingFacts = try allFacts()
-        let factsBySessionID = Dictionary(grouping: existingFacts, by: \.sessionID)
-        var rebuiltSessions = 0
-        var didMutate = false
-
-        for fact in existingFacts where !validSessionIDs.contains(fact.sessionID) {
-            modelContext.delete(fact)
-            didMutate = true
-        }
-
-        for session in completedSessions {
-            let drafts = try HistoryProjectionSnapshotBuilder.projectedFacts(
-                from: session,
-                repository: sessionRepository
-            )
-            let existing = factsBySessionID[session.id] ?? []
-            let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
-            guard hasStaleProjectionVersion || !factsMatch(existing, drafts: drafts) else { continue }
-
-            if apply(drafts: drafts, to: existing, sessionID: session.id) {
-                rebuiltSessions += 1
-                didMutate = true
+        let checkpoint = try modelContext.fetch(FetchDescriptor<HistoryProjectionCheckpoint>()).first
+        if checkpoint == nil {
+            // First upgrade, or disposable projection store was removed. Only headers are touched.
+            for session in try sessionRepository.completedSessions(includeArchived: true) {
+                session.projectionVersion = 0
             }
+            modelContext.insert(HistoryProjectionCheckpoint(version: Self.currentVersion))
         }
-
-        if didMutate, persistChanges {
-            try modelContext.save()
+        var count = 0
+        while true {
+            let sessions = try staleSessions(limit: 100)
+            guard !sessions.isEmpty else { break }
+            for session in sessions {
+                _ = try rebuildFacts(forSessionID: session.id, persistChanges: false)
+                count += 1
+            }
+            if persistChanges, modelContext.hasChanges { try modelContext.saveWithRecoveryProtection() }
         }
-        if didMutate {
-            HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
-        }
-
-        return rebuiltSessions
+        if let checkpoint, checkpoint.version != Self.currentVersion { checkpoint.version = Self.currentVersion }
+        if persistChanges, modelContext.hasChanges { try modelContext.saveWithRecoveryProtection() }
+        return count
     }
 
     func needsBackfill() throws -> Bool {
-        let completedSessions = try sessionRepository.completedSessions(includeArchived: true)
-        let validSessionIDs = Set(completedSessions.map(\.id))
-        let existingFacts = try allFacts()
-        let factsBySessionID = Dictionary(grouping: existingFacts, by: \.sessionID)
-
-        if existingFacts.contains(where: { !validSessionIDs.contains($0.sessionID) }) {
-            return true
+        if try !staleSessions(limit: 1).isEmpty { return true }
+        if try modelContext.fetchCount(FetchDescriptor<HistoryProjectionCheckpoint>()) == 0 {
+            let completed = WorkoutSessionStatus.completed.rawValue
+            return try modelContext.fetchCount(FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.statusRaw == completed })) > 0
         }
-
-        for session in completedSessions {
-            let drafts = try HistoryProjectionSnapshotBuilder.projectedFacts(
-                from: session,
-                repository: sessionRepository
-            )
-            let existing = factsBySessionID[session.id] ?? []
-            let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
-            if hasStaleProjectionVersion || factsMatch(existing, drafts: drafts) == false {
-                return true
-            }
-        }
-
         return false
+    }
+
+    private func staleSessions(limit: Int) throws -> [WorkoutSession] {
+        let completed = WorkoutSessionStatus.completed.rawValue
+        let version = Self.currentVersion
+        var descriptor = FetchDescriptor<WorkoutSession>(predicate: #Predicate {
+            $0.statusRaw == completed && ($0.projectionVersion < version || $0.projectionSourceUpdatedAt != $0.updatedAt)
+        })
+        descriptor.fetchLimit = limit
+        return try modelContext.fetch(descriptor)
     }
 
     func facts(forSessionID sessionID: UUID) throws -> [CompletedSetFact] {
@@ -190,6 +237,8 @@ nonisolated final class HistoryProjectionRepository {
     private func update(_ fact: CompletedSetFact, with draft: CompletedSetFactDraft) -> Bool {
         guard !draft.matches(fact) else { return false }
 
+        fact.parentSetID = draft.parentSetID
+        fact.muscleSummarySnapshot = draft.muscleSummarySnapshot
         fact.sessionID = draft.sessionID
         fact.sessionExerciseID = draft.sessionExerciseID
         fact.templateID = draft.templateID
@@ -243,9 +292,11 @@ nonisolated struct CompletedSetFactDraft: Equatable, Sendable {
     let estimatedOneRepMaxKg: Double?
     let volumeKg: Double?
     let sourceSessionUpdatedAt: Date
+    var muscleSummarySnapshot: String = ""
+    var parentSetID: UUID? = nil
 
     nonisolated func makeModel() -> CompletedSetFact {
-        CompletedSetFact(
+        let model = CompletedSetFact(
             sessionSetID: sessionSetID,
             sessionID: sessionID,
             sessionExerciseID: sessionExerciseID,
@@ -263,10 +314,15 @@ nonisolated struct CompletedSetFactDraft: Equatable, Sendable {
             volumeKg: volumeKg,
             sourceSessionUpdatedAt: sourceSessionUpdatedAt
         )
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.parentSetID = parentSetID
+        return model
     }
 
     nonisolated func matches(_ fact: CompletedSetFact) -> Bool {
-        fact.sessionSetID == sessionSetID
+        fact.parentSetID == parentSetID
+            && fact.muscleSummarySnapshot == muscleSummarySnapshot
+            && fact.sessionSetID == sessionSetID
             && fact.sessionID == sessionID
             && fact.sessionExerciseID == sessionExerciseID
             && fact.templateID == templateID

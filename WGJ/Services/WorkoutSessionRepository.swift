@@ -165,6 +165,7 @@ nonisolated final class WorkoutSessionRepository {
     private let autoSaveChanges: Bool
     private let boundaryEffects: UserDataBackupBoundaryEffects
     private var pendingPostCommitEffects: Set<PostCommitEffect> = []
+    private var needsHistoryRebuildBeforeSave = false
 
     private enum PostCommitEffect: Hashable {
         case invalidateAnalytics
@@ -205,7 +206,9 @@ nonisolated final class WorkoutSessionRepository {
     private func saveUserDataChanges() throws {
         guard autoSaveChanges else { return }
         guard modelContext.hasChanges else { return }
-        try modelContext.save()
+        try prepareWorkoutCommit()
+        try modelContext.saveWithRecoveryProtection()
+        needsHistoryRebuildBeforeSave = false
     }
 
     private func saveUserDataChanges(
@@ -213,7 +216,9 @@ nonisolated final class WorkoutSessionRepository {
     ) throws {
         if autoSaveChanges {
             guard modelContext.hasChanges else { return }
-            try modelContext.save()
+            try prepareWorkoutCommit()
+            try modelContext.saveWithRecoveryProtection()
+            needsHistoryRebuildBeforeSave = false
             apply(postCommitEffects)
         } else {
             pendingPostCommitEffects.formUnion(postCommitEffects)
@@ -224,13 +229,24 @@ nonisolated final class WorkoutSessionRepository {
         guard !autoSaveChanges else { return }
         guard modelContext.hasChanges else {
             pendingPostCommitEffects.removeAll()
+            needsHistoryRebuildBeforeSave = false
             return
         }
 
-        try modelContext.save()
+        try prepareWorkoutCommit()
+        try modelContext.saveWithRecoveryProtection()
+        needsHistoryRebuildBeforeSave = false
         let effects = pendingPostCommitEffects
         pendingPostCommitEffects.removeAll()
         apply(effects)
+    }
+
+    private func prepareWorkoutCommit() throws {
+        try WorkoutCommitPreparation.stampChangedWorkouts(in: modelContext)
+        if needsHistoryRebuildBeforeSave {
+            _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+            _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
+        }
     }
 
     private func apply(_ effects: Set<PostCommitEffect>) {
@@ -581,6 +597,11 @@ nonisolated final class WorkoutSessionRepository {
         var limitedDescriptor = descriptor
         limitedDescriptor.fetchLimit = 1
         return try modelContext.fetch(limitedDescriptor).first?.updatedAt
+    }
+
+    func sessionDropStages(setIDs: Set<UUID>) throws -> [WorkoutSessionDropStage] {
+        guard !setIDs.isEmpty else { return [] }
+        return try modelContext.fetch(FetchDescriptor<WorkoutSessionDropStage>(predicate: #Predicate { setIDs.contains($0.sessionSetID) }))
     }
 
     func sessionExercises(sessionID: UUID) throws -> [WorkoutSessionExercise] {
@@ -1061,6 +1082,8 @@ nonisolated final class WorkoutSessionRepository {
         let now = Date()
         session.archivedAt = now
         session.updatedAt = now
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
         try saveUserDataChanges(postCommitEffects: [
             .invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange, .scheduleBackup(.workoutEdited)
         ])
@@ -1079,6 +1102,8 @@ nonisolated final class WorkoutSessionRepository {
 
         session.archivedAt = nil
         session.updatedAt = Date()
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
         try saveUserDataChanges(postCommitEffects: [
             .invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange, .scheduleBackup(.workoutEdited)
         ])
@@ -1115,10 +1140,7 @@ nonisolated final class WorkoutSessionRepository {
         if session.status == .completed {
             let end = session.endedAt ?? .now
             session.durationSeconds = max(0, Int(end.timeIntervalSince(session.startedAt)))
-            _ = try historyProjectionRepository.rebuildFacts(
-                forSessionID: sessionID,
-                persistChanges: false
-            )
+            needsHistoryRebuildBeforeSave = true
         }
 
         var effects: Set<PostCommitEffect> = [.invalidateAnalytics]
@@ -1132,39 +1154,25 @@ nonisolated final class WorkoutSessionRepository {
 
     @discardableResult
     func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
-        let rebuiltProjectionCount = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
-        let sessions = try completedSessions(includeArchived: true)
-        let staleSessions = sessions.filter {
-            $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        let count = try HistoryRecordRebuilder.rebuild(in: modelContext)
+        if modelContext.hasChanges { try saveUserDataChanges() }
+        if count > 0 {
+            invalidateAnalyticsCache()
+            publishWeeklyGoalWidgetProgress()
+            WorkoutHistoryChangeBroadcaster.post()
         }
-        guard !staleSessions.isEmpty else {
-            if rebuiltProjectionCount > 0 {
-                try saveUserDataChanges()
-            }
-            return 0
-        }
-
-        let metrics = WorkoutMetricsService(modelContext: modelContext)
-
-        for session in staleSessions {
-            let summary = try metrics.sessionSummary(sessionID: session.id)
-            session.totalVolume = summary.totalVolume
-            session.prHitsCount = summary.prHitsCount
-            session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
-        }
-
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        publishWeeklyGoalWidgetProgress()
-        WorkoutHistoryChangeBroadcaster.post()
-        return staleSessions.count
+        return count
     }
 
     func hasStaleCompletedSessionSummaries() throws -> Bool {
-        let sessions = try completedSessions(includeArchived: true)
-        return sessions.contains {
-            $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
-        }
+        let completed = WorkoutSessionStatus.completed.rawValue
+        let version = WorkoutMetricsService.currentSummaryMetricsVersion
+        var descriptor = FetchDescriptor<WorkoutSession>(predicate: #Predicate {
+            $0.statusRaw == completed && $0.summaryMetricsVersion < version
+        })
+        descriptor.fetchLimit = 1
+        return try !modelContext.fetch(descriptor).isEmpty
     }
 
     func deleteSession(id: UUID) throws {
@@ -1179,6 +1187,8 @@ nonisolated final class WorkoutSessionRepository {
         ))
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
         var effects: Set<PostCommitEffect> = [.invalidateAnalytics, .publishWeeklyGoalWidget, .broadcastHistoryChange]
         if wasCompleted { effects.insert(.scheduleBackup(.workoutDeleted)) }
         try saveUserDataChanges(postCommitEffects: effects)

@@ -45,6 +45,7 @@ final class AppLaunchBootstrapTests: XCTestCase {
         await assertEventually { state.resolvedBootstrap != nil }
 
         XCTAssertEqual(state.resolvedBootstrap?.bootstrap.persistenceMode, .durable)
+        XCTAssertFalse(container.mainContext.autosaveEnabled)
         XCTAssertNil(state.recoveryState)
     }
 

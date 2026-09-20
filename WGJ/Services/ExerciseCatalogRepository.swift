@@ -67,7 +67,7 @@ nonisolated final class ExerciseCatalogRepository {
 
     private func saveUserDataChanges() throws {
         guard modelContext.hasChanges else { return }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         boundaryEffects.scheduleBackup(modelContext.container, .customExerciseSaved)
     }
 
@@ -143,7 +143,7 @@ nonisolated final class ExerciseCatalogRepository {
             entityID: UUID(),
             entityKey: remoteUUID
         ))
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         modelContext.delete(exercise)
         try saveUserDataChanges()
     }

@@ -1151,7 +1151,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
         for legacySession in legacySessions {
             modelContext.delete(legacySession)
         }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         return runtime
     }
 

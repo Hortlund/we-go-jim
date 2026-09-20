@@ -75,7 +75,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
         let created = ActiveWorkoutDraftSession(name: cleanedName)
         modelContext.insert(created)
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         return created
     }
 
@@ -226,7 +226,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             membershipsByExerciseID: supersetMembershipsByExerciseID
         )
 
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         return session
     }
 
@@ -324,7 +324,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let cleaned = try ReviewModerationService.validateUserInput(name, kind: .workoutName)
         session.name = cleaned
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func updateSessionNotes(sessionID: UUID, notes: String) throws {
@@ -334,7 +334,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
         session.notes = notes
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func overrideExerciseComponent(sessionExerciseID: UUID, componentID: UUID) throws {
@@ -358,7 +358,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         exercise.categorySnapshot = component.categorySnapshot
         exercise.muscleSummarySnapshot = component.muscleSummarySnapshot
         exercise.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func addExercise(sessionID: UUID, catalogItem: ExerciseCatalogItem, restSeconds: Int = 120) throws {
@@ -395,7 +395,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         created.sets = sets
 
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func moveExercise(sessionID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
@@ -432,7 +432,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             )
         )
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func removeExercise(sessionID: UUID, sessionExerciseID: UUID) throws {
@@ -467,7 +467,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             )
         )
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func upsertCardioActivity(sessionID: UUID, draft: WorkoutCardioBlockDraft) throws {
@@ -512,7 +512,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
         normalizeCardioActivities(for: session, adding: cardioBlock)
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func updateCardioResult(
@@ -552,7 +552,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         cardioBlock.isCompleted = isCompleted
         cardioBlock.updatedAt = .now
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func setCardioCompletion(sessionID: UUID, activityID: UUID, isCompleted: Bool) throws {
@@ -571,7 +571,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         cardioBlock.isCompleted = isCompleted
         cardioBlock.updatedAt = .now
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func removeCardioActivity(sessionID: UUID, activityID: UUID) throws {
@@ -586,7 +586,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         modelContext.delete(cardioBlock)
         normalizeCardioActivities(for: session)
         session.updatedAt = .now
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func updateExerciseRest(sessionExerciseID: UUID, restSeconds: Int) throws {
@@ -598,7 +598,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         guard applyExerciseRest(restSeconds, to: exercise, now: now) else {
             return
         }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func updateExerciseRepRange(sessionExerciseID: UUID, minReps: Int?, maxReps: Int?) throws {
@@ -610,7 +610,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         guard applyExerciseRepRange(minReps: minReps, maxReps: maxReps, to: exercise, now: now) else {
             return
         }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func updateExerciseNotes(sessionExerciseID: UUID, notes: String) throws {
@@ -622,7 +622,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         guard applyExerciseNotes(notes, to: exercise, now: now) else {
             return
         }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func saveSetDrafts(sessionExerciseID: UUID, drafts: [WorkoutSessionSetDraft]) throws {
@@ -635,7 +635,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         guard changes.didMutateExerciseStructure || changes.didMutateAnySet else {
             return
         }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func persistExerciseSnapshot(
@@ -676,7 +676,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         }
 
         guard shouldSave else { return }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func persistCheckpoint(
@@ -783,7 +783,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         }
 
         if shouldSave {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
 
         return ActiveWorkoutCheckpointPersistenceResult(
@@ -899,7 +899,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
         try deleteDraftAggregateRows(sessionID: sessionID)
         modelContext.delete(session)
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     private func deleteDraftAggregateRows(sessionID: UUID) throws {
@@ -1123,7 +1123,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
     }
 
     private func saveUserDataMutation() throws {
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     private func sessionExercise(id: UUID) throws -> ActiveWorkoutDraftExercise? {

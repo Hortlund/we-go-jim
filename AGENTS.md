@@ -4,4 +4,5 @@
 - Keep WGJ local-first. Active workout progress and template edits persist locally during edits; CloudKit backup is best-effort only at explicit save boundaries.
 - Keep SwiftUI thin. Put persistence and business rules in repositories/services, not view bodies.
 - Respect SwiftData boundaries. Avoid broad background sync, no-op save churn, and CloudKit work on interaction paths.
+- Commit ordinary ModelContext writes through `saveWithRecoveryProtection()`. Only the restore transaction may save directly while holding `LocalStoreWriteBarrier`; keep main-context autosave disabled.
 - Verify with focused builds/tests when requested. If verification is skipped by request, say so clearly.

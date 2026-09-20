@@ -9,7 +9,8 @@ nonisolated enum ExerciseProgressProjector {
         calendar: Calendar,
         maximumChartPointCount: Int = 60
     ) -> ExerciseProgressProjection {
-        let sessions = sessionsInRange(dataset.sessions, range: range, now: now, calendar: calendar)
+        let sessions = sessionsInRange(dataset.sessions, range: range, now: now, calendar: calendar,
+            alignToWeek: metric == .workoutFrequency)
         let points = points(
             from: sessions,
             metric: metric,
@@ -19,7 +20,15 @@ nonisolated enum ExerciseProgressProjector {
         )
         let availability = availability(for: metric, hasCompatibleData: !points.isEmpty)
         let summary = summary(points: points, sessions: sessions)
-        let milestones = milestones(points: points, metric: metric)
+        let lifetimePoints = self.points(
+            from: sessionsInRange(dataset.sessions, range: .allTime, now: now, calendar: calendar),
+            metric: metric, displayUnit: dataset.preferredLoadUnit, now: now, calendar: calendar
+        )
+        let visiblePointIDs = Set(points.map(\.id))
+        let milestones = cappedMilestones(
+            self.milestones(points: lifetimePoints, metric: metric).filter { visiblePointIDs.contains($0.pointID) },
+            maximumCount: 24
+        )
         let chartPoints = downsample(
             points: points,
             milestones: milestones,
@@ -54,9 +63,14 @@ nonisolated enum ExerciseProgressProjector {
     ) -> [ExerciseProgressMetric: ExerciseProgressAvailability] {
         let sessions = sessionsInRange(dataset.sessions, range: range, now: now, calendar: calendar)
         var availableMetrics: Set<ExerciseProgressMetric> = []
+        if !sessionsInRange(dataset.sessions, range: range, now: now, calendar: calendar, alignToWeek: true).isEmpty {
+            availableMetrics.insert(.workoutFrequency)
+        }
 
         for session in sessions {
-            availableMetrics.insert(.totalReps)
+            if session.completedSetCount > 0 || session.totalReps > 0 { availableMetrics.insert(.totalReps) }
+            if session.durationSeconds != nil { availableMetrics.insert(.duration) }
+            if session.distanceMeters != nil { availableMetrics.insert(.distance) }
             availableMetrics.insert(.workoutFrequency)
             if session.estimatedOneRepMaxKilograms != nil { availableMetrics.insert(.estimatedOneRepMax) }
             if session.heaviestWeightKilograms != nil { availableMetrics.insert(.heaviestWeight) }
@@ -77,15 +91,21 @@ nonisolated enum ExerciseProgressProjector {
         _ sessions: [ExerciseProgressSession],
         range: ExerciseProgressRange,
         now: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        alignToWeek: Bool = false
     ) -> [ExerciseProgressSession] {
-        let cutoff: Date?
+        var cutoff: Date?
         switch range {
         case .oneMonth: cutoff = calendar.date(byAdding: .month, value: -1, to: now)
         case .threeMonths: cutoff = calendar.date(byAdding: .month, value: -3, to: now)
         case .sixMonths: cutoff = calendar.date(byAdding: .month, value: -6, to: now)
         case .oneYear: cutoff = calendar.date(byAdding: .year, value: -1, to: now)
         case .allTime: cutoff = nil
+        }
+        // A weekly bucket must have the same count in the chart, summary and
+        // lifetime milestones, including the week intersecting the range boundary.
+        if alignToWeek, let date = cutoff {
+            cutoff = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
         }
         return sessions.filter { session in
             session.completedAt <= now && (cutoff.map { session.completedAt >= $0 } ?? true)
@@ -110,7 +130,9 @@ nonisolated enum ExerciseProgressProjector {
             case .heaviestWeight: rawValue = session.heaviestWeightKilograms
             case .sessionVolume: rawValue = session.sessionVolumeKilograms
             case .bestSetReps: rawValue = session.bestSetReps.map(Double.init)
-            case .totalReps: rawValue = Double(session.totalReps)
+            case .totalReps: rawValue = (session.completedSetCount > 0 || session.totalReps > 0) ? Double(session.totalReps) : nil
+            case .duration: rawValue = session.durationSeconds
+            case .distance: rawValue = session.distanceMeters
             case .workoutFrequency: rawValue = nil
             }
             guard let rawValue else { return nil }
@@ -220,7 +242,7 @@ nonisolated enum ExerciseProgressProjector {
         if let latest = points.last, result.last?.pointID != latest.id {
             result.append(milestone(latest, kind: .latestPerformance))
         }
-        return cappedMilestones(result, maximumCount: 24)
+        return result
     }
 
     private static func milestone(
@@ -246,7 +268,7 @@ nonisolated enum ExerciseProgressProjector {
             return abs(current - previous) >= 2
         case .workoutFrequency:
             return abs(current - previous) >= 1
-        case .estimatedOneRepMax, .heaviestWeight, .sessionVolume:
+        case .estimatedOneRepMax, .heaviestWeight, .sessionVolume, .duration, .distance:
             guard previous != 0 else { return current != 0 }
             return abs(current - previous) / abs(previous) >= 0.05
         }

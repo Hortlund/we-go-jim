@@ -26,7 +26,7 @@ nonisolated final class ProfileWidgetRepository {
 
     private func saveUserDataChanges() throws {
         guard modelContext.hasChanges else { return }
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         boundaryEffects.scheduleBackup(modelContext.container, .profileWidgetsSaved)
     }
 
@@ -257,7 +257,7 @@ nonisolated final class ProfileWidgetRepository {
         }
 
         if didInsert || didChange {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
     }
 
@@ -274,7 +274,7 @@ nonisolated final class ProfileWidgetRepository {
             sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
         )
         modelContext.insert(created)
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         return created
     }
 

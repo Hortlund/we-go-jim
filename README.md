@@ -221,3 +221,7 @@ Good contributions tend to:
 ## License
 
 WGJ is released under the [MIT License](LICENSE).
+
+### Data storage and backup deployment
+
+See [DATA_STORAGE.md](DATA_STORAGE.md) for the local schema, incremental backup format, migration and recovery behavior, rollout steps, and measured large-history fixtures.

@@ -128,6 +128,31 @@ final class ExerciseProgressProjectorTests: XCTestCase {
         XCTAssertEqual(projection.points.map(\.value), [1, 0, 0, 1, 0])
     }
 
+    func testFrequencyRangeUsesSameWholeWeekForPointsAndMilestones() throws {
+        let history = dataset(sessions: [17, 18, 19, 21].map {
+            session(day: date(2026, 8, $0), bestSetReps: 5)
+        })
+        let projection = ExerciseProgressProjector.project(dataset: history, metric: .workoutFrequency,
+            range: .oneMonth, now: date(2026, 9, 20), calendar: calendar)
+        let first = try XCTUnwrap(projection.points.first)
+        XCTAssertEqual(first.value, 4)
+        XCTAssertEqual(projection.summary?.sessionCount, 4)
+        for event in projection.milestones {
+            XCTAssertEqual(event.value, projection.points.first { $0.id == event.pointID }?.value)
+        }
+    }
+
+    func testFrequencyAvailabilityIncludesBoundaryWeekWithoutExpandingOtherMetrics() {
+        let history = dataset(sessions: [session(day: date(2026, 8, 18), bestSetReps: 5)])
+        let availability = ExerciseProgressProjector.availabilityByMetric(dataset: history,
+            range: .oneMonth, now: date(2026, 9, 20), calendar: calendar)
+        XCTAssertEqual(availability[.workoutFrequency]?.isAvailable, true)
+        XCTAssertEqual(availability[.bestSetReps]?.isAvailable, false)
+        let projection = ExerciseProgressProjector.project(dataset: history, metric: .workoutFrequency,
+            range: .oneMonth, now: date(2026, 9, 20), calendar: calendar)
+        XCTAssertTrue(projection.availability.isAvailable)
+    }
+
     func testSummaryAndMilestonesUseCompleteRangeHistory() throws {
         let projection = ExerciseProgressProjector.project(
             dataset: dataset(sessions: [

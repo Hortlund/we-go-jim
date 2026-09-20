@@ -14,6 +14,8 @@ struct AppStorageDiagnosticsView: View {
     @State private var isRestoringCloudBackup = false
     @State private var showingStoreResetConfirmation = false
     @State private var showingCloudRestoreConfirmation = false
+    @State private var showingPreviousRestoreConfirmation = false
+    @State private var showingLocalBackupConfirmation = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showingAlert = false
@@ -159,6 +161,25 @@ struct AppStorageDiagnosticsView: View {
             } message: {
                 Text("This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup.")
             }
+            Button("Use This Device’s Data") { showingLocalBackupConfirmation = true }
+                .buttonStyle(WGJGhostButtonStyle())
+                .disabled(!cloudSyncEnabled || isRestoringCloudBackup || isClearing)
+                .confirmationDialog("Make this device’s data the current backup?", isPresented: $showingLocalBackupConfirmation, titleVisibility: .visible) {
+                    Button("Back Up This Device", role: .destructive) { replaceCloudBackup() }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Workouts from other devices will not be merged. The previous complete backup remains available for recovery.")
+                }
+            Button("Restore Previous Cloud Backup") { showingPreviousRestoreConfirmation = true }
+                .buttonStyle(WGJGhostButtonStyle())
+                .disabled(!cloudSyncEnabled || isRestoringCloudBackup || isClearing)
+                .confirmationDialog("Restore the previous backup?", isPresented: $showingPreviousRestoreConfirmation, titleVisibility: .visible) {
+                    Button("Restore Previous Backup", role: .destructive) { restoreCloudBackup(previousGeneration: true) }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This replaces this device’s data with the previous complete backup. The current cloud backup is kept until you save again.")
+                }
+
         }
         .padding(14)
         .wgjCardContainer()
@@ -254,7 +275,30 @@ struct AppStorageDiagnosticsView: View {
         }
     }
 
-    private func restoreCloudBackup() {
+    private func replaceCloudBackup() {
+        guard cloudSyncEnabled, !isRestoringCloudBackup else { return }
+        isRestoringCloudBackup = true
+        let container = modelContext.container
+        Task.detached(priority: .utility) {
+            do {
+                try BackupLocalJournal.markPending(for: container)
+                let result = try await UserDataCloudBackupService(localContainer: container, backupStore: CloudKitUserDataCloudBackupStore())
+                    .exportCurrentBackup(replacingRemote: true)
+                await MainActor.run {
+                    AppRuntimeState.shared.recordSuccessfulCloudBackup(result)
+                    isRestoringCloudBackup = false
+                    showAlert(title: "Backup Complete", message: "This device’s saved data is now the current cloud backup.")
+                }
+            } catch {
+                await MainActor.run {
+                    isRestoringCloudBackup = false
+                    showAlert(title: "Backup Failed", message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func restoreCloudBackup(previousGeneration: Bool = false) {
         guard cloudSyncEnabled, !isRestoringCloudBackup else { return }
         isRestoringCloudBackup = true
         let container = modelContext.container
@@ -263,7 +307,7 @@ struct AppStorageDiagnosticsView: View {
                 let restoreResult = try await UserDataCloudBackupService(
                     localContainer: container,
                     backupStore: CloudKitUserDataCloudBackupStore()
-                ).restoreLatestBackup(replacingLocalData: true)
+                ).restoreLatestBackup(replacingLocalData: true, previousGeneration: previousGeneration)
                 let loadedSnapshot = AppStorageDiagnosticsService.snapshot()
 
                 await MainActor.run {
@@ -272,8 +316,8 @@ struct AppStorageDiagnosticsView: View {
                     if let restoreResult {
                         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                         let message = restoreResult.cleanupWarnings.isEmpty
-                            ? "Latest CloudKit backup was restored on this device."
-                            : "Latest CloudKit backup was restored. Some old local artifacts will be cleaned up automatically on the next launch."
+                            ? "CloudKit backup was restored on this device."
+                            : "CloudKit backup was restored. Some old local artifacts will be cleaned up automatically on the next launch."
                         showAlert(title: "Backup Restored", message: message)
                     } else {
                         showAlert(title: "No Backup Found", message: "WGJ could not find a CloudKit backup to restore.")
