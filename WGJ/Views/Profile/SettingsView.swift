@@ -100,6 +100,15 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Settings", subtitle: "Manage training preferences, legal details, privacy, and support.")
 
+                WGJNavigationTile(
+                    title: String(localized: "App Theme"),
+                    systemImage: "paintpalette.fill",
+                    subtitle: WGJThemePreferences.shared.selected.title,
+                    accessibilityID: "settings-app-theme-tile"
+                ) {
+                    AppThemePickerView()
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Library", subtitle: "Inspect the bundled on-device exercise database.")
 

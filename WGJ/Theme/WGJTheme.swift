@@ -1,68 +1,104 @@
 import SwiftUI
 import UIKit
 
+// Values are cached per palette; reading a token observes the selected theme.
+struct WGJPalette {
+    var bgBase = Color(UIColor.dynamic(light: 0xF4F7FA, dark: 0x0A1016))
+    var bgElevated = Color(UIColor.dynamic(light: 0xE6EDF4, dark: 0x111922))
+    var bgFloating = Color(UIColor.dynamic(light: 0xDDE7F0, dark: 0x18232E))
+
+    var card = Color(UIColor.dynamic(light: 0xFFFFFF, dark: 0x16202A))
+    var cardStrong = Color(UIColor.dynamic(light: 0xF8FBFD, dark: 0x1B2733))
+    var cardElevated = Color(UIColor.dynamic(light: 0xEEF4F9, dark: 0x22303D))
+    var field = Color(UIColor.dynamic(light: 0xEEF3F8, dark: 0x111A23))
+    var fieldStrong = Color(UIColor.dynamic(light: 0xE6EDF4, dark: 0x18232E))
+    var destructiveField = Color(UIColor.dynamic(light: 0xFBEDEE, dark: 0x2C181B))
+
+    var textPrimary = Color(UIColor.dynamic(light: 0x0D1520, dark: 0xF5F7FA))
+    var textSecondary = Color(UIColor.dynamic(light: 0x566476, dark: 0xA4AFBC))
+    var textTertiary = Color(UIColor.dynamic(light: 0x7F8A98, dark: 0x7B8795))
+    var textInverse = Color(UIColor.dynamic(light: 0xFFFFFF, dark: 0x0B1016))
+
+    var accentBlue = Color(UIColor.dynamic(light: 0x1E86FF, dark: 0x6DB5FF))
+    var accentCyan = Color(UIColor.dynamic(light: 0x2CB8D9, dark: 0x7CE3EF))
+    var accentPurple = Color(UIColor.dynamic(light: 0xA4B5FF, dark: 0x9FB0FF))
+    var accentGold = Color(UIColor.dynamic(light: 0xB48A2D, dark: 0xE0C56B))
+    var success = Color(UIColor.dynamic(light: 0x1A9D6F, dark: 0x62D8A6))
+    var warning = Color(UIColor.dynamic(light: 0xC58A2E, dark: 0xE6BE73))
+    var danger = Color(UIColor.dynamic(light: 0xD65A5A, dark: 0xFF8484))
+}
+
 enum WGJTheme {
-    static let bgBase = Color(UIColor.dynamic(light: 0xF4F7FA, dark: 0x0A1016))
-    static let bgElevated = Color(UIColor.dynamic(light: 0xE6EDF4, dark: 0x111922))
-    static let bgFloating = Color(UIColor.dynamic(light: 0xDDE7F0, dark: 0x18232E))
+    static var usesMatteSurfaces: Bool { WGJThemePreferences.shared.selected.usesMatteSurfaces }
 
-    static let card = Color(UIColor.dynamic(light: 0xFFFFFF, dark: 0x16202A))
-    static let cardStrong = Color(UIColor.dynamic(light: 0xF8FBFD, dark: 0x1B2733))
-    static let cardElevated = Color(UIColor.dynamic(light: 0xEEF4F9, dark: 0x22303D))
-    static let field = Color(UIColor.dynamic(light: 0xEEF3F8, dark: 0x111A23))
-    static let fieldStrong = Color(UIColor.dynamic(light: 0xE6EDF4, dark: 0x18232E))
-    static let destructiveField = Color(UIColor.dynamic(light: 0xFBEDEE, dark: 0x2C181B))
+    static func headingFont(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
+        WGJThemePreferences.shared.selected.headingFont(style, weight: weight)
+    }
 
-    static let textPrimary = Color(UIColor.dynamic(light: 0x0D1520, dark: 0xF5F7FA))
-    static let textSecondary = Color(UIColor.dynamic(light: 0x566476, dark: 0xA4AFBC))
-    static let textTertiary = Color(UIColor.dynamic(light: 0x7F8A98, dark: 0x7B8795))
-    static let textInverse = Color(UIColor.dynamic(light: 0xFFFFFF, dark: 0x0B1016))
-
-    static let accentBlue = Color(UIColor.dynamic(light: 0x1E86FF, dark: 0x6DB5FF))
-    static let accentCyan = Color(UIColor.dynamic(light: 0x2CB8D9, dark: 0x7CE3EF))
-    static let accentPurple = Color(UIColor.dynamic(light: 0xA4B5FF, dark: 0x9FB0FF))
-    static let accentGold = Color(UIColor.dynamic(light: 0xB48A2D, dark: 0xE0C56B))
-    static let success = Color(UIColor.dynamic(light: 0x1A9D6F, dark: 0x62D8A6))
-    static let warning = Color(UIColor.dynamic(light: 0xC58A2E, dark: 0xE6BE73))
-    static let danger = Color(UIColor.dynamic(light: 0xD65A5A, dark: 0xFF8484))
+    static var bgBase: Color { WGJThemePreferences.shared.selected.palette.bgBase }
+    static var bgElevated: Color { WGJThemePreferences.shared.selected.palette.bgElevated }
+    static var bgFloating: Color { WGJThemePreferences.shared.selected.palette.bgFloating }
+    static var card: Color { WGJThemePreferences.shared.selected.palette.card }
+    static var cardStrong: Color { WGJThemePreferences.shared.selected.palette.cardStrong }
+    static var cardElevated: Color { WGJThemePreferences.shared.selected.palette.cardElevated }
+    static var field: Color { WGJThemePreferences.shared.selected.palette.field }
+    static var fieldStrong: Color { WGJThemePreferences.shared.selected.palette.fieldStrong }
+    static var destructiveField: Color { WGJThemePreferences.shared.selected.palette.destructiveField }
+    static var textPrimary: Color { WGJThemePreferences.shared.selected.palette.textPrimary }
+    static var textSecondary: Color { WGJThemePreferences.shared.selected.palette.textSecondary }
+    static var textTertiary: Color { WGJThemePreferences.shared.selected.palette.textTertiary }
+    static var textInverse: Color { WGJThemePreferences.shared.selected.palette.textInverse }
+    static var accentBlue: Color { WGJThemePreferences.shared.selected.palette.accentBlue }
+    static var accentCyan: Color { WGJThemePreferences.shared.selected.palette.accentCyan }
+    static var accentPurple: Color { WGJThemePreferences.shared.selected.palette.accentPurple }
+    static var accentGold: Color { WGJThemePreferences.shared.selected.palette.accentGold }
+    static var success: Color { WGJThemePreferences.shared.selected.palette.success }
+    static var warning: Color { WGJThemePreferences.shared.selected.palette.warning }
+    static var danger: Color { WGJThemePreferences.shared.selected.palette.danger }
 
     static let outline = Color.white.opacity(0.18)
     static let outlineStrong = Color.white.opacity(0.24)
     static let shadowSoft = Color.black.opacity(0.10)
     static let shadowStrong = Color.black.opacity(0.18)
-    static let rowDivider = accentBlue.opacity(0.20)
+    static var rowDivider: Color { (usesMatteSurfaces ? textSecondary : accentBlue).opacity(0.20) }
 
-    static let accent = accentBlue
+    static var accent: Color { accentBlue }
 
-    static let appHeroGradient = LinearGradient(
-        colors: [
-            Color.white.opacity(0.34),
-            accentBlue.opacity(0.12),
-            accentPurple.opacity(0.07),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static var appHeroGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                usesMatteSurfaces ? card : Color.white.opacity(0.34),
+                usesMatteSurfaces ? card : accentBlue.opacity(0.12),
+                usesMatteSurfaces ? card : accentPurple.opacity(0.07),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
-    static let headerOverlayGradient = LinearGradient(
-        colors: [
-            Color.white.opacity(0.24),
-            accentBlue.opacity(0.10),
-            accentCyan.opacity(0.08),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static var headerOverlayGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                usesMatteSurfaces ? card : Color.white.opacity(0.24),
+                usesMatteSurfaces ? card : accentBlue.opacity(0.10),
+                usesMatteSurfaces ? card : accentCyan.opacity(0.08),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
-    static let screenBackgroundGradient = LinearGradient(
-        colors: [
-            bgBase,
-            bgElevated,
-            accentBlue.opacity(0.04),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static var screenBackgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                bgBase,
+                usesMatteSurfaces ? bgBase : bgElevated,
+                usesMatteSurfaces ? bgBase : accentBlue.opacity(0.04),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 }
 
 enum WGJSpacing {
@@ -139,7 +175,8 @@ private struct WGJCardModifier: ViewModifier {
     let cornerRadius: CGFloat
 
     private var fillColor: Color {
-        strong ? WGJTheme.cardStrong.opacity(0.98) : WGJTheme.card.opacity(0.94)
+        if WGJTheme.usesMatteSurfaces { return strong ? WGJTheme.cardStrong : WGJTheme.card }
+        return strong ? WGJTheme.cardStrong.opacity(0.98) : WGJTheme.card.opacity(0.94)
     }
 
     private var strokeColor: Color {
@@ -166,6 +203,9 @@ private struct WGJGlassButtonBackground: View {
     private var fill: AnyShapeStyle {
         switch tone {
         case .primary:
+            if WGJTheme.usesMatteSurfaces {
+                return AnyShapeStyle(WGJTheme.accent.opacity(isPressed ? 0.85 : 1))
+            }
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [
@@ -193,6 +233,7 @@ private struct WGJGlassButtonBackground: View {
     }
 
     private var overlayFill: Color {
+        if WGJTheme.usesMatteSurfaces { return .clear }
         switch tone {
         case .primary:
             return Color.white.opacity(0.04)
@@ -228,7 +269,7 @@ private struct WGJGlassButtonBackground: View {
     }
 }
 
-private extension UIColor {
+extension UIColor {
     nonisolated static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
         UIColor { traits in
             traits.userInterfaceStyle == .dark
@@ -429,7 +470,7 @@ struct WGJSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.headline.weight(.semibold))
+                .font(WGJTheme.headingFont(.headline, weight: .semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
 
             if let subtitle, !subtitle.isEmpty {
@@ -453,7 +494,7 @@ struct WGJCompactSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.subheadline.weight(.bold))
+                .font(WGJTheme.headingFont(.subheadline))
                 .foregroundStyle(WGJTheme.textPrimary)
 
             if let subtitle, !subtitle.isEmpty {
@@ -549,7 +590,7 @@ struct WGJRootHeader<Trailing: View>: View {
     @ViewBuilder
     private var rootTitle: some View {
         let titleText = Text(title)
-            .font(.largeTitle.weight(.bold))
+            .font(WGJTheme.headingFont(.largeTitle))
             .foregroundStyle(WGJTheme.textPrimary)
             .wgjSingleLineText(scale: 0.82)
 

@@ -70,16 +70,18 @@ struct ExerciseBodyMapSection: View {
 }
 
 private extension BodyViewStyle {
-    static let wgjExerciseDetail = BodyViewStyle(
-        defaultFillColor: WGJTheme.cardElevated.opacity(0.95),
-        strokeColor: WGJTheme.outline.opacity(0.45),
-        strokeWidth: 0.55,
-        selectionColor: WGJTheme.accentBlue,
-        selectionStrokeColor: WGJTheme.accentBlue.opacity(0.95),
-        selectionStrokeWidth: 1.25,
-        headColor: WGJTheme.cardElevated.opacity(0.95),
-        hairColor: WGJTheme.textSecondary.opacity(0.45)
-    )
+    static var wgjExerciseDetail: BodyViewStyle {
+        BodyViewStyle(
+            defaultFillColor: WGJTheme.cardElevated.opacity(0.95),
+            strokeColor: WGJTheme.outline.opacity(0.45),
+            strokeWidth: 0.55,
+            selectionColor: WGJTheme.accentBlue,
+            selectionStrokeColor: WGJTheme.accentBlue.opacity(0.95),
+            selectionStrokeWidth: 1.25,
+            headColor: WGJTheme.cardElevated.opacity(0.95),
+            hairColor: WGJTheme.textSecondary.opacity(0.45)
+        )
+    }
 }
 
 private extension ExerciseBodyMapRegion {
