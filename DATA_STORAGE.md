@@ -13,6 +13,15 @@ WGJ remains local-first. Draft workout progress and template edits stay local. A
 - Chart projection runs outside the view body and main actor. Rendering remains capped at 60 points and 24 timeline events.
 - Workout frequency uses complete calendar weeks intersecting the selected date range (the current week runs through now). Chart points, summaries and lifetime milestones use the same weekly counts; other metrics keep their exact date cutoffs.
 
+## Profile and Coach reads
+
+- Profile identity is displayed from local storage immediately. Optional iCloud name enrichment runs separately only for the default name, coalesces concurrent attempts, and rechecks the profile before saving so a late response cannot overwrite a user edit.
+- Trend caches include the container, history revision and reset generation. Edits, archives, deletions and restore invalidate prior data. A batch checks projection freshness once, builds canonical fallback once per exercise, and decodes overlapping summaries once. Each metric retains its own eight-compatible-point SQL limit so recent reps-only workouts cannot hide older weighted results.
+- Profile dashboard caches are separate from the full exercise-history cache. Highlights keep lifetime header counts and exercise frequency; disabled PR widgets skip record payloads, and the heatmap reads payloads only for the current week. Requested payloads are fetched together. Widget configuration and calendar/week changes select separate bounded cache entries.
+- Weekly Coach calculations hydrate the current week plus the six most recent populated baseline weeks, jumping over gaps. Archived and warmup facts are excluded. Calculated insights are cached by history revision, calendar and week.
+- Generated Coach text is disposable: keep at most three revisions per week/kind, 36 recaps and 108 follow-ups, and expire text generated more than 84 days ago. Pruning runs on the background narrative store during writes and startup maintenance; an unchanged pruning pass does not save.
+- These changes use the existing schema and need no additional local or CloudKit migration. Lifetime highlight header reads still grow with history, and physical-device timings remain a release validation step.
+
 ## Backup format and size
 
 The v3 archive uses one immutable compressed chunk per completed workout or template, plus a shared profile/widgets/folders/custom-exercises chunk. Derived projections, bundled catalog data, image caches and active drafts are excluded. Each chunk has a SHA-256 integrity digest and a unique storage identity. LZFSE compression applies to the actual CloudKit asset; there is no duplicate inline payload.
@@ -70,6 +79,8 @@ xcodebuild -project WGJ.xcodeproj -scheme WGJ -configuration Debug \
 The scheme does not use a test plan. Normal simulator signing is needed for the app-group entitlements; do not disable signing for these tests.
 
 ## Validation completed
+
+- Profile/data efficiency follow-up: all 615 Debug unit tests passed, including the existing 2,500-workout/75,000-set fixture. After the final trend-read retry refinement and deletion assertion, all 19 focused profile/concurrency tests passed. Thirteen new tests cover trend freshness after edits/archive/delete/reset, batched compatible points and dirty fallback, dashboard request isolation and skipped payload decoding, nonblocking/offline identity loading and late-response protection, sparse Coach baseline weeks, cache revision/week changes, and bounded/idempotent text retention. Physical-device latency and memory improvements have not been measured.
 
 - After the follow-up review fixes: all 602 Debug unit tests passed on the iOS Simulator. The 50-test focused run also passed. Added regressions cover prompt main-thread save rejection during restore and successful retry afterward, reset with pending SQLite recovery and backup lineage, consistent partial-week chart/milestone counts and availability, and expiry of abandoned temporary files while active uploads remain intact.
 - After the review fixes: all 596 Debug unit tests passed on the iOS Simulator, including concurrent-save exclusion during failed restore, explicit recreation after remote deletion, same-account orphan cleanup after restore, missing-manifest cleanup retry, projection freshness at immediate/deferred save boundaries, and the 2,500-workout fixture. The focused 113-test run also passed before the final account-scope assertions were added.

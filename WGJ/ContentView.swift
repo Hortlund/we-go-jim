@@ -128,6 +128,9 @@ struct ContentView: View {
             coachWarmupTask?.cancel()
             workoutIdleTimerController.reset()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .wgjProfileIdentityDidChange).receive(on: RunLoop.main)) { _ in
+            appWarmupState.invalidateProfile()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged).receive(on: RunLoop.main)) { _ in
             startupCloudBackupStatusCheckTask?.cancel()
             appRuntimeState.resetCloudBackupSession()
@@ -347,9 +350,11 @@ struct ContentView: View {
     }
 
     private func scheduleExerciseImageCacheTrim() {
+        let backgroundStore = rootBackgroundStore
         Task.detached(priority: .utility) {
             await ExerciseImageCacheService().trimDiskCacheIfNeeded()
             CloudKitUserDataCloudBackupStore.removeExpiredTemporaryPayloads()
+            try? await backgroundStore.pruneCoachCache()
         }
     }
 
@@ -771,6 +776,9 @@ struct ContentView: View {
 
                 return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
             }
+            if appRuntimeState.cloudSyncEnabled {
+                await backgroundStore.scheduleProfileNameUpgrade(profile: snapshot)
+            }
             AppRuntimeState.shared.updateWorkoutRuntimePreferences(
                 notificationStyle: snapshot.workoutNotificationStyle,
                 keepsScreenAwake: snapshot.keepsScreenAwake
@@ -831,7 +839,7 @@ struct ContentView: View {
             calendar: WeeklyGoalWeekPolicy.calendar()
         )
         let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
-        let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
+        let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8, enabledWidgets: Set(enabledWidgets.map(\.kind)))
         var content = ProfileDashboardContent.make(
             enabledWidgets: enabledWidgets,
             dashboard: dashboard,

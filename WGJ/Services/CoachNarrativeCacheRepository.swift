@@ -65,6 +65,7 @@ nonisolated final class CoachNarrativeCacheRepository {
             )
         }
 
+        try prune(now: now, persistChanges: false)
         try modelContext.saveWithRecoveryProtection()
     }
 
@@ -163,6 +164,41 @@ nonisolated final class CoachNarrativeCacheRepository {
             )
         }
 
+        try prune(now: now, persistChanges: false)
         try modelContext.saveWithRecoveryProtection()
     }
+    /// Disposable generated text: retain three revisions per week/kind, at most
+    /// twelve weeks worth of entries, and expire text generated more than twelve weeks ago.
+    /// Called on the background narrative store at write/maintenance boundaries.
+    @discardableResult
+    func prune(now: Date = .now, persistChanges: Bool = true) throws -> Int {
+        let cutoff = now.addingTimeInterval(-12 * 7 * 24 * 60 * 60)
+        let recaps = try modelContext.fetch(FetchDescriptor<CachedCoachNarrative>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse), SortDescriptor(\.cacheKey)]))
+        let followUps = try modelContext.fetch(FetchDescriptor<CachedCoachFollowUpNarrative>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse), SortDescriptor(\.cacheKey)]))
+        var removed = 0
+        var recapCounts: [Date: Int] = [:]
+        var followUpCounts: [Date: [String: Int]] = [:]
+        var keptRecaps = 0
+        var keptFollowUps = 0
+        for row in recaps {
+            if row.updatedAt < cutoff || recapCounts[row.weekStart, default: 0] >= 3 || keptRecaps >= 36 {
+                modelContext.delete(row); removed += 1
+            } else {
+                recapCounts[row.weekStart, default: 0] += 1; keptRecaps += 1
+            }
+        }
+        for row in followUps {
+            if row.updatedAt < cutoff || followUpCounts[row.weekStart, default: [:]][row.followUpKindRaw, default: 0] >= 3
+                || keptFollowUps >= 108 {
+                modelContext.delete(row); removed += 1
+            } else {
+                followUpCounts[row.weekStart, default: [:]][row.followUpKindRaw, default: 0] += 1; keptFollowUps += 1
+            }
+        }
+        if removed > 0, persistChanges { try modelContext.saveWithRecoveryProtection() }
+        return removed
+    }
+
 }

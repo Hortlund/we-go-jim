@@ -1557,6 +1557,8 @@ struct ProfileView: View {
                     dashboardContent.trendSeriesByWidgetID.merge(trendSeriesByWidgetID) { _, new in new }
                     persistWarmProfileSnapshotIfNeeded()
                 }
+            } catch is CancellationError {
+                // A newer history revision/reload owns the next refresh.
             } catch {
                 await MainActor.run {
                     guard profileReloadToken == reloadToken else { return }
