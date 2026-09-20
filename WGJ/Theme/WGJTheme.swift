@@ -96,7 +96,8 @@ enum WGJMotion {
     }
 
     static func activeWorkoutPresentationAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.42, extraBounce: 0.04)
+        // A full-screen surface should settle once, without spring overshoot.
+        .easeOut(duration: reduceMotion ? 0.01 : 0.42)
     }
 
     static func cardTransition(reduceMotion: Bool) -> AnyTransition {
