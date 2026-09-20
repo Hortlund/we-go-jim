@@ -369,6 +369,7 @@ final class AppRuntimeState {
     @ObservationIgnored private var hasRequestedStartupCloudBackupStatusCheck = false
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     var keepsScreenAwake = false
+    var requiresStorageRecovery = false
 
     @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
     @ObservationIgnored private var isRefreshingRuntimeCloudAvailability = false

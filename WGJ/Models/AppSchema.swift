@@ -1,8 +1,10 @@
 import SwiftData
 
 nonisolated enum AppSchema {
-    static func makeFull() -> Schema {
-        Schema([
+    static func makeFull() -> Schema { Schema(versionedSchema: AppSchemaV2.self) }
+
+    static var models: [any PersistentModel.Type] {
+        [
             ExerciseCatalogItem.self,
             MuscleGroup.self,
             ExerciseImageAsset.self,
@@ -36,7 +38,10 @@ nonisolated enum AppSchema {
             WorkoutSessionSupersetGroup.self,
             WorkoutSessionDropStage.self,
             CompletedSetFact.self,
-        ])
+            ExerciseSessionSummary.self,
+            CompletedCardioFact.self,
+            HistoryProjectionCheckpoint.self,
+        ]
     }
 
     static func makeInMemoryContainer(name: String = "WGJInMemory") throws -> ModelContainer {
@@ -47,6 +52,16 @@ nonisolated enum AppSchema {
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
         )
-        return try ModelContainer(for: schema, configurations: [configuration])
+        return try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: [configuration])
     }
+}
+
+nonisolated enum AppSchemaV2: VersionedSchema {
+    static var versionIdentifier: Schema.Version { .init(2, 0, 0) }
+    static var models: [any PersistentModel.Type] { AppSchema.models }
+}
+
+nonisolated enum AppSchemaMigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] { [AppSchemaV1.self, AppSchemaV2.self] }
+    static var stages: [MigrationStage] { [.lightweight(fromVersion: AppSchemaV1.self, toVersion: AppSchemaV2.self)] }
 }

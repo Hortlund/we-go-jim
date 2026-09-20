@@ -394,7 +394,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("WGJ/Views/Profile/AppStorageDiagnosticsView.swift"),
             encoding: .utf8
         )
-        let restoreStart = try XCTUnwrap(source.range(of: "private func restoreCloudBackup()"))
+        let restoreStart = try XCTUnwrap(source.range(of: "private func restoreCloudBackup("))
         let restoreBody = source[restoreStart.lowerBound...]
 
         XCTAssertFalse(restoreBody.contains("WorkoutHistoryChangeBroadcaster.post()"))
@@ -2794,17 +2794,20 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         }
     }
 
-    func testDeviceWithSavedWorkoutCanUpdateExistingBackup() async throws {
+    func testDeviceWithSavedWorkoutCannotReplaceUnrelatedLegacyBackup() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
         context.insert(WorkoutSession(name: "Saved workout", status: .completed, endedAt: .now))
         try context.save()
         let store = CapturingBackupStore()
-        await store.replaceRecord(.init(updatedAt: .distantPast, payloadData: Data()))
-        let exported = try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+        let original = UserDataCloudBackupRemoteRecord(updatedAt: .distantPast, payloadData: Data())
+        await store.replaceRecord(original)
+        do {
+            _ = try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+            XCTFail("Nonempty data does not prove backup lineage")
+        } catch UserDataCloudBackupSafetyError.unrelatedDevice { }
         let stored = try await store.fetchBackup()
-        XCTAssertEqual(stored?.contentSummary, exported.contentSummary)
-        XCTAssertEqual(exported.contentSummary.completedWorkoutCount, 1)
+        XCTAssertEqual(stored, original)
     }
 
     func testUploadDoesNotOverwriteBackupChangedAfterSafetyCheck() async throws {

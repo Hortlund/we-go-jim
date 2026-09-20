@@ -81,7 +81,7 @@ actor AppBackgroundStore {
         let context = makeContext()
         let result = try operation(context)
         if context.hasChanges {
-            try context.save()
+            try context.saveWithRecoveryProtection()
         }
         return result
     }

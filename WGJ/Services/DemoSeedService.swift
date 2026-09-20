@@ -55,7 +55,7 @@ nonisolated final class DemoSeedService {
                 try templateRepository.createFolder(name: folderName)
             }
 
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
 
             let refreshedFolders = try templateRepository.folders()
             let foldersByName = Dictionary(
@@ -92,7 +92,7 @@ nonisolated final class DemoSeedService {
             }
         }
 
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
         try seedWorkoutHistoryIfEmpty(itemsByUUID: itemsByUUID)
         TemplateLibraryChangeBroadcaster.post()
         WorkoutHistoryChangeBroadcaster.post()
@@ -213,7 +213,7 @@ nonisolated final class DemoSeedService {
             seededSessions.append(session)
         }
 
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
 
         let metricsService = WorkoutMetricsService(modelContext: modelContext)
         let projectionRepository = HistoryProjectionRepository(modelContext: modelContext)
@@ -230,7 +230,7 @@ nonisolated final class DemoSeedService {
                 forSessionID: session.id,
                 persistChanges: false
             )
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
 
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)

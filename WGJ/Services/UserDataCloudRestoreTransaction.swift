@@ -49,9 +49,21 @@ nonisolated final class UserDataCloudRestoreTransaction {
         mergeDatabaseGraph: (ModelContext) throws -> Void,
         relinkRelationships: (ModelContext) throws -> Void
     ) throws {
+        try LocalStoreWriteBarrier.exclusively {
+            try commitExclusively(replacingLocalData: replacingLocalData,
+                mergeDatabaseGraph: mergeDatabaseGraph, relinkRelationships: relinkRelationships)
+        }
+    }
+
+    private func commitExclusively(
+        replacingLocalData: Bool,
+        mergeDatabaseGraph: (ModelContext) throws -> Void,
+        relinkRelationships: (ModelContext) throws -> Void
+    ) throws {
         let context = ModelContext(container)
         context.autosaveEnabled = false
-
+        let recovery = try PersistentRestoreRecovery.prepare(container: container)
+        var attemptedSave = false
         do {
             try dependencies.checkpoint(.afterValidation)
             if replacingLocalData {
@@ -68,28 +80,20 @@ nonisolated final class UserDataCloudRestoreTransaction {
             try dependencies.checkpoint(.beforeSave)
 
             if context.hasChanges {
+                attemptedSave = true
                 try dependencies.save(context)
             }
+            try PersistentRestoreRecovery.complete(recovery)
         } catch {
             context.rollback()
+            if attemptedSave, recovery != nil { throw PersistentRestoreRecovery.RecoveryRequired() }
+            try? PersistentRestoreRecovery.complete(recovery)
             throw error
         }
     }
 
     private func rebuildCompletedSessionSummariesAndFacts(in context: ModelContext) throws {
-        let completedStatus = WorkoutSessionStatus.completed.rawValue
-        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>(
-            predicate: #Predicate { session in
-                session.statusRaw == completedStatus
-            }
-        ))
-        let repository = WorkoutSessionRepository(
-            modelContext: context,
-            weeklyGoalWidgetPublisher: nil,
-            autoSaveChanges: false
-        )
-        for session in sessions {
-            try repository.recalculateSessionSummary(sessionID: session.id)
-        }
+        _ = try HistoryProjectionRepository(modelContext: context).backfillIfNeeded(persistChanges: false)
+        _ = try HistoryRecordRebuilder.rebuild(in: context)
     }
 }

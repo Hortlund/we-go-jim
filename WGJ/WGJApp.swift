@@ -16,7 +16,10 @@ struct WGJApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let resolvedBootstrap = launchBootstrapState.resolvedBootstrap {
+                if AppRuntimeState.shared.requiresStorageRecovery {
+                    ContentUnavailableView("Restart WGJ", systemImage: "externaldrive.badge.exclamationmark",
+                        description: Text("Restore could not finish. Close and reopen WGJ to recover your previous local data before continuing."))
+                } else if let resolvedBootstrap = launchBootstrapState.resolvedBootstrap {
                     switch resolvedBootstrap.bootstrap.persistenceMode {
                     case .durable:
                         ContentView()
@@ -79,9 +82,12 @@ struct WGJApp: App {
     nonisolated private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = AppSchema.makeFull()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
+        let configurations = storeConfigurations()
+        try PersistentRestoreRecovery.recoverIfNeeded(configurations: configurations)
         let container = try ModelContainer(
             for: appSchema,
-            configurations: storeConfigurations()
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: configurations
         )
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("DEV_SEED_DEMO_DATA") {
@@ -131,7 +137,7 @@ struct WGJApp: App {
             )]
             template.exercises = [exercise]
             context.insert(template)
-            try context.save()
+            try context.saveWithRecoveryProtection()
         }
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_LIBRARY") {
             let context = ModelContext(container)
@@ -142,7 +148,7 @@ struct WGJApp: App {
                     sortOrder: index
                 ))
             }
-            try context.save()
+            try context.saveWithRecoveryProtection()
         }
 #endif
         return container
@@ -238,6 +244,9 @@ struct WGJApp: App {
 
         let historyProjectionSchema = Schema([
             CompletedSetFact.self,
+            ExerciseSessionSummary.self,
+            CompletedCardioFact.self,
+            HistoryProjectionCheckpoint.self,
             CachedCoachNarrative.self,
             CachedCoachFollowUpNarrative.self,
         ])
@@ -298,7 +307,7 @@ struct WGJApp: App {
             sourceName: "ui-test"
         )
         context.insert(bench)
-        try context.save()
+        try context.saveWithRecoveryProtection()
     }
 
     nonisolated private static func seedUITestExerciseProgressIfRequested(container: ModelContainer) throws {
@@ -393,7 +402,7 @@ struct WGJApp: App {
             exercise.sets = sets
         }
 
-        try context.save()
+        try context.saveWithRecoveryProtection()
         HistoryAnalyticsCache.shared.invalidate(container: container)
     }
 
@@ -491,7 +500,7 @@ struct WGJApp: App {
         session.exercises = [exercise]
         session.cardioBlocks = cardioBlocks
         exercise.sets = [set]
-        try context.save()
+        try context.saveWithRecoveryProtection()
         HistoryAnalyticsCache.shared.invalidate(container: container)
     }
 
@@ -596,12 +605,22 @@ nonisolated enum AppStoreLayout {
     }
 
     private static func clearPersistentStoreFiles(fileManager: FileManager) throws {
-        for directory in persistentStoreDirectories(fileManager: fileManager) {
+        try clearPersistentStoreFiles(in: persistentStoreDirectories(fileManager: fileManager), fileManager: fileManager)
+    }
+
+    static func clearPersistentStoreFiles(in directories: [URL], fileManager: FileManager = .default) throws {
+        for directory in directories {
             guard fileManager.fileExists(atPath: directory.path) else { continue }
             let fileURLs = try fileManager.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil
             )
+            // A reset starts a new local lineage. Old rollback copies must never
+            // repopulate the removed stores on this same launch.
+            for fileURL in fileURLs where fileURL.lastPathComponent == "BackupJournal"
+                || fileURL.lastPathComponent.hasPrefix("RestoreRecovery-") {
+                try fileManager.removeItem(at: fileURL)
+            }
             for fileURL in fileURLs where isPersistentStoreFile(fileURL) {
                 try fileManager.removeItem(at: fileURL)
             }

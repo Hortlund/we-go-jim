@@ -130,6 +130,8 @@ final class AppLaunchBootstrapState {
 
         runtimeStateUpdater(bootstrap)
         let backgroundStore = AppBackgroundStore(container: bootstrap.container)
+        // Repository save boundaries participate in restore exclusion; implicit autosaves cannot.
+        bootstrap.container.mainContext.autosaveEnabled = false
         resolvedBootstrap = ResolvedAppLaunchBootstrap(
             bootstrap: bootstrap,
             backgroundStore: backgroundStore,

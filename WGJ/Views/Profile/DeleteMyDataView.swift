@@ -92,12 +92,14 @@ struct DeleteMyDataView: View {
         let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
 
         do {
-            try await AppDataDeletionService.deleteConfiguredCloudBackup()
+            try await AppDataDeletionService.deleteConfiguredCloudBackup(container: modelContext.container)
             try await backgroundStore.performWrite("profile.delete-all-data.local") { backgroundContext in
                 try AppDataDeletionService(modelContext: backgroundContext).stageLocalDataDeletion()
             }
             try await backgroundStore.perform("profile.delete-all-data.invalidate-caches") { backgroundContext in
-                AppDataDeletionService(modelContext: backgroundContext).invalidateCommittedCaches()
+                let deletion = AppDataDeletionService(modelContext: backgroundContext)
+                try deletion.resetLocalBackupState()
+                deletion.invalidateCommittedCaches()
             }
             try await AppDataDeletionService.clearDefaultLocalArtifacts()
             alertTitle = "Data Deleted"

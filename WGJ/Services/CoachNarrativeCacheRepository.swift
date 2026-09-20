@@ -65,7 +65,7 @@ nonisolated final class CoachNarrativeCacheRepository {
             )
         }
 
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 
     func needsRecapRefresh(
@@ -163,6 +163,6 @@ nonisolated final class CoachNarrativeCacheRepository {
             )
         }
 
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 }

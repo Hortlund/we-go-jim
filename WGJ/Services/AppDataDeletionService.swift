@@ -11,10 +11,7 @@ nonisolated final class AppDataDeletionService {
     init(
         modelContext: ModelContext,
         fileManager: FileManager = .default,
-        deleteCloudBackup: @escaping @Sendable () async throws -> Void = {
-            guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
-            try await CloudKitUserDataCloudBackupStore().deleteBackup()
-        },
+        deleteCloudBackup: (@Sendable () async throws -> Void)? = nil,
         clearWeeklyGoalWidgetSnapshot: @escaping @Sendable () -> Void = {
             WeeklyGoalWidgetPublisher()?.clear()
         },
@@ -24,7 +21,12 @@ nonisolated final class AppDataDeletionService {
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
-        self.deleteCloudBackup = deleteCloudBackup
+        let container = modelContext.container
+        self.deleteCloudBackup = deleteCloudBackup ?? {
+            guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+            try await CloudKitUserDataCloudBackupStore().deleteBackup(
+                additionalRecordNames: BackupLocalJournal.knownRecordNames(for: container))
+        }
         self.clearWeeklyGoalWidgetSnapshot = clearWeeklyGoalWidgetSnapshot
         self.clearActiveWorkoutSnapshot = clearActiveWorkoutSnapshot
     }
@@ -38,8 +40,9 @@ nonisolated final class AppDataDeletionService {
     func deleteLocalDeviceData() async throws {
         try stageLocalDataDeletion()
         if modelContext.hasChanges {
-            try modelContext.save()
+            try modelContext.saveWithRecoveryProtection()
         }
+        try resetLocalBackupState()
         invalidateCommittedCaches()
         try await clearLocalArtifacts()
     }
@@ -72,6 +75,9 @@ nonisolated final class AppDataDeletionService {
         try deleteAll(WorkoutSessionExercise.self)
         try deleteAll(WorkoutSession.self)
 
+        try deleteAll(ExerciseSessionSummary.self)
+        try deleteAll(CompletedCardioFact.self)
+        try deleteAll(HistoryProjectionCheckpoint.self)
         try deleteAll(CompletedSetFact.self)
         try deleteAll(CachedCoachFollowUpNarrative.self)
         try deleteAll(CachedCoachNarrative.self)
@@ -80,13 +86,21 @@ nonisolated final class AppDataDeletionService {
         try deleteAll(UserProfile.self)
     }
 
+    func resetLocalBackupState() throws {
+        try BackupLocalJournal.save(.init(), for: modelContext.container)
+        if let pending = try BackupLocalJournal.pending(for: modelContext.container) {
+            try BackupLocalJournal.finish(pending, for: modelContext.container)
+        }
+    }
+
     func invalidateCommittedCaches() {
         HistoryAnalyticsCache.shared.clear()
     }
 
-    static func deleteConfiguredCloudBackup() async throws {
+    static func deleteConfiguredCloudBackup(container: ModelContainer? = nil) async throws {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
-        try await CloudKitUserDataCloudBackupStore().deleteBackup()
+        let names = try container.map { try BackupLocalJournal.knownRecordNames(for: $0) } ?? []
+        try await CloudKitUserDataCloudBackupStore().deleteBackup(additionalRecordNames: names)
         await MainActor.run { AppRuntimeState.shared.recordCloudBackupDeletion() }
     }
 

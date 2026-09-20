@@ -340,6 +340,7 @@ struct ContentView: View {
 
     private func requestStartupCloudBackupStatusCheckIfNeeded() {
         guard appRuntimeState.cloudSyncEnabled else { return }
+        BoundaryCloudBackupScheduler.resumePending(container: modelContext.container)
         startupCloudBackupStatusCheckTask = CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
             container: modelContext.container
         )

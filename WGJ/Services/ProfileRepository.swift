@@ -343,6 +343,6 @@ nonisolated final class ProfileRepository {
     }
 
     private func saveUserDataChanges() throws {
-        try modelContext.save()
+        try modelContext.saveWithRecoveryProtection()
     }
 }

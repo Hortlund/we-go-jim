@@ -369,7 +369,8 @@ nonisolated final class TemplateRepository {
 
     private func saveUserDataChanges() throws {
         guard autoSaveChanges, modelContext.hasChanges else { return }
-        try modelContext.save()
+        try WorkoutCommitPreparation.stampChangedTemplates(in: modelContext)
+        try modelContext.saveWithRecoveryProtection()
         boundaryEffects.postLibraryChange()
         boundaryEffects.scheduleBackup(modelContext.container, userDataChangeBackupReason)
     }
@@ -377,7 +378,8 @@ nonisolated final class TemplateRepository {
     func finalizeDeferredUserDataChangesIfNeeded() throws {
         guard !autoSaveChanges else { return }
         guard modelContext.hasChanges else { return }
-        try modelContext.save()
+        try WorkoutCommitPreparation.stampChangedTemplates(in: modelContext)
+        try modelContext.saveWithRecoveryProtection()
         boundaryEffects.postLibraryChange()
         boundaryEffects.scheduleBackup(modelContext.container, userDataChangeBackupReason)
     }
@@ -857,7 +859,8 @@ nonisolated final class TemplateRepository {
         }
 
         if modelContext.hasChanges {
-            try modelContext.save()
+            try WorkoutCommitPreparation.stampChangedTemplates(in: modelContext)
+            try modelContext.saveWithRecoveryProtection()
         }
     }
 
