@@ -118,6 +118,7 @@ struct ProfileView: View {
     private var isRefreshingCloudBackupMetadata: Bool { userDataSyncStatus.state == .checking }
     @State private var isForcingCloudBackup = false
     @State private var showsCloudBackupConfirmation = false
+    @State private var showsCloudBackupRecovery = false
     @State private var hasLoadedCloudBackupSummary = false
     private var isCloudBackupProtected: Bool {
         AppRuntimeState.shared.isCloudBackupProtected(from: localCloudBackupSummary)
@@ -158,6 +159,10 @@ struct ProfileView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $showsCloudBackupRecovery) {
+            AppStorageDiagnosticsView(showsCloudBackupFirst: true)
+                .toolbar(.visible, for: .navigationBar)
+        }
         .alert("Back up this device to iCloud?", isPresented: $showsCloudBackupConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Back Up", role: .destructive) {
@@ -833,21 +838,31 @@ struct ProfileView: View {
             .accessibilityIdentifier("profile-cloud-backup-refresh-button")
 
             Button {
-                showsCloudBackupConfirmation = true
+                if isCloudBackupProtected {
+                    showsCloudBackupRecovery = true
+                } else {
+                    showsCloudBackupConfirmation = true
+                }
             } label: {
                 if isForcingCloudBackup {
                     ProgressView().controlSize(.small)
                 } else {
-                    Text("Back Up")
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Group {
+                        if isCloudBackupProtected {
+                            Text("Restore")
+                        } else {
+                            Text("Back Up")
+                        }
+                    }
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .buttonStyle(WGJCompactGhostButtonStyle())
             .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending
-                || isLoadingCloudBackupSummary || !hasLoadedCloudBackupSummary || isCloudBackupProtected)
-            .accessibilityLabel("Back Up Now")
-            .accessibilityIdentifier("profile-cloud-backup-now-button")
+                || isLoadingCloudBackupSummary || !hasLoadedCloudBackupSummary)
+            .accessibilityLabel(isCloudBackupProtected ? "Restore Cloud Backup" : "Back Up Now")
+            .accessibilityIdentifier(isCloudBackupProtected ? "profile-cloud-backup-restore-button" : "profile-cloud-backup-now-button")
         }
     }
 
@@ -900,7 +915,7 @@ struct ProfileView: View {
             }
 
             if isCloudBackupProtected {
-                Text("Backup is disabled to protect your iCloud saves. Restore your cloud backup before backing up this device.")
+                Text("Your saved data is in iCloud. Tap Restore to bring it onto this device before making a new backup.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             }

@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 
 struct AppStorageDiagnosticsView: View {
+    var showsCloudBackupFirst = false
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
@@ -24,6 +26,10 @@ struct AppStorageDiagnosticsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Storage", subtitle: "Inspect local app data and clear disposable files.")
+
+                if showsCloudBackupFirst {
+                    cloudRestoreCard
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJActionHeader("Local Usage", subtitle: "Approximate on-device storage by bucket.") {
@@ -83,7 +89,9 @@ struct AppStorageDiagnosticsView: View {
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
-                cloudRestoreCard
+                if !showsCloudBackupFirst {
+                    cloudRestoreCard
+                }
                 cleanupCard
                 dangerZoneCard
             }
@@ -149,6 +157,7 @@ struct AppStorageDiagnosticsView: View {
             }
             .buttonStyle(WGJGhostButtonStyle())
             .disabled(!cloudSyncEnabled || isRestoringCloudBackup || isClearing)
+            .accessibilityIdentifier("storage-restore-latest-cloud-backup-button")
             .confirmationDialog(
                 "Restore latest CloudKit backup?",
                 isPresented: $showingCloudRestoreConfirmation,
