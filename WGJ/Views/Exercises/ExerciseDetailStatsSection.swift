@@ -14,7 +14,6 @@ struct ExerciseDetailStatsSection: View {
 
     @State private var selectedMetric: ExerciseProgressMetric = .estimatedOneRepMax
     @State private var selectedRange: ExerciseProgressRange = .sixMonths
-    @State private var chartSelectionRevision = 0
     @State private var configuredDatasetID: String?
     @State private var presentation: ExerciseProgressPresentation?
 
@@ -41,11 +40,14 @@ struct ExerciseDetailStatsSection: View {
         let request = ExerciseProgressPresentationRequest(dataset: dataset, metric: selectedMetric,
             range: selectedRange, day: Calendar.current.startOfDay(for: .now))
         return Group {
-            if let presentation, presentation.request == request {
+            // Keep the current cards mounted while a new metric/range is projected.
+            // Replacing them with placeholders collapses the section and flashes the chart.
+            if let presentation, presentation.request.dataset == dataset {
                 projectedContent(presentation)
             } else { loadingContent }
         }
         .task(id: request) {
+            guard presentation?.request != request else { return }
             let calendar = Calendar.current
             let now = Date()
             let result = await Task.detached(priority: .userInitiated) {
@@ -65,7 +67,6 @@ struct ExerciseDetailStatsSection: View {
                 summaryGrid(summary, projection: projection)
             }
             ExerciseProgressChartCard(projection: projection)
-                .id(chartSelectionRevision)
             if projection.milestones.isEmpty {
                 Text(projection.availability.reason ?? "No compatible history in this range.")
                     .font(.subheadline)
@@ -87,7 +88,6 @@ struct ExerciseDetailStatsSection: View {
                 ForEach(ExerciseProgressMetric.allCases) { metric in
                     Button {
                         selectedMetric = metric
-                        chartSelectionRevision &+= 1
                     } label: {
                         metric == selectedMetric
                             ? Label(metric.title, systemImage: "checkmark")
@@ -116,7 +116,6 @@ struct ExerciseDetailStatsSection: View {
                     ForEach(ExerciseProgressRange.allCases) { range in
                         Button(range.title) {
                             selectedRange = range
-                            chartSelectionRevision &+= 1
                         }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(range == selectedRange ? WGJTheme.bgBase : WGJTheme.textPrimary)
@@ -310,6 +309,9 @@ private struct ExerciseProgressChartCard: View {
         }
         .padding(14)
         .wgjCardContainer(strong: true)
+        .onChange(of: projection) { _, _ in
+            selectedDate = nil
+        }
     }
 
     private func selectedPoint(in projection: ExerciseProgressProjection) -> ExerciseProgressPoint? {

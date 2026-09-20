@@ -257,6 +257,31 @@ final class AdaptiveLayoutUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [selection], timeout: 3), .completed)
         XCTAssertTrue(chart.exists)
+
+        let metricSelector = app.buttons["exercise-progress-metric-selector"]
+        for _ in 0..<6 {
+            if metricSelector.isHittable { break }
+            scroll.swipeDown()
+        }
+        // Exercise in-place chart updates across different units and back again.
+        // The chart must receive the new projection, not retain the previous metric.
+        for metric in ["Heaviest Weight", "Total Reps", "Workout Frequency", "Estimated 1RM"] {
+            metricSelector.tap()
+            let option = app.buttons[metric].firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 3))
+            option.tap()
+            let selectedMetric = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", metric),
+                object: metricSelector
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [selectedMetric], timeout: 3), .completed)
+            let updatedChart = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label CONTAINS %@", ", \(metric), 6M,"),
+                object: chart
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [updatedChart], timeout: 3), .completed)
+            XCTAssertTrue(app.otherElements["exercise-progress-timeline"].exists)
+        }
     }
 
     @MainActor
