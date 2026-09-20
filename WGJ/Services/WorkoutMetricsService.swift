@@ -270,7 +270,7 @@ nonisolated private struct BestSetPresentation: Equatable {
 
 nonisolated private enum WorkoutMetricsPolicy {
     // Bump when session summary math or projected history facts change semantics.
-    nonisolated static let summaryMetricsVersion = 3
+    nonisolated static let summaryMetricsVersion = 4
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
         WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps)
@@ -1397,7 +1397,17 @@ nonisolated final class WorkoutMetricsService {
         let hasStaleProjectionSource = persistedFacts.contains { fact in
             fact.sourceSessionUpdatedAt != sourceUpdatedAt || fact.completedAt != completedAt
         }
-        guard hasStaleProjectionVersion || hasStaleProjectionSource else {
+        // Older projections omitted reps-only sets logged with kg/lb. Recover
+        // these from local source data without saving during a history read.
+        let persistedSetIDs = Set(persistedFacts.map(\.sessionSetID))
+        let hasMissingRepsOnlySets = source?.exercises.contains { row in
+            row.sets.contains { set in
+                set.isCompleted && (set.actualReps ?? 0) > 0
+                    && (set.actualWeight == nil || set.actualWeight == 0)
+                    && !persistedSetIDs.contains(set.id)
+            }
+        } ?? false
+        guard hasStaleProjectionVersion || hasStaleProjectionSource || hasMissingRepsOnlySets else {
             return persistedFacts
         }
 

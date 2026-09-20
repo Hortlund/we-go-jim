@@ -99,11 +99,17 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
             return nil
         }
 
-        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+        var normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
             actualWeight: set.actualWeight,
             actualLoadUnit: set.actualLoadUnit,
             targetLoadUnit: set.targetLoadUnit
         )
+
+        // A completed reps-only set still counts even when the editor kept kg/lb.
+        // Only the history projection changes; preserve the original logged unit.
+        if normalizedActualLoad.weight == nil || normalizedActualLoad.weight == 0 {
+            normalizedActualLoad = WorkoutLoggedLoad(weight: nil, unit: .bodyweight)
+        }
 
         switch normalizedActualLoad.unit {
         case .kg, .lb:
