@@ -461,6 +461,11 @@ final class AppRuntimeState {
         updateUserDataSyncStatus(.backedUp(at: snapshot.updatedAt))
     }
 
+    func isCloudBackupProtected(from localSummary: UserDataCloudBackupContentSummary) -> Bool {
+        cloudBackupUpdatedAt != nil
+            && localSummary.wouldEraseRemoteContent(cloudBackupContentSummary)
+    }
+
     func recordCloudBackupDeletion() {
         cloudBackupSessionRevision += 1
         cloudBackupUpdatedAt = nil

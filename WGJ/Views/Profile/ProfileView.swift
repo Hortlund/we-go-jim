@@ -117,6 +117,11 @@ struct ProfileView: View {
     }
     private var isRefreshingCloudBackupMetadata: Bool { userDataSyncStatus.state == .checking }
     @State private var isForcingCloudBackup = false
+    @State private var showsCloudBackupConfirmation = false
+    @State private var hasLoadedCloudBackupSummary = false
+    private var isCloudBackupProtected: Bool {
+        AppRuntimeState.shared.isCloudBackupProtected(from: localCloudBackupSummary)
+    }
     @State private var showsCloudBackupDetails = false
 
     @State private var errorMessage = ""
@@ -153,6 +158,14 @@ struct ProfileView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Back up this device to iCloud?", isPresented: $showsCloudBackupConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Back Up", role: .destructive) {
+                Task { await forceCloudBackup() }
+            }
+        } message: {
+            Text("This uploads \(localCloudBackupSummary.completedWorkoutCount) completed workouts, \(localCloudBackupSummary.workoutTemplateCount) templates, and \(localCloudBackupSummary.customExerciseCount) custom exercises, plus your profile and settings. Any existing cloud backup will be replaced, not merged. Data saved only in that backup may be lost.")
+        }
         .onAppear {
             applyWarmProfileSnapshotIfAvailable()
         }
@@ -820,7 +833,7 @@ struct ProfileView: View {
             .accessibilityIdentifier("profile-cloud-backup-refresh-button")
 
             Button {
-                Task { await forceCloudBackup() }
+                showsCloudBackupConfirmation = true
             } label: {
                 if isForcingCloudBackup {
                     ProgressView().controlSize(.small)
@@ -831,7 +844,8 @@ struct ProfileView: View {
                 }
             }
             .buttonStyle(WGJCompactGhostButtonStyle())
-            .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending)
+            .disabled(!cloudSyncEnabled || isForcingCloudBackup || userDataSyncStatus.state == .pending
+                || isLoadingCloudBackupSummary || !hasLoadedCloudBackupSummary || isCloudBackupProtected)
             .accessibilityLabel("Back Up Now")
             .accessibilityIdentifier("profile-cloud-backup-now-button")
         }
@@ -883,6 +897,12 @@ struct ProfileView: View {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.26), lineWidth: 1)
                     }
+            }
+
+            if isCloudBackupProtected {
+                Text("Backup is disabled to protect your iCloud saves. Restore your cloud backup before backing up this device.")
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
             }
 
             Text("Backup comparison")
@@ -1249,17 +1269,20 @@ struct ProfileView: View {
             }
             guard !Task.isCancelled, cloudBackupSummaryLoadID == loadID else { return }
             localCloudBackupSummary = summary
+            hasLoadedCloudBackupSummary = true
         } catch is CancellationError {
             return
         } catch {
             guard cloudBackupSummaryLoadID == loadID else { return }
             localCloudBackupSummary = .empty
+            hasLoadedCloudBackupSummary = false
         }
     }
 
     @MainActor
     private func forceCloudBackup() async {
-        guard cloudSyncEnabled, !isForcingCloudBackup else { return }
+        guard cloudSyncEnabled, !isForcingCloudBackup, hasLoadedCloudBackupSummary,
+              !isLoadingCloudBackupSummary, !isCloudBackupProtected else { return }
 
         isForcingCloudBackup = true
         await BoundaryCloudBackupScheduler.exportManually(container: modelContext.container)

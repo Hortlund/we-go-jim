@@ -2527,6 +2527,36 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(state.cloudBackupContentSummary)
     }
 
+    func testEmptyDeviceProtectionSurvivesRefreshAndFailuresUntilBackupIsRemoved() throws {
+        let state = AppRuntimeState.makeTestingInstance()
+        let context = ModelContext(try makeInMemoryContainer())
+        let local = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+        var remote = local
+        remote.completedWorkoutCount = 12
+        let snapshot = UserDataCloudBackupRemoteSnapshot(updatedAt: .now, contentSummary: remote)
+        state.recordSuccessfulCloudBackup(snapshot)
+        XCTAssertTrue(state.isCloudBackupProtected(from: local))
+
+        let check = try XCTUnwrap(state.beginCloudBackupMetadataCheck(isStartup: false))
+        XCTAssertTrue(state.isCloudBackupProtected(from: local))
+        state.finishUserDataSyncStatusCheck(.checkFailed("Offline"), matching: check)
+        XCTAssertTrue(state.isCloudBackupProtected(from: local))
+        state.updateUserDataSyncStatus(.pending())
+        XCTAssertTrue(state.isCloudBackupProtected(from: local))
+        state.updateUserDataSyncStatus(.degraded("Backup blocked"))
+        XCTAssertTrue(state.isCloudBackupProtected(from: local))
+
+        let missingCheck = try XCTUnwrap(state.beginCloudBackupMetadataCheck(isStartup: false))
+        state.finishCloudBackupMetadataCheck(nil, matching: missingCheck)
+        XCTAssertFalse(state.isCloudBackupProtected(from: local))
+        state.recordSuccessfulCloudBackup(snapshot)
+        state.recordCloudBackupDeletion()
+        XCTAssertFalse(state.isCloudBackupProtected(from: local))
+        state.recordSuccessfulCloudBackup(snapshot)
+        state.resetCloudBackupSession()
+        XCTAssertFalse(state.isCloudBackupProtected(from: local))
+    }
+
     func testLegacyMetadataDoesNotClaimTheBackupIsMissingOrKeepOldCounts() throws {
         let state = AppRuntimeState.makeTestingInstance()
         let context = ModelContext(try makeInMemoryContainer())
@@ -2736,6 +2766,82 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(UserDataCloudBackupDescriptor.decodeSummary(nil, updatedAt: date))
     }
 
+    func testEmptyAndProfileOnlyDevicesCannotReplaceTrainingOrLegacyBackup() async throws {
+        for profileOnly in [false, true] {
+            for legacy in [false, true] {
+                let container = try makeInMemoryContainer()
+                let context = ModelContext(container)
+                if profileOnly { context.insert(UserProfile(displayName: "New device")) }
+                try context.save()
+                var remoteSummary = try UserDataCloudBackupContentSummary.loadLocal(context: context)
+                remoteSummary.completedWorkoutCount = 12
+                let original = UserDataCloudBackupRemoteRecord(
+                    updatedAt: .distantPast,
+                    payloadData: Data("precious backup".utf8),
+                    contentSummary: legacy ? nil : remoteSummary
+                )
+                let store = CapturingBackupStore()
+                await store.replaceRecord(original)
+                do {
+                    try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+                    XCTFail("An empty device must not replace an existing training or legacy backup")
+                } catch UserDataCloudBackupSafetyError.emptyDevice {
+                    // Expected: neither manual nor automatic callers can bypass this guard.
+                }
+                let stored = try await store.fetchBackup()
+                XCTAssertEqual(stored, original)
+            }
+        }
+    }
+
+    func testDeviceWithSavedWorkoutCanUpdateExistingBackup() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.insert(WorkoutSession(name: "Saved workout", status: .completed, endedAt: .now))
+        try context.save()
+        let store = CapturingBackupStore()
+        await store.replaceRecord(.init(updatedAt: .distantPast, payloadData: Data()))
+        let exported = try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+        let stored = try await store.fetchBackup()
+        XCTAssertEqual(stored?.contentSummary, exported.contentSummary)
+        XCTAssertEqual(exported.contentSummary.completedWorkoutCount, 1)
+    }
+
+    func testUploadDoesNotOverwriteBackupChangedAfterSafetyCheck() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.insert(WorkoutSession(name: "Local workout", status: .completed, endedAt: .now))
+        try context.save()
+        let store = CapturingBackupStore()
+        let newer = UserDataCloudBackupRemoteRecord(updatedAt: .now, payloadData: Data("newer cloud saves".utf8))
+        await store.replaceRecordOnNextSave(newer)
+        do {
+            try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+            XCTFail("A backup created after the safety check must not be overwritten")
+        } catch UserDataCloudBackupSafetyError.remoteChanged {
+            // Expected: even the create-first-backup path uses a conditional write.
+        }
+        let stored = try await store.fetchBackup()
+        XCTAssertEqual(stored, newer)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+    }
+
+    func testEmptyDeviceStopsWhenRemoteMetadataCannotBeChecked() async throws {
+        let container = try makeInMemoryContainer()
+        let store = CapturingBackupStore()
+        let original = UserDataCloudBackupRemoteRecord(updatedAt: .distantPast, payloadData: Data("backup".utf8))
+        await store.replaceRecord(original)
+        await store.failMetadataReads()
+        do {
+            try await UserDataCloudBackupService(localContainer: container, backupStore: store).exportCurrentBackup()
+            XCTFail("A failed safety check must not allow an upload")
+        } catch {
+            XCTAssertFalse(error is UserDataCloudBackupSafetyError)
+        }
+        let stored = try await store.fetchBackup()
+        XCTAssertEqual(stored, original)
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         try AppSchema.makeInMemoryContainer(name: "UserDataCloudBackupServiceTests")
     }
@@ -2744,8 +2850,19 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
 private actor CapturingBackupStore: UserDataCloudBackupStoring {
     private var record: UserDataCloudBackupRemoteRecord?
     private var payloadReads = 0
+    private var metadataReadsFail = false
+    private var replacementOnSave: UserDataCloudBackupRemoteRecord?
+    func replaceRecordOnNextSave(_ record: UserDataCloudBackupRemoteRecord) { replacementOnSave = record }
+    func failMetadataReads() { metadataReadsFail = true }
 
-    func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws {
+    func saveBackup(_ record: UserDataCloudBackupRemoteRecord, expectedUpdatedAt: Date?) async throws {
+        if let replacementOnSave {
+            self.record = replacementOnSave
+            self.replacementOnSave = nil
+        }
+        let current = self.record
+        let actualUpdatedAt = await MainActor.run { current?.updatedAt }
+        guard actualUpdatedAt == expectedUpdatedAt else { throw UserDataCloudBackupSafetyError.remoteChanged }
         self.record = record
     }
 
@@ -2761,7 +2878,11 @@ private actor CapturingBackupStore: UserDataCloudBackupStoring {
     func payloadReadCount() -> Int { payloadReads }
 
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
-        nil
+        if metadataReadsFail { throw CKError(.networkUnavailable) }
+        let current = record
+        return await MainActor.run {
+            current.map { .init(updatedAt: $0.updatedAt, contentSummary: $0.contentSummary) }
+        }
     }
 
     func replaceRecord(_ record: UserDataCloudBackupRemoteRecord) {
