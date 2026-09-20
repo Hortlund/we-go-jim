@@ -1167,6 +1167,30 @@ private struct ExercisesCatalogSearchField: View {
     @State private var observedResetToken: Int?
 
     var body: some View {
+        HStack(spacing: 0) {
+            queryField
+
+            if !liveQuery.isEmpty {
+                Button {
+                    debounceTask?.cancel()
+                    debounceTask = nil
+                    liveQuery = ""
+                    committedQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear Search")
+                .accessibilityIdentifier("exercises-search-clear-button")
+            }
+        }
+    }
+
+    private var queryField: some View {
         TextField("Search", text: $liveQuery)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
