@@ -42,6 +42,18 @@ nonisolated struct UserDataCloudBackupContentSummary: Codable, Equatable, Sendab
 }
 
 extension UserDataCloudBackupContentSummary {
+    nonisolated var hasTrainingContent: Bool {
+        completedWorkoutCount > 0 || workoutTemplateCount > 0 || customExerciseCount > 0
+    }
+
+    nonisolated func wouldEraseRemoteContent(_ remote: Self?) -> Bool {
+        guard !hasTrainingContent else { return false }
+        // Unknown counts include backups written by older app versions.
+        guard let remote else { return true }
+        return remote.hasTrainingContent
+            || (profileCount == 0 && profileWidgetCount == 0 && templateFolderCount == 0)
+    }
+
     nonisolated static func loadLocal(context: ModelContext) throws -> UserDataCloudBackupContentSummary {
         let customSourceName = "custom"
         let completedStatus = WorkoutSessionStatus.completed.rawValue
@@ -77,7 +89,7 @@ extension UserDataCloudBackupContentSummary {
 }
 
 nonisolated protocol UserDataCloudBackupStoring: Sendable {
-    func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws
+    func saveBackup(_ record: UserDataCloudBackupRemoteRecord, expectedUpdatedAt: Date?) async throws
     func deleteBackup() async throws
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord?
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata?
@@ -308,6 +320,20 @@ actor BoundaryCloudBackupExportQueue {
     }
 }
 
+nonisolated enum UserDataCloudBackupSafetyError: LocalizedError {
+    case emptyDevice
+    case remoteChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyDevice:
+            "Backup stopped to protect your iCloud saves. This device has no saved workouts, templates, or custom exercises. Restore your cloud backup before backing up this device."
+        case .remoteChanged:
+            "The cloud backup changed while preparing this upload. Nothing was uploaded. Check your cloud backup before trying again."
+        }
+    }
+}
+
 nonisolated final class UserDataCloudBackupService {
     private let localContainer: ModelContainer
     private let backupStore: any UserDataCloudBackupStoring
@@ -330,7 +356,13 @@ nonisolated final class UserDataCloudBackupService {
     @discardableResult
     func exportCurrentBackup() async throws -> UserDataCloudBackupRemoteSnapshot {
         let (record, snapshot) = try makeExportRecord()
-        try await backupStore.saveBackup(record)
+        let remote = try await backupStore.fetchBackupMetadata()
+        if !snapshot.contentSummary.hasTrainingContent,
+           let remote,
+           snapshot.contentSummary.wouldEraseRemoteContent(remote.contentSummary) {
+            throw UserDataCloudBackupSafetyError.emptyDevice
+        }
+        try await backupStore.saveBackup(record, expectedUpdatedAt: remote?.updatedAt)
         return snapshot
     }
 
@@ -475,11 +507,16 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     }
 
     @concurrent
-    func saveBackup(_ backup: UserDataCloudBackupRemoteRecord) async throws {
+    func saveBackup(_ backup: UserDataCloudBackupRemoteRecord, expectedUpdatedAt: Date?) async throws {
         let database = try requireDatabase()
         let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
-        let record = try await existingRecord(recordID: recordID, desiredKeys: [])
-            ?? CKRecord(recordType: UserDataCloudBackupDescriptor.recordType, recordID: recordID)
+        let existing = try await existingRecord(
+            recordID: recordID,
+            desiredKeys: [UserDataCloudBackupDescriptor.Field.updatedAt]
+        )
+        let actualUpdatedAt = existing.map { $0[UserDataCloudBackupDescriptor.Field.updatedAt] as? Date ?? .distantPast }
+        guard actualUpdatedAt == expectedUpdatedAt else { throw UserDataCloudBackupSafetyError.remoteChanged }
+        let record = existing ?? CKRecord(recordType: UserDataCloudBackupDescriptor.recordType, recordID: recordID)
         let payloadURL = try writeTemporaryPayload(backup.payloadData)
         defer {
             try? FileManager.default.removeItem(at: payloadURL)
@@ -499,12 +536,16 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
             record[UserDataCloudBackupDescriptor.Field.payloadCompression] = nil
         }
 
-        _ = try await database.modifyRecords(
+        let results = try await database.modifyRecords(
             saving: [record],
             deleting: [],
-            savePolicy: .allKeys,
+            savePolicy: .ifServerRecordUnchanged,
             atomically: true
         )
+        guard let result = results.saveResults[recordID] else {
+            throw UserDataCloudBackupSafetyError.remoteChanged
+        }
+        _ = try result.get()
     }
 
     func deleteBackup() async throws {
