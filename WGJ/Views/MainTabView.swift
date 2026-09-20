@@ -392,14 +392,8 @@ private struct MainTabBottomOverlayChrome: View {
 
 private func activeWorkoutOverlayTransition(reduceMotion: Bool) -> AnyTransition {
     guard !reduceMotion else { return .opacity }
-    return AnyTransition.asymmetric(
-        insertion: AnyTransition.move(edge: .bottom)
-            .combined(with: AnyTransition.opacity)
-            .combined(with: AnyTransition.scale(scale: 0.985, anchor: .bottom)),
-        removal: AnyTransition.move(edge: .bottom)
-            .combined(with: AnyTransition.opacity)
-            .combined(with: AnyTransition.scale(scale: 0.992, anchor: .bottom))
-    )
+    // Keep the NavigationStack at its final scale throughout presentation.
+    return .move(edge: .bottom).combined(with: .opacity)
 }
 
 private var activeWorkoutStripTransition: AnyTransition {
