@@ -416,8 +416,21 @@ nonisolated final class UserDataCloudBackupService {
 
     @discardableResult
     func exportCurrentBackup(replacingRemote: Bool = false, expectedSessionRevision: Int? = nil) async throws -> UserDataCloudBackupRemoteSnapshot {
+        let trace = WGJPerformance.begin("backup.export")
+        defer { WGJPerformance.end(trace) }
         await BackupOperationGate.shared.acquire()
-        defer { Task { await BackupOperationGate.shared.release() } }
+        // Keep the operation gate held through cleanup, but return as soon as the
+        // cloud commit and its local acknowledgment are durable.
+        var acknowledgedCleanup: BackupLocalJournal.State?
+        defer {
+            let cleanup = acknowledgedCleanup
+            Task { [localContainer, backupStore] in
+                if let cleanup {
+                    await Self.finishRetentionCleanup(cleanup, localContainer: localContainer, backupStore: backupStore)
+                }
+                await BackupOperationGate.shared.release()
+            }
+        }
         if let expectedSessionRevision {
             guard await AppRuntimeState.shared.cloudBackupSessionRevision == expectedSessionRevision else { throw CancellationError() }
         }
@@ -480,14 +493,9 @@ nonisolated final class UserDataCloudBackupService {
                 state.account = account
                 state.generation = previous.generation
                 state.manifest = previous
-                if let garbage = state.garbageRecords, !garbage.isEmpty {
-                    do {
-                        try await archive.removeOrphanedRecords(garbage, retaining: previous)
-                        state.garbageRecords = nil
-                    } catch { /* Keep cleanup work durable until another boundary. */ }
-                }
                 try BackupLocalJournal.save(state, for: localContainer)
                 if let pending { try BackupLocalJournal.finish(pending, for: localContainer) }
+                acknowledgedCleanup = state
                 return UserDataCloudBackupRemoteSnapshot(updatedAt: previous.updatedAt, contentSummary: previous.summary)
             }
             if let abandoned = state.attemptedManifest, abandoned.generation != previous?.generation {
@@ -505,12 +513,6 @@ nonisolated final class UserDataCloudBackupService {
             try await WGJPerformance.measureAsync("backup.upload") {
                 try await archive.saveArchive(plan.manifest, chunkFiles: plan.chunkFiles, expectedGeneration: previous?.generation, expectedAccount: account)
             }
-            if let garbage = state.garbageRecords, !garbage.isEmpty {
-                do {
-                    try await archive.removeOrphanedRecords(garbage, retaining: plan.manifest)
-                    state.garbageRecords = nil
-                } catch { /* Retry cleanup after the next successful publication. */ }
-            }
             state.generation = plan.manifest.generation
             state.manifest = plan.manifest
             state.attemptedManifest = nil
@@ -524,7 +526,27 @@ nonisolated final class UserDataCloudBackupService {
         }
         try BackupLocalJournal.save(state, for: localContainer)
         if let pending { try BackupLocalJournal.finish(pending, for: localContainer) }
+        acknowledgedCleanup = state
         return snapshot
+    }
+
+    /// Called only while the exporting operation still owns BackupOperationGate.
+    /// Cleanup failure (or app termination) leaves the journal intact for retry.
+    private static func finishRetentionCleanup(
+        _ acknowledged: BackupLocalJournal.State,
+        localContainer: ModelContainer,
+        backupStore: any UserDataCloudBackupStoring
+    ) async {
+        guard let archive = backupStore as? any IncrementalBackupStoring,
+              let manifest = acknowledged.manifest,
+              let garbage = acknowledged.garbageRecords, !garbage.isEmpty else { return }
+        do {
+            guard try await backupStore.accountIdentifier() == acknowledged.account else { return }
+            try await archive.removeOrphanedRecords(garbage, retaining: manifest)
+            try BackupLocalJournal.finishCleanup(
+                garbage, account: acknowledged.account, generation: manifest.generation, for: localContainer
+            )
+        } catch { /* Retry at the next successful backup boundary. */ }
     }
 
     private func makeExportRecord() throws -> (UserDataCloudBackupRemoteRecord, UserDataCloudBackupRemoteSnapshot) {
@@ -796,24 +818,53 @@ nonisolated struct CloudKitUserDataCloudBackupStore: IncrementalBackupStoring {
         recordID: CKRecord.ID,
         desiredKeys: [CKRecord.FieldKey]? = nil
     ) async throws -> CKRecord? {
-        let database = try requireDatabase()
-        do {
-            let results = try await database.records(for: [recordID], desiredKeys: desiredKeys)
-            guard let result = results[recordID] else {
-                return nil
-            }
+        try await existingRecords(recordIDs: [recordID], desiredKeys: desiredKeys)[recordID]
+    }
 
+    func existingRecords(
+        recordIDs: [CKRecord.ID],
+        desiredKeys: [CKRecord.FieldKey]? = nil
+    ) async throws -> [CKRecord.ID: CKRecord] {
+        let database = try requireDatabase()
+        var records: [CKRecord.ID: CKRecord] = [:]
+        for offset in stride(from: 0, to: recordIDs.count, by: 50) {
+            try Task.checkCancellation()
+            let batch = Array(recordIDs[offset..<min(offset + 50, recordIDs.count)])
+            let results: [CKRecord.ID: Result<CKRecord, Error>]
+            do {
+                results = try await WGJPerformance.measureAsync("backup.cloud.read") {
+                    try await database.records(for: batch, desiredKeys: desiredKeys)
+                }
+            } catch let error as CKError where error.code == .unknownItem && batch.count == 1 {
+                // A single-record fetch may report absence at the operation level.
+                continue
+            }
+            records.merge(try Self.resolveRecords(results, requestedIDs: batch)) { _, new in new }
+        }
+        return records
+    }
+
+    /// Only an explicit unknownItem means absent. Missing results or transport
+    /// failures must never be mistaken for permission to create or delete data.
+    static func resolveRecords(
+        _ results: [CKRecord.ID: Result<CKRecord, Error>],
+        requestedIDs: [CKRecord.ID]
+    ) throws -> [CKRecord.ID: CKRecord] {
+        var records: [CKRecord.ID: CKRecord] = [:]
+        for recordID in requestedIDs {
+            guard let result = results[recordID] else {
+                throw BackupArchiveError.missingChunk
+            }
             switch result {
             case .success(let record):
-                return record
+                records[recordID] = record
             case .failure(let error as CKError) where error.code == .unknownItem:
-                return nil
+                continue
             case .failure(let error):
                 throw error
             }
-        } catch let error as CKError where error.code == .unknownItem {
-            return nil
         }
+        return records
     }
 
     private func writeTemporaryPayload(_ data: Data) throws -> URL {

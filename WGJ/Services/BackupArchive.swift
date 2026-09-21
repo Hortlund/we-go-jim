@@ -171,6 +171,24 @@ nonisolated enum BackupLocalJournal {
         }
     }
 
+    /// Clear only completed cleanup work without racing a reset of local lineage.
+    static func finishCleanup(
+        _ names: Set<String>, account: String?, generation: String, for container: ModelContainer
+    ) throws {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            let url = directory(for: container)?.appendingPathComponent("state.json")
+            let current = try url.map { try read(State.self, at: $0) }
+                ?? memory.states[ObjectIdentifier(container)]
+            guard var state = current, state.account == account,
+                  state.generation == generation, state.attemptedManifest == nil else { return }
+            let remaining = (state.garbageRecords ?? []).subtracting(names)
+            state.garbageRecords = remaining.isEmpty ? nil : remaining
+            if let url { try write(state, at: url) }
+            else { memory.states[ObjectIdentifier(container)] = state }
+        }
+    }
+
     static func markPending(for container: ModelContainer) throws {
         try lock.withLock { memory in
             memory.prepare(container)
@@ -302,30 +320,66 @@ nonisolated struct BackupExportPlan {
     }
 }
 
+/// A manifest contains the full workout index, so bound decoded histories as well
+/// as network requests. Consumers keep record IDs, never the decoded manifests.
+nonisolated enum BackupManifestBatches {
+    static let limit = 4
+
+    static func forEach(
+        _ names: Set<String>,
+        load: (Set<String>) async throws -> [String: BackupManifest],
+        consume: (String, BackupManifest) throws -> Void
+    ) async throws {
+        let ordered = names.sorted()
+        for offset in stride(from: 0, to: ordered.count, by: limit) {
+            try Task.checkCancellation()
+            let batch = Set(ordered[offset..<min(offset + limit, ordered.count)])
+            let manifests = try await load(batch)
+            for (name, manifest) in manifests {
+                try manifest.validate()
+                guard batch.contains(name), name == "backup-generation-v3-\(manifest.generation)" else {
+                    throw BackupArchiveError.invalidManifest
+                }
+                try consume(name, manifest)
+            }
+        }
+    }
+}
+
 /// Shared by the CloudKit transport and deterministic retention tests. A cleanup
 /// succeeds only when every retained manifest was read and both delete phases finish.
 nonisolated enum BackupRetentionCleanup {
     static func remove(
         _ names: Set<String>, retaining current: BackupManifest,
-        loadManifest: (String) async throws -> BackupManifest?,
+        loadManifests: (Set<String>) async throws -> [String: BackupManifest],
         delete: (Set<String>) async throws -> Void
     ) async throws {
+        guard !names.isEmpty else { return }
+        try current.validate()
+        let retainedGenerations = Set(current.previousGenerations.map { "backup-generation-v3-\($0)" })
+        let currentName = "backup-generation-v3-\(current.generation)"
+        let retiredGenerations = names.filter { $0.hasPrefix("backup-generation-v3-") }
+            .subtracting(retainedGenerations).subtracting([currentName])
         var retained = Set(current.chunks.map(\.recordName))
-        retained.insert("backup-generation-v3-\(current.generation)")
-        for generation in current.previousGenerations {
-            guard let previous = try await loadManifest("backup-generation-v3-\(generation)") else {
-                throw BackupArchiveError.missingChunk
+        retained.insert(currentName)
+        var foundRetained: Set<String> = []
+        var candidates = names
+        // Reduce each batch to record IDs before fetching the next. Even a large
+        // retry backlog must not keep every full workout index alive at once.
+        try await BackupManifestBatches.forEach(retainedGenerations.union(retiredGenerations), load: loadManifests) { name, manifest in
+            if retainedGenerations.contains(name) {
+                foundRetained.insert(name)
+                retained.formUnion(manifest.chunks.map(\.recordName))
+                retained.insert(name)
+            } else {
+                candidates.formUnion(manifest.chunks.map(\.recordName))
             }
-            retained.formUnion(previous.chunks.map(\.recordName))
-            retained.insert("backup-generation-v3-\(generation)")
         }
-        var candidates = names.subtracting(retained)
+        // Retained manifests can arrive in any batch. Validate all of them before
+        // subtracting their chunks or permitting either deletion phase.
+        guard foundRetained == retainedGenerations else { throw BackupArchiveError.missingChunk }
+        candidates.subtract(retained)
         let generations = candidates.filter { $0.hasPrefix("backup-generation-v3-") }
-        for name in generations {
-            if let retired = try await loadManifest(name) {
-                candidates.formUnion(Set(retired.chunks.map(\.recordName)).subtracting(retained))
-            }
-        }
         // Keep each retired manifest until its chunks are removed. The durable local
         // journal can then rediscover and retry every deletion after a partial failure.
         try await delete(candidates.subtracting(generations))
