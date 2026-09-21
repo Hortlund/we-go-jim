@@ -114,6 +114,7 @@ struct WGJApp: App {
         let container = try ModelContainer(for: appSchema, configurations: [inMemory])
         try seedUITestCatalogIfNeeded(container: container)
         try seedUITestExerciseProgressIfRequested(container: container)
+        try seedUITestProfileBodyweightIfRequested(container: container)
         try seedUITestHistoryMainCardioIfRequested(container: container)
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_REVIEW") {
@@ -308,6 +309,25 @@ struct WGJApp: App {
         )
         context.insert(bench)
         try context.saveWithRecoveryProtection()
+    }
+
+    nonisolated private static func seedUITestProfileBodyweightIfRequested(container: ModelContainer) throws {
+        guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_PROFILE_BODYWEIGHT") else { return }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        for index in 0..<2 {
+            let date = Date().addingTimeInterval(Double(index - 2) * 86_400)
+            let session = WorkoutSession(name: "Pull-Up Fixture", status: .completed, endedAt: date)
+            let exercise = WorkoutSessionExercise(sessionID: session.id, catalogExerciseUUID: "fixture-pull-up",
+                exerciseNameSnapshot: "Pull-Up", categorySnapshot: "Back", muscleSummarySnapshot: "Back", session: session)
+            let set = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: 8 + index * 2,
+                actualWeight: index == 0 ? nil : 0, actualLoadUnit: .kg, isCompleted: true, sessionExercise: exercise)
+            context.insert(session)
+            context.insert(exercise)
+            context.insert(set)
+        }
+        try context.saveWithRecoveryProtection()
+        HistoryAnalyticsCache.shared.invalidate(container: container)
     }
 
     nonisolated private static func seedUITestExerciseProgressIfRequested(container: ModelContainer) throws {

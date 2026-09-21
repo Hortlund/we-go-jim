@@ -6,11 +6,15 @@ struct ProfileWidgetManagerView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
 
+    @State private var isReordering = false
+    @State private var reorderSaveTask: Task<Void, Never>?
+    @State private var reorderSaveToken: UUID?
+    @State private var isSavingConfiguration = false
+
     @State private var configs: [ProfileWidgetConfigSnapshot] = []
     @State private var widgetListSnapshot = ProfileWidgetManagerListSnapshot.empty
     @State private var exerciseOptions: [ExerciseHistoryOption] = []
     @State private var selectingExerciseTarget: ExerciseSelectionTarget?
-    @State private var newTrendMetric: ProfileExerciseTrendMetric = .oneRepMax
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var isLoading = false
@@ -42,14 +46,6 @@ struct ProfileWidgetManagerView: View {
             }
         }
 
-        var pickerTitle: String {
-            switch self {
-            case .singleton(let kind, _):
-                return kind.title
-            case .existingTrend(_, let metric), .newTrend(let metric):
-                return "\(metric.title) Trend"
-            }
-        }
     }
 
     private var widgetBackgroundStore: AppBackgroundStore {
@@ -64,7 +60,9 @@ struct ProfileWidgetManagerView: View {
             Section {
                 WGJEmptyStateCard(
                     title: "Profile widgets",
-                    message: "Choose the cards that appear on your profile, from PRs and goals to streaks, favorites, and consistency heatmaps.",
+                    message: isReordering
+                        ? "Use the up and down arrows to change the order. Changes save automatically."
+                        : "Choose your profile widgets. Tap Reorder to change their order.",
                     icon: "square.grid.2x2"
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
@@ -85,23 +83,30 @@ struct ProfileWidgetManagerView: View {
                 }
 
                 ForEach(visibleEnabledConfigs) { config in
-                    widgetRow(config)
+                    if isReordering {
+                        reorderRow(config)
+                    } else {
+                        widgetRow(config)
+                    }
                 }
-                .onMove(perform: moveEnabledWidgets)
             } header: {
                 sectionHeader("Enabled", subtitle: "Visible on your profile")
             }
 
-            Section {
-                addExerciseTrendRow
+            if !isReordering {
+                Section {
+                    addExerciseTrendRow
 
-                ForEach(visibleAvailableConfigs) { config in
-                    widgetRow(config)
+                    ForEach(visibleAvailableConfigs) { config in
+                        widgetRow(config)
+                    }
+                } header: {
+                    sectionHeader("Available", subtitle: "Add more profile modules")
                 }
-            } header: {
-                sectionHeader("Available", subtitle: "Add more profile modules")
             }
         }
+        .disabled(isSavingConfiguration)
+        .interactiveDismissDisabled(isSavingConfiguration || reorderSaveToken != nil)
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .wgjScreenBackground()
@@ -113,10 +118,16 @@ struct ProfileWidgetManagerView: View {
                 Button("Done") {
                     dismiss()
                 }
+                .disabled(isSavingConfiguration || reorderSaveToken != nil)
+                .accessibilityIdentifier("profile-widgets-done-button")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
+                Button(isReordering ? "Finish" : "Reorder") {
+                    withAnimation { isReordering.toggle() }
+                }
+                .disabled(isSavingConfiguration || reorderSaveToken != nil || visibleEnabledConfigs.count < 2)
+                .accessibilityIdentifier("profile-widgets-reorder-button")
             }
         }
         .task {
@@ -127,7 +138,7 @@ struct ProfileWidgetManagerView: View {
         }
         .sheet(item: $selectingExerciseTarget) { target in
             ProfileWidgetExercisePickerView(
-                title: target.pickerTitle,
+                initialMetric: target.metric ?? .oneRepMax,
                 options: exerciseOptions,
                 onSelect: { option in
                     saveExerciseSelection(option, for: target)
@@ -196,10 +207,11 @@ struct ProfileWidgetManagerView: View {
 
                 HStack(spacing: 8) {
                     if config.kind.requiresExerciseSelection && !isLocked {
-                        Button(config.selectedCatalogExerciseUUID == nil ? "Choose Exercise" : "Change") {
+                        Button(config.selectedCatalogExerciseUUID == nil ? "Choose Exercise" : "Edit Trend") {
                             presentExercisePicker(for: selectionTarget(for: config, enableAfterSelection: false))
                         }
                         .buttonStyle(WGJCompactGhostButtonStyle())
+                        .accessibilityIdentifier("profile-widget-edit-\(accessibilityIDToken(for: config))")
                     }
 
                     Spacer(minLength: 0)
@@ -253,16 +265,8 @@ struct ProfileWidgetManagerView: View {
                 Spacer(minLength: 0)
             }
 
-            Picker("Metric", selection: $newTrendMetric) {
-                ForEach(ProfileExerciseTrendMetric.allCases) { metric in
-                    Text(metric.title).tag(metric)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("profile-widget-new-trend-metric-picker")
-
             Button {
-                presentExercisePicker(for: .newTrend(metric: newTrendMetric))
+                presentExercisePicker(for: .newTrend(metric: .oneRepMax))
             } label: {
                 Label("Add Exercise Trend", systemImage: "plus")
             }
@@ -328,27 +332,11 @@ struct ProfileWidgetManagerView: View {
             return config.kind.title
         }
 
-        if let selectedName = config.selectedExerciseNameSnapshot, !selectedName.isEmpty {
-            return "\(selectedName) - \(config.exerciseTrendMetric.title)"
-        }
-        return "\(config.exerciseTrendMetric.title) Trend"
+        return config.trendTitle
     }
 
     private func description(for config: ProfileWidgetConfigSnapshot) -> String {
-        guard config.kind.isExerciseTrend else {
-            return description(for: config.kind)
-        }
-
-        switch config.exerciseTrendMetric {
-        case .oneRepMax:
-            return "Chart estimated max strength across recent workouts."
-        case .maxWeight:
-            return "Track the best load you logged across recent workouts."
-        case .volume:
-            return "Track weighted training volume over time for one exercise."
-        case .maxReps:
-            return "Track the best completed reps across recent workouts."
-        }
+        config.kind.isExerciseTrend ? config.exerciseTrendMetric.trendDescription : description(for: config.kind)
     }
 
     @ViewBuilder
@@ -375,30 +363,91 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
+    private func reorderRow(_ config: ProfileWidgetConfigSnapshot) -> some View {
+        let enabled = widgetListSnapshot.visibleEnabledConfigs
+        let index = enabled.firstIndex { $0.id == config.id } ?? 0
+        return HStack(spacing: 12) {
+            Text(title(for: config))
+                .font(.headline)
+                .foregroundStyle(WGJTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                moveEnabledWidgets(from: IndexSet(integer: index), to: index - 1)
+            } label: {
+                Image(systemName: "arrow.up").frame(width: 32, height: 44)
+            }
+            .disabled(index == 0)
+            .accessibilityLabel("Move \(title(for: config)) up")
+            .accessibilityIdentifier("profile-widget-move-up-\(accessibilityIDToken(for: config))")
+            Button {
+                moveEnabledWidgets(from: IndexSet(integer: index), to: index + 2)
+            } label: {
+                Image(systemName: "arrow.down").frame(width: 32, height: 44)
+            }
+            .disabled(index == enabled.count - 1)
+            .accessibilityLabel("Move \(title(for: config)) down")
+            .accessibilityIdentifier("profile-widget-move-down-\(accessibilityIDToken(for: config))")
+        }
+        .buttonStyle(.borderless)
+        .padding(.vertical, 6)
+        .listRowBackground(Color.clear)
+    }
+
     private func moveEnabledWidgets(from source: IndexSet, to destination: Int) {
+        var ids = widgetListSnapshot.visibleEnabledConfigs.map(\.id)
+        guard !source.isEmpty, source.allSatisfy({ ids.indices.contains($0) }),
+              (0...ids.count).contains(destination) else { return }
+        let original = ids
+        ids.move(fromOffsets: source, toOffset: destination)
+        guard ids != original else { return }
+        let order = ids
+        let byID = Dictionary(configs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let movedIDs = Set(order)
+        let ordered = order.compactMap { byID[$0] } + configs.filter { !movedIDs.contains($0.id) }
+        applyConfigs(ordered.enumerated().map { $0.element.updating(sortOrder: $0.offset) })
+
         let backgroundStore = widgetBackgroundStore
-        applyConfigs(Self.reorderedEnabledConfigs(configs, fromOffsets: source, toOffset: destination))
-        Task.detached(priority: .userInitiated) {
+        let previousSave = reorderSaveTask
+        let token = UUID()
+        reorderSaveToken = token
+        reorderSaveTask = Task { @MainActor in
+            // Preserve move order and prevent older results from reverting a newer move.
+            await previousSave?.value
             do {
                 let snapshots = try await backgroundStore.performWrite("profile-widgets.move") { backgroundContext in
                     let repository = ProfileWidgetRepository(modelContext: backgroundContext)
-                    try repository.moveEnabledWidget(fromOffsets: source, toOffset: destination)
+                    try repository.reorderEnabledWidgets(ids: order)
                     return try repository.configurationSnapshots()
                 }
-                await applyConfigs(snapshots)
+                if reorderSaveToken == token { applyConfigs(snapshots) }
             } catch {
-                await showError(error)
+                if reorderSaveToken == token {
+                    let snapshots = try? await backgroundStore.perform("profile-widgets.reload-order", { context in
+                        try ProfileWidgetRepository(modelContext: context).configurationSnapshots()
+                    })
+                    // A newer move may take ownership while the recovery read is suspended.
+                    guard reorderSaveToken == token else { return }
+                    if let snapshots { applyConfigs(snapshots) }
+                    showError(error)
+                }
+            }
+            if reorderSaveToken == token {
+                reorderSaveToken = nil
+                reorderSaveTask = nil
             }
         }
     }
 
     private func toggleConfig(_ config: ProfileWidgetConfigSnapshot) {
+        guard !isSavingConfiguration else { return }
+        isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
         applyConfigs(configs.map { snapshot in
             guard snapshot.id == config.id else { return snapshot }
             return snapshot.updating(isEnabled: !config.isEnabled)
         })
-        Task.detached(priority: .userInitiated) {
+        Task { @MainActor in
+            defer { isSavingConfiguration = false }
             do {
                 let snapshots = try await backgroundStore.performWrite("profile-widgets.toggle") { backgroundContext in
                     let repository = ProfileWidgetRepository(modelContext: backgroundContext)
@@ -409,14 +458,16 @@ struct ProfileWidgetManagerView: View {
                     }
                     return try repository.configurationSnapshots()
                 }
-                await applyConfigs(snapshots)
+                applyConfigs(snapshots)
             } catch {
-                await showError(error)
+                showError(error)
             }
         }
     }
 
     private func removeOrToggleConfig(_ config: ProfileWidgetConfigSnapshot) {
+        guard !isSavingConfiguration else { return }
+        isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
         if config.kind.isExerciseTrend {
             applyConfigs(configs.filter { $0.id != config.id })
@@ -426,7 +477,8 @@ struct ProfileWidgetManagerView: View {
                 return snapshot.updating(isEnabled: false)
             })
         }
-        Task.detached(priority: .userInitiated) {
+        Task { @MainActor in
+            defer { isSavingConfiguration = false }
             do {
                 let snapshots = try await backgroundStore.performWrite("profile-widgets.remove") { backgroundContext in
                     let repository = ProfileWidgetRepository(modelContext: backgroundContext)
@@ -437,9 +489,9 @@ struct ProfileWidgetManagerView: View {
                     }
                     return try repository.configurationSnapshots()
                 }
-                await applyConfigs(snapshots)
+                applyConfigs(snapshots)
             } catch {
-                await showError(error)
+                showError(error)
             }
         }
     }
@@ -480,7 +532,7 @@ struct ProfileWidgetManagerView: View {
         exercisePickerLoadToken = token
         let backgroundStore = widgetBackgroundStore
         let metric = target.metric
-        let emptyMessage = emptyExerciseMessage(for: metric)
+        let emptyMessage = "Complete sets for an exercise first, then add a trend with or without weight."
         exercisePickerLoadTask = Task.detached(priority: .userInitiated) {
             do {
                 let options = try await backgroundStore.perform("profile-widgets.exercise-options") { backgroundContext in
@@ -521,9 +573,12 @@ struct ProfileWidgetManagerView: View {
         _ option: ExerciseHistoryOption,
         for target: ExerciseSelectionTarget
     ) {
+        guard !isSavingConfiguration else { return }
+        isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
         applyConfigs(Self.applyingExerciseSelection(option, target: target, to: configs))
-        Task.detached(priority: .userInitiated) {
+        Task { @MainActor in
+            defer { isSavingConfiguration = false }
             do {
                 let snapshots = try await backgroundStore.performWrite("profile-widgets.exercise-selection") { backgroundContext in
                     let repository = ProfileWidgetRepository(modelContext: backgroundContext)
@@ -537,16 +592,16 @@ struct ProfileWidgetManagerView: View {
                         if enableWidget {
                             try repository.setEnabled(kind: kind, isEnabled: true)
                         }
-                    case .existingTrend(let id, let metric):
+                    case .existingTrend(let id, _):
                         try repository.updateExerciseTrendConfig(
                             id: id,
-                            metric: metric,
+                            metric: option.trendMetric,
                             catalogExerciseUUID: option.catalogExerciseUUID,
                             exerciseName: option.exerciseName
                         )
-                    case .newTrend(let metric):
+                    case .newTrend:
                         try repository.createExerciseTrendConfig(
-                            metric: metric,
+                            metric: option.trendMetric,
                             catalogExerciseUUID: option.catalogExerciseUUID,
                             exerciseName: option.exerciseName,
                             isEnabled: true
@@ -554,9 +609,9 @@ struct ProfileWidgetManagerView: View {
                     }
                     return try repository.configurationSnapshots()
                 }
-                await applyConfigs(snapshots)
+                applyConfigs(snapshots)
             } catch {
-                await showError(error)
+                showError(error)
             }
         }
     }
@@ -580,23 +635,6 @@ struct ProfileWidgetManagerView: View {
         return config.kind.rawValue
     }
 
-    private func emptyExerciseMessage(for metric: ProfileExerciseTrendMetric?) -> String {
-        guard let metric else {
-            return "Log a weighted exercise first, then you can add a graph widget for it."
-        }
-
-        switch metric {
-        case .oneRepMax:
-            return "Log weighted sets first, then you can add a 1RM trend."
-        case .maxWeight:
-            return "Log weighted sets first, then you can add a max weight trend."
-        case .volume:
-            return "Log weighted sets first, then you can add a volume trend."
-        case .maxReps:
-            return "Log completed sets first, then you can add a max reps trend."
-        }
-    }
-
     @MainActor
     private func applyConfigs(_ snapshots: [ProfileWidgetConfigSnapshot]) {
         configs = snapshots
@@ -617,32 +655,6 @@ struct ProfileWidgetManagerView: View {
         )
     }
 
-    nonisolated private static func reorderedEnabledConfigs(
-        _ configs: [ProfileWidgetConfigSnapshot],
-        fromOffsets source: IndexSet,
-        toOffset destination: Int
-    ) -> [ProfileWidgetConfigSnapshot] {
-        var enabled = configs.filter(\.isEnabled).sorted { $0.sortOrder < $1.sortOrder }
-        let movingItems = source.sorted().compactMap { index in
-            enabled.indices.contains(index) ? enabled[index] : nil
-        }
-        for index in source.sorted(by: >) where enabled.indices.contains(index) {
-            enabled.remove(at: index)
-        }
-
-        var insertionIndex = destination - source.filter { $0 < destination }.count
-        insertionIndex = max(0, min(insertionIndex, enabled.count))
-        enabled.insert(contentsOf: movingItems, at: insertionIndex)
-
-        let enabledIDs = Set(enabled.map(\.id))
-        let disabled = configs
-            .filter { !enabledIDs.contains($0.id) }
-            .sorted { $0.sortOrder < $1.sortOrder }
-        return (enabled + disabled).enumerated().map { index, config in
-            config.updating(sortOrder: index)
-        }
-    }
-
     nonisolated private static func applyingExerciseSelection(
         _ option: ExerciseHistoryOption,
         target: ExerciseSelectionTarget,
@@ -658,17 +670,17 @@ struct ProfileWidgetManagerView: View {
                     selectedExerciseNameSnapshot: option.exerciseName
                 )
             }
-        case .existingTrend(let id, let metric):
+        case .existingTrend(let id, _):
             return configs.map { config in
                 guard config.id == id else { return config }
                 return config.updating(
                     kind: .exerciseOneRMTrend,
                     selectedCatalogExerciseUUID: option.catalogExerciseUUID,
                     selectedExerciseNameSnapshot: option.exerciseName,
-                    exerciseTrendMetric: metric
+                    exerciseTrendMetric: option.trendMetric
                 )
             }
-        case .newTrend(let metric):
+        case .newTrend:
             let nextSortOrder = (configs.map(\.sortOrder).max() ?? -1) + 1
             return configs + [
                 ProfileWidgetConfigSnapshot(
@@ -678,7 +690,7 @@ struct ProfileWidgetManagerView: View {
                     sortOrder: nextSortOrder,
                     selectedCatalogExerciseUUID: option.catalogExerciseUUID,
                     selectedExerciseNameSnapshot: option.exerciseName,
-                    exerciseTrendMetric: metric,
+                    exerciseTrendMetric: option.trendMetric,
                     updatedAt: .now
                 ),
             ]
