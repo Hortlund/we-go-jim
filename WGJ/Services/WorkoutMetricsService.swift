@@ -108,8 +108,17 @@ nonisolated struct ExerciseHistoryOption: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let lastPerformedAt: Date
+    let trendMetric: ProfileExerciseTrendMetric
+    let availableTrendMetrics: Set<ProfileExerciseTrendMetric>
 
     var id: String { catalogExerciseUUID }
+
+    func selectingMetric(_ requested: ProfileExerciseTrendMetric) -> Self {
+        Self(catalogExerciseUUID: catalogExerciseUUID, exerciseName: exerciseName,
+             lastPerformedAt: lastPerformedAt,
+             trendMetric: availableTrendMetrics.contains(requested) ? requested : .maxReps,
+             availableTrendMetrics: availableTrendMetrics)
+    }
 }
 
 nonisolated struct ExerciseMetricPoint: Identifiable, Equatable, Sendable {
@@ -193,6 +202,7 @@ nonisolated struct ProfileDashboardSnapshot: Equatable, Sendable {
     let overviewStats: ProfileOverviewStats
     let topExercises: [ProfileTopExerciseStat]
     let activityDays: [ProfileActivityDay]
+    var bodyweightPersonalRecords: [BodyweightExerciseBestRecord] = []
 }
 
 nonisolated struct ProfileWeeklyMuscleHeatmapSnapshot: Equatable, Sendable {
@@ -741,14 +751,19 @@ nonisolated final class WorkoutMetricsService {
         var latestByExercise: [String: ExerciseHistoryOption] = [:]
 
         for (catalogExerciseUUID, entries) in exerciseHistoryByUUID {
-            guard let latestEntry = entries.first(where: { $0.supportsExerciseTrendMetric(metric) }) else {
+            guard let latestEntry = entries.first(where: { $0.maxReps != nil }) else {
                 continue
             }
 
+            let availableMetrics = Set(ProfileExerciseTrendMetric.allCases.filter { metric in
+                entries.contains { $0.supportsExerciseTrendMetric(metric) }
+            })
             latestByExercise[catalogExerciseUUID] = ExerciseHistoryOption(
                 catalogExerciseUUID: catalogExerciseUUID,
                 exerciseName: latestEntry.exerciseName,
-                lastPerformedAt: latestEntry.completedAt
+                lastPerformedAt: latestEntry.completedAt,
+                trendMetric: metric.flatMap { availableMetrics.contains($0) ? $0 : nil } ?? .maxReps,
+                availableTrendMetrics: availableMetrics
             )
         }
 
@@ -992,7 +1007,14 @@ nonisolated final class WorkoutMetricsService {
             weeklyGoal: profileGoal,
             overviewStats: overviewStats,
             topExercises: topExercises,
-            activityDays: activityDays
+            activityDays: activityDays,
+            bodyweightPersonalRecords: Array(snapshot.bestBodyweightByExercise.values.filter {
+                // Each exercise gets one record; prefer its weighted 1RM when available.
+                snapshot.bestPRByExercise[$0.catalogExerciseUUID] == nil
+            }.sorted {
+                if $0.reps != $1.reps { return $0.reps > $1.reps }
+                return $0.exerciseName.localizedStandardCompare($1.exerciseName) == .orderedAscending
+            }.prefix(max(0, safePRLimit - personalRecords.count)))
         )
     }
 
@@ -1494,7 +1516,7 @@ nonisolated struct CollectedExerciseFrequency: Sendable {
     let lastPerformedAt: Date
 }
 
-nonisolated struct BodyweightExerciseBestRecord: Sendable {
+nonisolated struct BodyweightExerciseBestRecord: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let reps: Int

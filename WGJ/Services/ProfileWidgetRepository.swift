@@ -141,38 +141,22 @@ nonisolated final class ProfileWidgetRepository {
         try saveUserDataChanges()
     }
 
-    func moveEnabledWidget(fromOffsets: IndexSet, toOffset: Int) throws {
+    /// Persist widget identities, rather than offsets into a potentially older fetch.
+    func reorderEnabledWidgets(ids: [UUID]) throws {
         let configs = try configurations()
-        var enabled = configs.filter { $0.isEnabled }
-        let movingItems = fromOffsets.sorted().map { enabled[$0] }
-        for index in fromOffsets.sorted(by: >) {
-            enabled.remove(at: index)
+        let enabled = configs.filter(\.isEnabled)
+        let byID = Dictionary(enabled.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen: Set<UUID> = []
+        let requested = ids.compactMap { id -> ProfileWidgetConfig? in
+            guard seen.insert(id).inserted else { return nil }
+            return byID[id]
         }
-
-        var destination = toOffset
-        let removedBeforeDestination = fromOffsets.filter { $0 < toOffset }.count
-        destination -= removedBeforeDestination
-        destination = max(0, min(destination, enabled.count))
-        enabled.insert(contentsOf: movingItems, at: destination)
-
-        var sortIndex = 0
-        for enabledConfig in enabled {
-            if enabledConfig.sortOrder != sortIndex {
-                enabledConfig.sortOrder = sortIndex
-                enabledConfig.updatedAt = .now
-            }
-            sortIndex += 1
+        let remaining = enabled.filter { !seen.contains($0.id) }
+        let ordered = requested + remaining + configs.filter { !$0.isEnabled }
+        for (index, config) in ordered.enumerated() where config.sortOrder != index {
+            config.sortOrder = index
+            config.updatedAt = .now
         }
-
-        let disabled = configs.filter { !$0.isEnabled }
-        for disabledConfig in disabled {
-            if disabledConfig.sortOrder != sortIndex {
-                disabledConfig.sortOrder = sortIndex
-                disabledConfig.updatedAt = .now
-            }
-            sortIndex += 1
-        }
-
         try saveUserDataChanges()
     }
 

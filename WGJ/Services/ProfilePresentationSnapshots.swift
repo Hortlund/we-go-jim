@@ -51,6 +51,11 @@ struct ProfileWidgetConfigSnapshot: Identifiable, Equatable, Sendable {
     let exerciseTrendMetric: ProfileExerciseTrendMetric
     let updatedAt: Date
 
+    var trendTitle: String {
+        let name = selectedExerciseNameSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? exerciseTrendMetric.trendTitle : "\(exerciseTrendMetric.trendTitle) — \(name)"
+    }
+
     nonisolated init(config: ProfileWidgetConfig) {
         id = config.id
         kind = config.kind

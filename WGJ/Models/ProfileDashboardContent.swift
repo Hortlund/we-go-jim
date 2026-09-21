@@ -14,6 +14,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
     var activityDayRows: [[ProfileActivityDay]]
     var maxActivityDayWorkoutCount: Int
     var hasActivityDayWorkouts: Bool
+    var bodyweightPersonalRecords: [BodyweightExerciseBestRecord] = []
 
     static let empty = ProfileDashboardContent(
         enabledWidgets: [],
@@ -56,7 +57,8 @@ nonisolated struct ProfileDashboardContent: Sendable {
             activityDays: dashboard.activityDays,
             activityDayRows: activityDayRows,
             maxActivityDayWorkoutCount: maxActivityDayWorkoutCount,
-            hasActivityDayWorkouts: hasActivityDayWorkouts
+            hasActivityDayWorkouts: hasActivityDayWorkouts,
+            bodyweightPersonalRecords: dashboard.bodyweightPersonalRecords
         )
     }
 }

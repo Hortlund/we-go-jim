@@ -6,6 +6,109 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testProfileWidgetReorderPersistsAfterClosingManager() {
+        let app = launchLocalApp()
+        app.buttons["Profile"].firstMatch.tap()
+        let manage = app.buttons["profile-dashboard-manage-button"]
+        for _ in 0..<8 where !manage.isHittable { app.swipeUp() }
+        XCTAssertTrue(manage.waitForExistence(timeout: 5))
+        manage.tap()
+        app.buttons["profile-widgets-reorder-button"].tap()
+        let up = app.buttons["profile-widget-move-up-weeklyGoals"]
+        XCTAssertTrue(up.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Reorder Weekly Goal"].exists)
+        XCTAssertFalse(app.buttons["Reorder PRs"].exists)
+        up.tap()
+        // Both arrow directions work without entering native drag edit mode.
+        app.buttons["profile-widget-move-down-weeklyGoals"].tap()
+        up.tap()
+        XCTAssertFalse(app.buttons["profile-widget-move-up-weeklyGoals"].isEnabled)
+        // Move a second row while the first save may still be completing.
+        app.buttons["profile-widget-move-up-weeklyMuscleHeatmap"].tap()
+        app.buttons["profile-widget-move-up-weeklyMuscleHeatmap"].tap()
+        let done = app.buttons["profile-widgets-done-button"]
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: done)
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 5), .completed)
+        done.tap()
+        manage.tap()
+        let heatmap = app.staticTexts["Muscle Heatmap"].firstMatch
+        let prs = app.staticTexts["PRs"]
+        XCTAssertTrue(prs.waitForExistence(timeout: 5))
+        let cells = app.cells.allElementsBoundByIndex
+        let heatmapIndex = cells.firstIndex { $0.staticTexts["Muscle Heatmap"].exists }
+        let goalIndex = cells.firstIndex { $0.staticTexts["Weekly Goal"].exists }
+        let prsIndex = cells.firstIndex { $0.staticTexts["PRs"].exists }
+        XCTAssertNotNil(heatmapIndex)
+        XCTAssertNotNil(goalIndex)
+        XCTAssertNotNil(prsIndex)
+        XCTAssertLessThan(heatmapIndex ?? 99, goalIndex ?? 0)
+        XCTAssertLessThan(goalIndex ?? 99, prsIndex ?? 0)
+        XCTAssertTrue(heatmap.exists)
+    }
+
+    @MainActor
+    func testProfileBodyweightTrendPickerAndExerciseHeadings() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_PROFILE_BODYWEIGHT", "UITEST_SEED_EXERCISE_PROGRESS"])
+        app.buttons["Profile"].firstMatch.tap()
+        let manage = app.buttons["profile-dashboard-manage-button"]
+        for _ in 0..<8 where !manage.isHittable { app.swipeUp() }
+        XCTAssertTrue(manage.waitForExistence(timeout: 5))
+        manage.tap()
+
+        func addTrend(search: String, exercise: String, metric: String) {
+            let add = app.buttons["profile-widget-add-exerciseTrend"]
+            for _ in 0..<10 where !add.isHittable { app.swipeUp() }
+            XCTAssertTrue(add.isHittable)
+            add.tap()
+            let searchField = app.searchFields.firstMatch
+            XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+            searchField.tap()
+            searchField.typeText(search)
+            let option = app.buttons.containing(.staticText, identifier: exercise).firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            XCTAssertTrue(option.staticTexts[metric].exists)
+            option.tap()
+            XCTAssertTrue(app.staticTexts["\(metric) — \(exercise)"].waitForExistence(timeout: 5))
+        }
+        // The default request is 1RM; reps-only exercises must remain searchable.
+        addTrend(search: "pull", exercise: "Pull-Up", metric: "Max Reps Trend")
+        addTrend(search: "bench", exercise: "Barbell Bench Press", metric: "1RM Trend")
+        func editBench(from title: String, to metric: String, segment: String) {
+            let row = app.cells.containing(.staticText, identifier: title).firstMatch
+            let edit = row.buttons["Edit Trend"]
+            for _ in 0..<10 where !edit.isHittable { app.swipeDown() }
+            XCTAssertTrue(edit.isHittable)
+            edit.tap()
+            let picker = app.segmentedControls["profile-widget-trend-metric-picker"]
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            picker.buttons[segment].tap()
+            let search = app.searchFields.firstMatch
+            search.tap()
+            search.typeText("bench")
+            let option = app.buttons.containing(.staticText, identifier: "Barbell Bench Press").firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            XCTAssertTrue(option.staticTexts[metric].exists)
+            option.tap()
+            XCTAssertTrue(app.staticTexts["\(metric) — Barbell Bench Press"].waitForExistence(timeout: 5))
+        }
+        editBench(from: "1RM Trend — Barbell Bench Press", to: "Max Reps Trend", segment: "Max Reps")
+        editBench(from: "Max Reps Trend — Barbell Bench Press", to: "1RM Trend", segment: "1RM")
+        app.buttons["Done"].tap()
+        let title = app.staticTexts["Max Reps Trend — Pull-Up"]
+        for _ in 0..<12 where !title.isHittable { app.swipeUp() }
+        XCTAssertTrue(title.isHittable)
+        XCTAssertTrue(app.staticTexts["10 reps"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Profile bodyweight trend and exercise heading"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let weightedTitle = app.staticTexts["1RM Trend — Barbell Bench Press"]
+        for _ in 0..<6 where !weightedTitle.isHittable { app.swipeUp() }
+        XCTAssertTrue(weightedTitle.isHittable)
+        XCTAssertFalse(app.staticTexts["Max Reps Trend — Barbell Bench Press"].exists)
+    }
+
+    @MainActor
     func testThemeSelectionPersistsAndKeepsSettingsNavigation() {
         let app = launchLocalApp()
 

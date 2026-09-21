@@ -836,6 +836,25 @@ nonisolated enum ProfileExerciseTrendMetric: String, Codable, CaseIterable, Equa
             return "Max Reps"
         }
     }
+
+    var trendTitle: String { "\(title) Trend" }
+
+    var trendDescription: String {
+        switch self {
+        case .oneRepMax: "Estimated one-rep max from recorded weight and reps."
+        case .maxWeight: "Heaviest recorded weight per workout."
+        case .volume: "Recorded weight × reps per workout."
+        case .maxReps: "Most reps in a completed set, with or without weight."
+        }
+    }
+
+    func formattedTrendValue(_ value: Double, loadUnit: TemplateLoadUnit) -> String {
+        if self == .maxReps {
+            return "\(Int(value).formatted()) reps"
+        }
+        return "\(WGJFormatters.oneDecimalString(value)) \(loadUnit.shortLabel)"
+    }
+
 }
 
 nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {

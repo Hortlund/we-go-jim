@@ -3,19 +3,19 @@ import SwiftUI
 struct ProfileWidgetExercisePickerView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let title: String
     let options: [ExerciseHistoryOption]
     let onSelect: (ExerciseHistoryOption) -> Void
 
+    @State private var selectedMetric: ProfileExerciseTrendMetric
     @State private var searchText = ""
     @State private var filteredOptions: [ExerciseHistoryOption]
 
     init(
-        title: String,
+        initialMetric: ProfileExerciseTrendMetric,
         options: [ExerciseHistoryOption],
         onSelect: @escaping (ExerciseHistoryOption) -> Void
     ) {
-        self.title = title
+        _selectedMetric = State(initialValue: initialMetric)
         self.options = options
         self.onSelect = onSelect
         _filteredOptions = State(initialValue: options)
@@ -24,10 +24,24 @@ struct ProfileWidgetExercisePickerView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("Metric", selection: $selectedMetric) {
+                        ForEach(ProfileExerciseTrendMetric.allCases) { metric in
+                            Text(metric.title).tag(metric)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("profile-widget-trend-metric-picker")
+                    Text(selectedMetric.trendDescription)
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+                .listRowBackground(Color.clear)
+
                 if options.isEmpty {
                     WGJEmptyStateCard(
                         title: "No exercise history yet",
-                        message: "Complete weighted sets for an exercise before adding a graph widget for it.",
+                        message: "Complete sets with or without weight before adding a trend widget.",
                         icon: "chart.line.uptrend.xyaxis"
                     )
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
@@ -43,7 +57,8 @@ struct ProfileWidgetExercisePickerView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 } else {
-                    ForEach(filteredOptions) { option in
+                    ForEach(filteredOptions) { historyOption in
+                        let option = historyOption.selectingMetric(selectedMetric)
                         Button {
                             onSelect(option)
                             dismiss()
@@ -53,6 +68,10 @@ struct ProfileWidgetExercisePickerView: View {
                                     Text(option.exerciseName)
                                         .font(.headline)
                                         .foregroundStyle(WGJTheme.textPrimary)
+
+                                    Text(option.trendMetric.trendTitle)
+                                        .font(.subheadline)
+                                        .foregroundStyle(WGJTheme.accentCyan)
 
                                     Text("Last logged \(option.lastPerformedAt.formatted(date: .abbreviated, time: .omitted))")
                                         .font(.caption)
@@ -79,7 +98,7 @@ struct ProfileWidgetExercisePickerView: View {
             .scrollContentBackground(.hidden)
             .wgjScreenBackground()
             .wgjNavigationChrome()
-            .navigationTitle(title)
+            .navigationTitle("Exercise Trend")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search exercise history")
             .task(id: searchText) {

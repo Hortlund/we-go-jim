@@ -1,9 +1,200 @@
+import os
 import SwiftData
 import XCTest
 @testable import WGJ
 
 @MainActor
 final class ProfileDataEfficiencyTests: XCTestCase {
+    func testWidgetReorderPersistsDistinctTrendInstancesAndAvoidsNoOpBackup() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let backups = OSAllocatedUnfairLock(initialState: 0)
+        let repository = ProfileWidgetRepository(modelContext: context, boundaryEffects: .init { _, _ in
+            backups.withLock { $0 += 1 }
+        })
+        let first = try repository.createExerciseTrendConfig(metric: .maxReps, catalogExerciseUUID: "pull-up",
+            exerciseName: "Pull-Up", isEnabled: true).id
+        let second = try repository.createExerciseTrendConfig(metric: .maxReps, catalogExerciseUUID: "push-up",
+            exerciseName: "Push-Up", isEnabled: true).id
+        try repository.setEnabled(kind: .prs, isEnabled: false)
+        let remaining = try repository.enabledConfigurationSnapshots().map(\.id).filter { $0 != first && $0 != second }
+        let order = [second, first] + remaining
+        let before = backups.withLock { $0 }
+        try repository.reorderEnabledWidgets(ids: order)
+        let reader = ProfileWidgetRepository(modelContext: ModelContext(container), boundaryEffects: .init { _, _ in })
+        XCTAssertEqual(try reader.enabledConfigurationSnapshots().map(\.id), order)
+        XCTAssertEqual(backups.withLock { $0 }, before + 1)
+        try repository.reorderEnabledWidgets(ids: order)
+        XCTAssertEqual(backups.withLock { $0 }, before + 1)
+        XCTAssertFalse(context.hasChanges)
+        let all = try reader.configurationSnapshots()
+        XCTAssertEqual(all.map(\.sortOrder), Array(0..<all.count))
+        XCTAssertTrue(all.dropFirst(order.count).allSatisfy { !$0.isEnabled })
+    }
+
+    func testWidgetReorderUsesLatestExplicitOrderAndIgnoresDeletedIDs() throws {
+        let container = try container()
+        let repository = ProfileWidgetRepository(modelContext: ModelContext(container), boundaryEffects: .init { _, _ in })
+        let initial = try repository.enabledConfigurationSnapshots().map(\.id)
+        try repository.reorderEnabledWidgets(ids: Array(initial.reversed()))
+        // This request is relative to the UI's desired order, independent of the earlier persisted order.
+        let final = [initial[1], initial[3], initial[0], initial[2]]
+        try repository.reorderEnabledWidgets(ids: final + [UUID(), final[0]])
+        let reader = ProfileWidgetRepository(modelContext: ModelContext(container), boundaryEffects: .init { _, _ in })
+        XCTAssertEqual(try reader.enabledConfigurationSnapshots().map(\.id), final)
+    }
+
+    func testBodyweightExercisesAreOfferedForEveryTrendAndUseReps() throws {
+        for unit in [TemplateLoadUnit.kg, .lb, .bodyweight] {
+            let container = try container()
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let first = try pullUp(context, day: 1, reps: 8, weight: nil, unit: unit)
+            let second = try pullUp(context, day: 2, reps: 10, weight: 0, unit: unit)
+            let service = WorkoutMetricsService(modelContext: context)
+            // Exercise both canonical fallback and the persisted projection used after backfill.
+            for projected in [false, true] {
+                if projected {
+                    for session in [first, second] {
+                        _ = try HistoryProjectionRepository(modelContext: context).rebuildFacts(forSessionID: session.id)
+                    }
+                }
+                for metric in ProfileExerciseTrendMetric.allCases {
+                    let option = try XCTUnwrap(service.exerciseHistoryOptions(metric: metric).first)
+                    XCTAssertEqual(option.catalogExerciseUUID, "pull-up")
+                    XCTAssertEqual(option.trendMetric, .maxReps)
+                    let trend = try service.exerciseMetricTrend(for: option.catalogExerciseUUID, metric: option.trendMetric)
+                    XCTAssertEqual(trend.points.map(\.value), [8, 10])
+                }
+                XCTAssertEqual(try service.exerciseHistoryOptions().map(\.catalogExerciseUUID), ["pull-up"])
+                XCTAssertFalse(context.hasChanges)
+            }
+        }
+    }
+
+    func testWeightedHistoryPreservesSelectedMetricAndRepsIncludeUnweightedSessions() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        _ = try pullUp(context, day: 1, reps: 8, weight: nil, unit: .kg)
+        _ = try pullUp(context, day: 2, reps: 5, weight: 10, unit: .kg)
+        _ = try pullUp(context, day: 3, reps: 12, weight: 0, unit: .kg)
+        let service = WorkoutMetricsService(modelContext: context)
+        for metric in ProfileExerciseTrendMetric.allCases {
+            let option = try XCTUnwrap(service.exerciseHistoryOptions(metric: metric).first)
+            XCTAssertEqual(option.trendMetric, metric)
+            let series = try service.exerciseMetricTrend(for: option.catalogExerciseUUID, metric: metric)
+            XCTAssertEqual(series.points.count, metric == .maxReps ? 3 : 1)
+        }
+        XCTAssertEqual(try service.exerciseMaxRepsTrend(for: "pull-up").points.map(\.value), [8, 5, 12])
+        XCTAssertEqual(try service.exerciseMaxWeightTrend(for: "pull-up").points.map(\.value), [10])
+        XCTAssertEqual(try service.exerciseVolumeTrend(for: "pull-up").points.map(\.value), [50])
+        XCTAssertFalse(context.hasChanges)
+    }
+
+    func testBodyweightRecordsAndOtherProfileWidgetsIncludeUnweightedSets() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let session = try pullUp(context, day: 1, reps: 8, weight: nil, unit: .kg)
+        let service = WorkoutMetricsService(modelContext: context, calendar: calendar)
+        for projected in [false, true] {
+            if projected { _ = try HistoryProjectionRepository(modelContext: context).rebuildFacts(forSessionID: session.id) }
+            let dashboard = try service.profileDashboardSnapshot(enabledWidgets: Set(ProfileWidgetKind.allCases))
+            XCTAssertEqual(dashboard.bodyweightPersonalRecords.first?.reps, 8)
+            XCTAssertTrue(dashboard.personalRecords.isEmpty)
+            XCTAssertEqual(dashboard.topExercises.first?.catalogExerciseUUID, "pull-up")
+            XCTAssertEqual(dashboard.overviewStats.totalWorkouts, 1)
+            let content = ProfileDashboardContent.make(enabledWidgets: [], dashboard: dashboard, trendSeriesByWidgetID: [:])
+            XCTAssertEqual(content.bodyweightPersonalRecords.first?.exerciseName, "Pull-Up")
+            let disabled = try service.profileDashboardSnapshot(enabledWidgets: [])
+            XCTAssertTrue(disabled.bodyweightPersonalRecords.isEmpty)
+            XCTAssertFalse(context.hasChanges)
+        }
+    }
+
+    func testPersonalRecordsPreferOneWeightedRecordPerExerciseAndShareLimit() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let unweighted = try pullUp(context, day: 1, reps: 12, weight: nil, unit: .kg)
+        let weighted = try pullUp(context, day: 2, reps: 5, weight: 10, unit: .kg)
+        let other = try pullUp(context, day: 3, reps: 20, weight: nil, unit: .kg)
+        let otherExercise = try XCTUnwrap(other.exercises?.first)
+        otherExercise.catalogExerciseUUID = "push-up"
+        otherExercise.exerciseNameSnapshot = "Push-Up"
+        try context.saveWithRecoveryProtection()
+        HistoryAnalyticsCache.shared.invalidate(container: container)
+        let service = WorkoutMetricsService(modelContext: context)
+        for projected in [false, true] {
+            if projected {
+                for session in [unweighted, weighted, other] {
+                    _ = try HistoryProjectionRepository(modelContext: context).rebuildFacts(forSessionID: session.id)
+                }
+            }
+            let dashboard = try service.profileDashboardSnapshot(prLimit: 5, enabledWidgets: [.prs])
+            XCTAssertEqual(dashboard.personalRecords.map(\.catalogExerciseUUID), ["pull-up"])
+            XCTAssertEqual(dashboard.bodyweightPersonalRecords.map(\.catalogExerciseUUID), ["push-up"])
+            let limited = try service.profileDashboardSnapshot(prLimit: 1, enabledWidgets: [.prs])
+            XCTAssertEqual(limited.personalRecords.count, 1)
+            XCTAssertTrue(limited.bodyweightPersonalRecords.isEmpty)
+        }
+    }
+
+    func testExistingRepsTrendCanSwitchToWeightedMetricWithoutCreatingAnotherWidget() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        _ = try pullUp(context, day: 1, reps: 8, weight: nil, unit: .kg)
+        _ = try pullUp(context, day: 2, reps: 5, weight: 10, unit: .kg)
+        let service = WorkoutMetricsService(modelContext: context)
+        let repsOption = try XCTUnwrap(service.exerciseHistoryOptions(metric: .maxReps).first)
+        XCTAssertEqual(repsOption.trendMetric, .maxReps)
+        let selected = repsOption.selectingMetric(.oneRepMax)
+        XCTAssertEqual(selected.trendMetric, .oneRepMax)
+        let repository = ProfileWidgetRepository(modelContext: context, boundaryEffects: .init { _, _ in })
+        let id = try repository.createExerciseTrendConfig(metric: .maxReps, catalogExerciseUUID: selected.id,
+            exerciseName: selected.exerciseName, isEnabled: true).id
+        try repository.updateExerciseTrendConfig(id: id, metric: selected.trendMetric,
+            catalogExerciseUUID: selected.id, exerciseName: selected.exerciseName)
+        let reader = ProfileWidgetRepository(modelContext: ModelContext(container), boundaryEffects: .init { _, _ in })
+        let trends = try reader.enabledConfigurationSnapshots().filter { $0.kind.isExerciseTrend }
+        XCTAssertEqual(trends.count, 1)
+        XCTAssertEqual(trends.first?.id, id)
+        XCTAssertEqual(trends.first?.exerciseTrendMetric, .oneRepMax)
+        XCTAssertEqual(try service.exerciseOneRepMaxTrend(for: selected.id).points.count, 1)
+    }
+
+    func testTrendTitlesAndUnitsIdentifyExerciseAndMetric() {
+        for metric in ProfileExerciseTrendMetric.allCases {
+            let config = ProfileWidgetConfigSnapshot(id: UUID(), kind: .exerciseOneRMTrend,
+                isEnabled: true, sortOrder: 0, selectedCatalogExerciseUUID: "pull-up",
+                selectedExerciseNameSnapshot: "Pull-Up", exerciseTrendMetric: metric, updatedAt: .now)
+            XCTAssertEqual(config.trendTitle, "\(metric.trendTitle) — Pull-Up")
+            let value = metric.formattedTrendValue(8, loadUnit: .bodyweight)
+            if metric == .maxReps { XCTAssertEqual(value, "8 reps") }
+        }
+        XCTAssertTrue(ProfileExerciseTrendMetric.maxWeight.formattedTrendValue(10, loadUnit: .lb).hasSuffix(" lb"))
+    }
+
+    @discardableResult
+    private func pullUp(_ context: ModelContext, day: Int, reps: Int, weight: Double?, unit: TemplateLoadUnit) throws -> WorkoutSession {
+        let date = Date(timeIntervalSince1970: 1_700_000_000 + Double(day) * 86_400)
+        let session = WorkoutSession(name: "Bodyweight", status: .completed, endedAt: date)
+        let exercise = WorkoutSessionExercise(sessionID: session.id, catalogExerciseUUID: "pull-up",
+            exerciseNameSnapshot: "Pull-Up", categorySnapshot: "Back", muscleSummarySnapshot: "Back", session: session)
+        let set = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: reps,
+            actualWeight: weight, isCompleted: true, sessionExercise: exercise)
+        set.actualLoadUnit = unit
+        context.insert(session)
+        context.insert(exercise)
+        context.insert(set)
+        try context.saveWithRecoveryProtection()
+        HistoryAnalyticsCache.shared.invalidate(container: context.container)
+        return session
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .iso8601)
         value.timeZone = TimeZone(secondsFromGMT: 0)!

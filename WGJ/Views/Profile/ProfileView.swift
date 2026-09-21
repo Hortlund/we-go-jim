@@ -401,8 +401,9 @@ struct ProfileView: View {
             coachBriefWidget
         case .exerciseOneRMTrend, .exerciseVolumeTrend:
             exerciseTrendWidget(
-                title: trendTitle(for: config.exerciseTrendMetric),
-                subtitle: trendSubtitle(for: config),
+                title: config.trendTitle,
+                metric: config.exerciseTrendMetric,
+                subtitle: config.exerciseTrendMetric.trendDescription,
                 accent: trendAccent(for: config.exerciseTrendMetric),
                 series: dashboardContent.trendSeriesByWidgetID[config.id],
                 emptyMessage: trendEmptyMessage(for: config.exerciseTrendMetric)
@@ -439,9 +440,9 @@ struct ProfileView: View {
 
     private var prWidget: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Personal Records", subtitle: "Your strongest logged lifts at a glance")
+            WGJSectionHeader("Personal Records", subtitle: "Your best lifts at a glance")
 
-            if dashboardContent.personalRecords.isEmpty {
+            if dashboardContent.personalRecords.isEmpty && dashboardContent.bodyweightPersonalRecords.isEmpty {
                 Text("Finish a few workouts and your top lifts will show up here.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
@@ -450,7 +451,7 @@ struct ProfileView: View {
                     HStack {
                         Text(record.exerciseName)
                             .foregroundStyle(WGJTheme.textPrimary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Spacer()
 
@@ -459,6 +460,18 @@ struct ProfileView: View {
                             .foregroundStyle(WGJTheme.accentCyan)
                     }
                 }
+                ForEach(dashboardContent.bodyweightPersonalRecords, id: \.catalogExerciseUUID) { record in
+                    HStack {
+                        Text(record.exerciseName)
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Text(ProfileExerciseTrendMetric.maxReps.formattedTrendValue(Double(record.reps), loadUnit: .bodyweight))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.accentCyan)
+                    }
+                }
+
             }
         }
         .padding(14)
@@ -693,6 +706,7 @@ struct ProfileView: View {
 
     private func exerciseTrendWidget(
         title: String,
+        metric: ProfileExerciseTrendMetric,
         subtitle: String,
         accent: Color,
         series: ExerciseMetricSeries?,
@@ -711,12 +725,12 @@ struct ProfileView: View {
 
                             Spacer()
 
-                            Text("\(formatWeight(series.points.last?.value ?? 0)) \(series.loadUnit.shortLabel)")
+                            Text(metric.formattedTrendValue(series.points.last?.value ?? 0, loadUnit: series.loadUnit))
                                 .font(.headline.weight(.semibold))
                                 .foregroundStyle(accent)
                         }
 
-                        if let deltaText = trendDeltaText(for: series) {
+                        if let deltaText = trendDeltaText(for: series, metric: metric) {
                             Text(deltaText)
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
@@ -770,11 +784,11 @@ struct ProfileView: View {
                     }
                 } else if let latest = series.points.last {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(formatWeight(latest.value)) \(series.loadUnit.shortLabel)")
+                        Text(metric.formattedTrendValue(latest.value, loadUnit: series.loadUnit))
                             .font(.title3.weight(.bold))
                             .foregroundStyle(accent)
 
-                        Text("Log one more weighted session for this lift to unlock the chart.")
+                        Text("Log one more workout with this metric to unlock the chart.")
                             .font(.subheadline)
                             .foregroundStyle(WGJTheme.textSecondary)
                     }
@@ -1626,7 +1640,7 @@ struct ProfileView: View {
         return "\(totalMinutes)m"
     }
 
-    private func trendDeltaText(for series: ExerciseMetricSeries) -> String? {
+    private func trendDeltaText(for series: ExerciseMetricSeries, metric: ProfileExerciseTrendMetric) -> String? {
         guard let first = series.points.first, let last = series.points.last, series.points.count >= 2 else {
             return nil
         }
@@ -1637,34 +1651,7 @@ struct ProfileView: View {
         }
 
         let direction = delta > 0 ? "up" : "down"
-        return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
-    }
-
-    private func trendTitle(for metric: ProfileExerciseTrendMetric) -> String {
-        switch metric {
-        case .oneRepMax:
-            return "1RM Trend"
-        case .maxWeight:
-            return "Max Weight Trend"
-        case .volume:
-            return "Volume Trend"
-        case .maxReps:
-            return "Max Reps Trend"
-        }
-    }
-
-    private func trendSubtitle(for config: ProfileWidgetConfigSnapshot) -> String {
-        let exerciseName = config.selectedExerciseNameSnapshot ?? "your lift"
-        switch config.exerciseTrendMetric {
-        case .oneRepMax:
-            return "Estimated max strength for \(exerciseName)"
-        case .maxWeight:
-            return "Best logged load for \(exerciseName)"
-        case .volume:
-            return "Training volume for \(exerciseName)"
-        case .maxReps:
-            return "Best completed reps for \(exerciseName)"
-        }
+        return "\(metric.formattedTrendValue(abs(delta), loadUnit: series.loadUnit)) \(direction) across your last \(series.points.count) logged workouts."
     }
 
     private func trendAccent(for metric: ProfileExerciseTrendMetric) -> Color {
