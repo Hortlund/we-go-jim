@@ -7,7 +7,9 @@ extension CloudKitUserDataCloudBackupStore {
 
     nonisolated func accountIdentifier() async throws -> String {
         guard let cloudContainer else { throw CloudKitContainerAvailabilityError.unavailable }
-        return try await cloudContainer.userRecordID().recordName
+        return try await WGJPerformance.measureAsync("backup.cloud.account") {
+            try await cloudContainer.userRecordID().recordName
+        }
     }
 
     nonisolated func fetchManifest() async throws -> BackupManifest? {
@@ -77,11 +79,15 @@ extension CloudKitUserDataCloudBackupStore {
         expectedAccount: String
     ) async throws {
         try manifest.validate()
-        try await requireNoPendingDeletion()
         guard try await accountIdentifier() == expectedAccount else { throw UserDataCloudBackupSafetyError.accountChanged }
         let database = try requireDatabase()
         let headID = CKRecord.ID(recordName: Self.archiveHeadName)
-        let head = try await existingRecord(recordID: headID, desiredKeys: UserDataCloudBackupDescriptor.metadataFieldKeys)
+        let deletionID = CKRecord.ID(recordName: Self.deletionJournalName)
+        let pointers = try await existingRecords(
+            recordIDs: [headID, deletionID], desiredKeys: UserDataCloudBackupDescriptor.metadataFieldKeys
+        )
+        guard pointers[deletionID] == nil else { throw UserDataCloudBackupSafetyError.deletionPending }
+        let head = pointers[headID]
         let currentGeneration = try generation(in: head)
         guard currentGeneration == expectedGeneration else { throw UserDataCloudBackupSafetyError.remoteChanged }
 
@@ -97,7 +103,9 @@ extension CloudKitUserDataCloudBackupStore {
                 record[UserDataCloudBackupDescriptor.Field.schemaVersion] = 3 as CKRecordValue
                 return record
             }
-            let results = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: false)
+            let results = try await WGJPerformance.measureAsync("backup.cloud.chunks") {
+                try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: false)
+            }
             for record in records {
                 guard let result = results.saveResults[record.recordID] else { throw BackupArchiveError.missingChunk }
                 _ = try result.get()
@@ -114,10 +122,11 @@ extension CloudKitUserDataCloudBackupStore {
         let metadata = UserDataCloudBackupRemoteMetadata(
             updatedAt: manifest.updatedAt, contentSummary: manifest.summary, generation: manifest.generation
         )
+        let metadataData = try BackupArchiveCodec.json(metadata)
         for record in [generationRecord, nextHead] {
             record[UserDataCloudBackupDescriptor.Field.updatedAt] = manifest.updatedAt as CKRecordValue
             record[UserDataCloudBackupDescriptor.Field.schemaVersion] = 3 as CKRecordValue
-            record[UserDataCloudBackupDescriptor.Field.contentSummary] = try BackupArchiveCodec.json(metadata) as CKRecordValue
+            record[UserDataCloudBackupDescriptor.Field.contentSummary] = metadataData as CKRecordValue
         }
         generationRecord[UserDataCloudBackupDescriptor.Field.payloadAsset] = CKAsset(fileURL: url)
         // The head is a small conditional pointer; do not upload a second manifest asset.
@@ -125,8 +134,12 @@ extension CloudKitUserDataCloudBackupStore {
         guard try await accountIdentifier() == expectedAccount else { throw UserDataCloudBackupSafetyError.accountChanged }
         try await requireNoPendingDeletion()
         // Save immutable recovery manifest first; CAS publication is the commit point.
-        _ = try await database.save(generationRecord)
-        let results = try await database.modifyRecords(saving: [nextHead], deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+        _ = try await WGJPerformance.measureAsync("backup.cloud.manifest") {
+            try await database.save(generationRecord)
+        }
+        let results = try await WGJPerformance.measureAsync("backup.cloud.commit") {
+            try await database.modifyRecords(saving: [nextHead], deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+        }
         guard let result = results.saveResults[headID] else { throw UserDataCloudBackupSafetyError.remoteChanged }
         _ = try result.get()
     }
@@ -150,8 +163,11 @@ extension CloudKitUserDataCloudBackupStore {
             names.formUnion(current.previousGenerations.map { "backup-generation-v3-\($0)" })
         }
         // Include retired/abandoned manifests remembered by this installation too.
-        for name in names.filter({ $0.hasPrefix("backup-generation-v3-") }) {
-            if let old = try await manifest(named: name) { names.formUnion(old.chunks.map(\.recordName)) }
+        try await BackupManifestBatches.forEach(
+            names.filter { $0.hasPrefix("backup-generation-v3-") },
+            load: { try await manifests(named: $0) }
+        ) { _, old in
+            names.formUnion(old.chunks.map(\.recordName))
         }
         let url = try BackupTemporaryFiles.write(BackupArchiveCodec.encode(BackupArchiveCodec.json(names.sorted())), prefix: "WGJDeletion-")
         defer { BackupTemporaryFiles.remove(url) }
@@ -173,8 +189,10 @@ extension CloudKitUserDataCloudBackupStore {
     }
 
     nonisolated func removeOrphanedRecords(_ names: Set<String>, retaining current: BackupManifest) async throws {
+        let trace = WGJPerformance.begin("backup.cloud.cleanup")
+        defer { WGJPerformance.end(trace) }
         try await BackupRetentionCleanup.remove(names, retaining: current,
-            loadManifest: { try await manifest(named: $0) },
+            loadManifests: { try await manifests(named: $0) },
             delete: { try await deleteRecords(named: $0) })
     }
 
@@ -193,10 +211,25 @@ extension CloudKitUserDataCloudBackupStore {
     }
 
     private nonisolated func manifest(named name: String) async throws -> BackupManifest? {
-        guard let record = try await existingRecord(recordID: CKRecord.ID(recordName: name)) else { return nil }
-        let manifest = try JSONDecoder().decode(BackupManifest.self, from: BackupArchiveCodec.decode(assetData(record)))
-        try manifest.validate()
-        return manifest
+        try await manifests(named: [name])[name]
+    }
+
+    private nonisolated func manifests(named names: Set<String>) async throws -> [String: BackupManifest] {
+        guard !names.isEmpty else { return [:] }
+        let records = try await existingRecords(
+            recordIDs: names.sorted().map { CKRecord.ID(recordName: $0) },
+            desiredKeys: [UserDataCloudBackupDescriptor.Field.payloadAsset]
+        )
+        var manifests: [String: BackupManifest] = [:]
+        for (id, record) in records {
+            let manifest = try JSONDecoder().decode(BackupManifest.self, from: BackupArchiveCodec.decode(assetData(record)))
+            try manifest.validate()
+            guard id.recordName == "backup-generation-v3-\(manifest.generation)" else {
+                throw BackupArchiveError.invalidManifest
+            }
+            manifests[id.recordName] = manifest
+        }
+        return manifests
     }
 
     private nonisolated func generation(in record: CKRecord?) throws -> String? {

@@ -1653,7 +1653,9 @@ nonisolated enum UserDataBackupPayloadCodec {
             templateID: templateID, includeTemplates: templateID != nil
         )
         payload.generatedAt = .distantPast
-        let raw = try BackupArchiveCodec.json(payload)
+        // Only the final representation needs sorted keys. Sorting both encodings
+        // doubles that work for every changed workout without changing its digest.
+        let raw = try JSONEncoder().encode(payload)
         guard var object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else { throw BackupArchiveError.invalidManifest }
         // Entity ordering is not semantic; sortOrder is stored explicitly.
         for (key, value) in object {

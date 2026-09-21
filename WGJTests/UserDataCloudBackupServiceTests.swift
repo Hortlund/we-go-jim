@@ -11,6 +11,33 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         case artifactCleanup
     }
 
+    func testBatchedCloudReadsOnlyTreatExplicitUnknownItemsAsAbsent() throws {
+        let head = CKRecord(recordType: UserDataCloudBackupDescriptor.recordType,
+                            recordID: CKRecord.ID(recordName: "head"))
+        let deletionID = CKRecord.ID(recordName: "deletion")
+        let ids = [head.recordID, deletionID]
+        let records = try CloudKitUserDataCloudBackupStore.resolveRecords([
+            head.recordID: .success(head), deletionID: .failure(CKError(.unknownItem))
+        ], requestedIDs: ids)
+        XCTAssertEqual(Set(records.keys), [head.recordID])
+
+        XCTAssertThrowsError(try CloudKitUserDataCloudBackupStore.resolveRecords([
+            head.recordID: .success(head)
+        ], requestedIDs: ids))
+        for code: CKError.Code in [.networkFailure, .permissionFailure, .operationCancelled] {
+            XCTAssertThrowsError(try CloudKitUserDataCloudBackupStore.resolveRecords([
+                head.recordID: .success(head), deletionID: .failure(CKError(code))
+            ], requestedIDs: ids)) { error in
+                XCTAssertEqual((error as? CKError)?.code, code)
+            }
+        }
+        let deletion = CKRecord(recordType: UserDataCloudBackupDescriptor.recordType, recordID: deletionID)
+        let pendingDeletion = try CloudKitUserDataCloudBackupStore.resolveRecords([
+            head.recordID: .failure(CKError(.unknownItem)), deletionID: .success(deletion)
+        ], requestedIDs: ids)
+        XCTAssertNotNil(pendingDeletion[deletionID])
+    }
+
     func testLocalContentSummaryCountsOnlyBackedUpRows() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

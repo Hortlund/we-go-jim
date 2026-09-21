@@ -459,18 +459,23 @@ final class DataScalabilityTests: XCTestCase {
         XCTAssertTrue(entries.allSatisfy { $0.totalReps == 40 && $0.totalWeightedVolumeInKilograms == 2400 })
         XCTAssertFalse(read.hasChanges)
         XCTAssertFalse(try HistoryProjectionRepository(modelContext: read).needsBackfill())
+        let initialStarted = ContinuousClock.now
         let first = try BackupExportPlan.build(container: container, previous: nil)
+        let initialDuration = initialStarted.duration(to: .now)
         defer { first.cleanUp() }
         XCTAssertEqual(first.manifest.summary.workoutSetCount, workouts * 30)
         XCTAssertLessThan(first.compressedChunkBytes, first.rawChunkBytes / 2)
         read.insert(UserProfile(displayName: "Only profile changed"))
         try read.save()
+        let incrementalStarted = ContinuousClock.now
         let next = try BackupExportPlan.build(container: container, previous: first.manifest)
+        let incrementalDuration = incrementalStarted.duration(to: .now)
         defer { next.cleanUp() }
         XCTAssertEqual(next.chunkFiles.count, 1)
         XCTAssertLessThan(next.compressedChunkBytes, 10_000)
         let manifestBytes = try BackupArchiveCodec.encode(BackupArchiveCodec.json(next.manifest)).count
         print("WGJ scale: \(workouts) workouts / \(workouts * 30) sets; initial \(first.rawChunkBytes) -> \(first.compressedChunkBytes) bytes; profile edit \(next.compressedChunkBytes) chunk bytes + \(manifestBytes) manifest bytes")
+        print("WGJ backup planning: \(workouts) workouts; initial \(initialDuration); profile edit \(incrementalDuration)")
     }
 
     private func productionConfigurations(root: URL, models: [any PersistentModel.Type]) -> [ModelConfiguration] {
