@@ -162,7 +162,7 @@ final class DataScalabilityTests: XCTestCase {
         try context.save()
         let first = try BackupExportPlan.build(container: container, previous: nil)
         defer { first.cleanUp() }
-        XCTAssertEqual(first.chunkFiles.count, 251)
+        XCTAssertEqual(first.chunkFiles.count, try BackupHistoryBatch.make(context.fetch(FetchDescriptor<WorkoutSession>())).count + 1)
         context.insert(UserProfile(displayName: "Changed profile"))
         try context.save()
         let next = try BackupExportPlan.build(container: container, previous: first.manifest)
@@ -307,6 +307,43 @@ final class DataScalabilityTests: XCTestCase {
         XCTAssertFalse(try HistoryProjectionRepository(modelContext: context).needsBackfill())
     }
 
+    func testCommittedRestoreReceiptSurvivesReopenAndDoesNotApplyTwice() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("receipt.store")
+        let generation = UUID().uuidString
+        try autoreleasepool {
+            let container = try diskContainer(url: url)
+            let context = ModelContext(container)
+            context.insert(UserProfile(displayName: "Before"))
+            try context.saveWithRecoveryProtection()
+            try BackupLocalJournal.markPending(for: container)
+            var request = BackupLocalJournal.RestoreRequest(account: "a", replacingLocalData: true, previousGeneration: false)
+            request.stateAfterCommit = .init(account: "a", generation: generation)
+            request.pendingBeforeCommit = try BackupLocalJournal.pending(for: container)
+            try BackupLocalJournal.saveRestore(request, for: container)
+            try UserDataCloudRestoreTransaction(container: container).commit(replacingLocalData: true, restoreTicket: request.ticket,
+                mergeDatabaseGraph: { $0.insert(UserProfile(displayName: "Committed")) }, relinkRelationships: { _ in })
+            // Process exits after SQLite commit + receipt, before journal acknowledgment.
+            XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: container), request.ticket)
+        }
+        let config = ModelConfiguration(schema: AppSchema.makeFull(), url: url, cloudKitDatabase: .none)
+        try PersistentRestoreRecovery.recoverIfNeeded(configurations: [config])
+        let reopened = try diskContainer(url: url)
+        let context = ModelContext(reopened)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Committed")
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: reopened) }
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: reopened))
+        XCTAssertNil(try BackupLocalJournal.pending(for: reopened))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: reopened))
+        XCTAssertEqual(try BackupLocalJournal.state(for: reopened).generation, generation)
+        try XCTUnwrap(context.fetch(FetchDescriptor<UserProfile>()).first).displayName = "Saved after commit"
+        try context.saveWithRecoveryProtection()
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: reopened) }
+        XCTAssertEqual(try ModelContext(reopened).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Saved after commit")
+    }
+
     func testInterruptedRestoreRecoversSQLiteIncludingDraftsBeforeReopening() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -380,8 +417,8 @@ final class DataScalabilityTests: XCTestCase {
         let next = try BackupExportPlan.build(container: container, previous: first.manifest)
         defer { next.cleanUp() }
         XCTAssertEqual(next.chunkFiles.count, 1)
-        XCTAssertNotEqual(next.manifest.chunks.first { $0.key == session.id.uuidString }?.digest,
-                          first.manifest.chunks.first { $0.key == session.id.uuidString }?.digest)
+        XCTAssertNotEqual(next.manifest.chunks.first { $0.key.hasPrefix("history-v1-") }?.digest,
+                          first.manifest.chunks.first { $0.key.hasPrefix("history-v1-") }?.digest)
     }
 
     func testHistoricalArchiveAndDeleteRecomputeLaterRecordsWithoutNoOpChurn() throws {
@@ -421,7 +458,9 @@ final class DataScalabilityTests: XCTestCase {
     func testPersistentHistory250Workouts7500Sets() throws { try verifyPersistentHistory(workouts: 250) }
     func testPersistentHistory2500Workouts75000Sets() throws { try verifyPersistentHistory(workouts: 2_500) }
 
-    private func verifyPersistentHistory(workouts: Int) throws {
+    func testPersistentRestore2500Workouts75000Sets() throws { try verifyPersistentHistory(workouts: 2_500, verifyRestore: true) }
+
+    private func verifyPersistentHistory(workouts: Int, verifyRestore: Bool = false) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -476,6 +515,33 @@ final class DataScalabilityTests: XCTestCase {
         let manifestBytes = try BackupArchiveCodec.encode(BackupArchiveCodec.json(next.manifest)).count
         print("WGJ scale: \(workouts) workouts / \(workouts * 30) sets; initial \(first.rawChunkBytes) -> \(first.compressedChunkBytes) bytes; profile edit \(next.compressedChunkBytes) chunk bytes + \(manifestBytes) manifest bytes")
         print("WGJ backup planning: \(workouts) workouts; initial \(initialDuration); profile edit \(incrementalDuration)")
+        if verifyRestore {
+            // Seed the same saved summaries as ordinary workout completion, then
+            // compare every backed-up value after a real multi-store restore.
+            _ = try HistoryRecordRebuilder.rebuild(in: read)
+            try read.saveWithRecoveryProtection()
+            let payload = try UserDataCloudBackupPayload(context: read)
+            let expectedDigest = BackupArchiveCodec.digest(try UserDataBackupPayloadCodec.canonicalData(BackupArchiveCodec.json(payload)))
+            let targetRoot = root.appendingPathComponent("restored")
+            try FileManager.default.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+            let target = try ModelContainer(for: AppSchema.makeFull(), migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: productionConfigurations(root: targetRoot, models: AppSchema.models))
+            for replacement in [false, true] {
+                let restoreStarted = ContinuousClock.now
+                try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true, replacementPayload: payload,
+                    mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+                    relinkRelationships: { try payload.relinkRelationships(in: $0) })
+                let restoreDuration = restoreStarted.duration(to: .now)
+                print("WGJ bulk restore: \(workouts) workouts, replacement=\(replacement); \(restoreDuration)")
+                XCTAssertLessThan(restoreDuration, .seconds(replacement ? 120 : 60), "Restore must not scan all pending rows once per workout")
+                let restoredContext = ModelContext(target)
+                XCTAssertFalse(try HistoryProjectionRepository(modelContext: restoredContext).needsBackfill())
+                let restored = try UserDataCloudBackupPayload(context: restoredContext)
+                XCTAssertEqual(restored.contentSummary, payload.contentSummary)
+                XCTAssertEqual(BackupArchiveCodec.digest(try UserDataBackupPayloadCodec.canonicalData(BackupArchiveCodec.json(restored))), expectedDigest)
+            }
+        }
+
     }
 
     private func productionConfigurations(root: URL, models: [any PersistentModel.Type]) -> [ModelConfiguration] {

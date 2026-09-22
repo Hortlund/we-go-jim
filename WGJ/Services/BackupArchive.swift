@@ -18,7 +18,8 @@ nonisolated enum BackupArchiveCodec {
 
     static func decode(_ data: Data) throws -> Data {
         guard data.starts(with: magic) else { return data } // Legacy JSON assets.
-        return try (Data(data.dropFirst(magic.count)) as NSData).decompressed(using: .lzfse) as Data
+        do { return try (Data(data.dropFirst(magic.count)) as NSData).decompressed(using: .lzfse) as Data }
+        catch { throw BackupArchiveError.corruptChunk }
     }
 
     static func json<T: Encodable>(_ value: T) throws -> Data {
@@ -33,6 +34,7 @@ nonisolated struct BackupChunkReference: Codable, Equatable, Sendable {
     var storageID: String = UUID().uuidString
     var digest: String
     var sourceUpdatedAt: Date
+    var sourceFingerprint: String? = nil
     var summary: UserDataCloudBackupContentSummary
     var recordName: String { "backup-chunk-v3-\(storageID)" }
 }
@@ -115,6 +117,19 @@ nonisolated enum BackupLocalJournal {
         var retryAfter: Date = .distantPast
     }
 
+    struct RestoreRequest: Codable, Sendable {
+        var ticket = UUID()
+        var cleanupBefore: Date = .now
+        var account: String?
+        var replacingLocalData: Bool
+        var previousGeneration: Bool
+        var head: UserDataCloudBackupRemoteMetadata?
+        var pinned = false
+        var requiresExplicitRetry: Bool? = nil
+        var stateAfterCommit: State?
+        var pendingBeforeCommit: Pending?
+    }
+
     private final class WeakContainer: @unchecked Sendable {
         weak var value: ModelContainer?
         init(_ value: ModelContainer) { self.value = value }
@@ -126,13 +141,18 @@ nonisolated enum BackupLocalJournal {
             if containers[id]?.value !== container {
                 states[id] = nil
                 pending[id] = nil
+                restores[id] = nil
+                restoreCleanups[id] = nil
                 containers[id] = WeakContainer(container)
             }
         }
         var states: [ObjectIdentifier: State] = [:]
         var pending: [ObjectIdentifier: Pending] = [:]
+        var restores: [ObjectIdentifier: RestoreRequest] = [:]
+        var restoreCleanups: [ObjectIdentifier: Date] = [:]
     }
     private static let lock = Mutex(Memory())
+    private static let restoreReconciliationLock = NSLock()
 
     static func directory(for container: ModelContainer) -> URL? {
         guard let configuration = container.configurations.filter({ !$0.isStoredInMemoryOnly }).sorted(by: { $0.url.path < $1.url.path }).first else { return nil }
@@ -226,6 +246,87 @@ nonisolated enum BackupLocalJournal {
         }
     }
 
+    static func restoreRequest(for container: ModelContainer) throws -> RestoreRequest? {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            guard let directory = directory(for: container) else { return memory.restores[ObjectIdentifier(container)] }
+            if let request = try read(RestoreRequest.self, at: directory.appendingPathComponent("restore.json")) {
+                return request
+            }
+            var paused = try read(RestoreRequest.self, at: directory.appendingPathComponent("restore-paused.json"))
+            paused?.requiresExplicitRetry = true
+            return paused
+        }
+    }
+
+    static func saveRestore(_ request: RestoreRequest?, for container: ModelContainer) throws {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            if let directory = directory(for: container) {
+                let url = directory.appendingPathComponent("restore.json")
+                if let request { try write(request, at: url) }
+                // A newly written explicit request takes precedence over a paused
+                // one, even if termination interrupts removal of the old file.
+                let paused = directory.appendingPathComponent("restore-paused.json")
+                if FileManager.default.fileExists(atPath: paused.path) { try FileManager.default.removeItem(at: paused) }
+                if request == nil, FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            } else { memory.restores[ObjectIdentifier(container)] = request }
+        }
+    }
+
+    /// Called under the write barrier. Rename the already durable intent rather
+    /// than allocating an atomic rewrite after a possibly disk-full save failure.
+    /// The rollback snapshots remain untouched until startup recovery completes.
+    static func pauseRestore(_ ticket: UUID, for container: ModelContainer) throws {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            guard let directory = directory(for: container) else {
+                let id = ObjectIdentifier(container)
+                if memory.restores[id]?.ticket == ticket { memory.restores[id]?.requiresExplicitRetry = true }
+                return
+            }
+            let url = directory.appendingPathComponent("restore.json")
+            guard try read(RestoreRequest.self, at: url)?.ticket == ticket else { return }
+            let paused = directory.appendingPathComponent("restore-paused.json")
+            if FileManager.default.fileExists(atPath: paused.path) { try FileManager.default.removeItem(at: paused) }
+            try FileManager.default.moveItem(at: url, to: paused)
+        }
+    }
+
+    /// Called under the local write barrier, including before ordinary writes.
+    /// A committed receipt is replayable until its lineage acknowledgment is durable.
+    static func reconcileRestore(for container: ModelContainer) throws {
+        restoreReconciliationLock.lock()
+        defer { restoreReconciliationLock.unlock() }
+        guard let request = try restoreRequest(for: container),
+              try PersistentRestoreRecovery.committedTicket(container: container) == request.ticket,
+              let state = request.stateAfterCommit else { return }
+        try save(state, for: container)
+        if let pending = request.pendingBeforeCommit { try finish(pending, for: container) }
+        try saveRestoreCleanup(request.cleanupBefore, for: container)
+        try saveRestore(nil, for: container)
+        try? PersistentRestoreRecovery.acknowledge(container: container)
+    }
+
+    static func restoreCleanup(for container: ModelContainer) throws -> Date? {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            guard let directory = directory(for: container) else { return memory.restoreCleanups[ObjectIdentifier(container)] }
+            return try read(Date.self, at: directory.appendingPathComponent("restore-cleanup.json"))
+        }
+    }
+
+    static func saveRestoreCleanup(_ cutoff: Date?, for container: ModelContainer) throws {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            if let directory = directory(for: container) {
+                let url = directory.appendingPathComponent("restore-cleanup.json")
+                if let cutoff { try write(cutoff, at: url) }
+                else if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            } else { memory.restoreCleanups[ObjectIdentifier(container)] = cutoff }
+        }
+    }
+
     private static func read<T: Decodable>(_ type: T.Type, at url: URL) throws -> T? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return try JSONDecoder().decode(type, from: Data(contentsOf: url))
@@ -234,6 +335,48 @@ nonisolated enum BackupLocalJournal {
     private static func write<T: Encodable>(_ value: T, at url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try BackupArchiveCodec.json(value).write(to: url, options: .atomic)
+    }
+}
+
+/// Stable binary partitions keep cloud assets bounded while allowing small
+/// histories to use one asset. An insertion only rewrites its partition (or its
+/// two children when it splits), never every workout in the archive.
+nonisolated struct BackupHistoryBatch {
+    static let maximumWorkouts = 64
+    struct Entry: Codable {
+        let id: UUID
+        let updatedAt: Date
+        var bytes: [UInt8] { withUnsafeBytes(of: id.uuid) { Array($0) } }
+    }
+    let key: String
+    let entries: [Entry]
+    let fingerprint: String
+    var updatedAt: Date { entries.map(\.updatedAt).max() ?? .distantPast }
+
+    static func make(_ sessions: [WorkoutSession]) throws -> [Self] {
+        let entries = sessions.map { Entry(id: $0.id, updatedAt: $0.updatedAt) }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        guard Set(entries.map(\.id)).count == entries.count else { throw BackupArchiveError.invalidManifest }
+        var result: [Self] = []
+        func partition(_ rows: [Entry], prefix: String, bit: Int) throws {
+            guard !rows.isEmpty else { return }
+            if rows.count <= maximumWorkouts {
+                result.append(Self(key: "history-v1-" + (prefix.isEmpty ? "all" : prefix), entries: rows,
+                    fingerprint: BackupArchiveCodec.digest(try BackupArchiveCodec.json(rows))))
+                return
+            }
+            guard bit < 128 else { throw BackupArchiveError.invalidManifest }
+            var zero: [Entry] = []
+            var one: [Entry] = []
+            for row in rows {
+                if row.bytes[bit / 8] & (1 << (7 - bit % 8)) == 0 { zero.append(row) }
+                else { one.append(row) }
+            }
+            try partition(zero, prefix: prefix + "0", bit: bit + 1)
+            try partition(one, prefix: prefix + "1", bit: bit + 1)
+        }
+        try partition(entries, prefix: "", bit: 0)
+        return result
     }
 }
 
@@ -261,8 +404,9 @@ nonisolated struct BackupExportPlan {
                 var files: [String: URL] = [:]
                 var rawBytes = 0
                 var compressedBytes = 0
-                func append(key: String, updatedAt: Date, payload: () throws -> (Data, UserDataCloudBackupContentSummary)) throws {
-                    if key != "shared", let cached = old[key], cached.sourceUpdatedAt == updatedAt {
+                func append(key: String, updatedAt: Date, fingerprint: String? = nil, payload: () throws -> (Data, UserDataCloudBackupContentSummary)) throws {
+                    if key != "shared", let cached = old[key],
+                       fingerprint.map({ cached.sourceFingerprint == $0 }) ?? (cached.sourceUpdatedAt == updatedAt) {
                         chunks.append(cached)
                         return
                     }
@@ -271,10 +415,11 @@ nonisolated struct BackupExportPlan {
                     if let cached = old[key], cached.digest == digest {
                         var reused = cached
                         reused.sourceUpdatedAt = updatedAt
+                        reused.sourceFingerprint = fingerprint
                         chunks.append(reused)
                         return
                     }
-                    var reference = BackupChunkReference(key: key, digest: digest, sourceUpdatedAt: updatedAt, summary: summary)
+                    var reference = BackupChunkReference(key: key, digest: digest, sourceUpdatedAt: updatedAt, sourceFingerprint: fingerprint, summary: summary)
                     if let attempt = attempts[key], attempt.digest == digest { reference.storageID = attempt.storageID }
                     chunks.append(reference)
                     if old[key]?.digest != digest {
@@ -296,9 +441,9 @@ nonisolated struct BackupExportPlan {
                 }
                 let completed = WorkoutSessionStatus.completed.rawValue
                 let sessions = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.statusRaw == completed }))
-                for session in sessions.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-                    try append(key: session.id.uuidString, updatedAt: session.updatedAt) {
-                        try UserDataBackupPayloadCodec.makeChunk(context: context, sessionID: session.id)
+                for batch in try BackupHistoryBatch.make(sessions) {
+                    try append(key: batch.key, updatedAt: batch.updatedAt, fingerprint: batch.fingerprint) {
+                        try UserDataBackupPayloadCodec.makeHistoryChunk(context: context, sessionIDs: Set(batch.entries.map(\.id)))
                     }
                 }
                 let summary = UserDataBackupPayloadCodec.combinedSummary(chunks.map(\.summary))

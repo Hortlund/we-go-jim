@@ -596,6 +596,10 @@ nonisolated struct HistoryOverviewPreparedSnapshots: Sendable {
 @MainActor
 @Observable
 final class HistoryOverviewController {
+    // SwiftUI can release this state synchronously inside a task-local scope.
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     private(set) var snapshotRevision: UInt64 = 0
     var completedSessions: [HistoryOverviewSessionSnapshot] = []
     var snapshot = HistoryOverviewSnapshot.empty

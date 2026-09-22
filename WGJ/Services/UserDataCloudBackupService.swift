@@ -1,6 +1,7 @@
 import CloudKit
 import Foundation
 import SwiftData
+import UIKit
 
 nonisolated struct UserDataCloudBackupRemoteRecord: Equatable, Sendable {
     var updatedAt: Date
@@ -221,6 +222,19 @@ nonisolated enum BoundaryCloudBackupScheduler {
         } catch { reportJournalFailure(error) }
     }
 
+    static func resumeOperations(container: ModelContainer) {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+        Task.detached(priority: .utility) {
+            do {
+                try await UserDataCloudBackupService(localContainer: container,
+                    backupStore: CloudKitUserDataCloudBackupStore()).resumePendingRestore()
+            } catch {
+                await MainActor.run { AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud restore paused: \(error.localizedDescription)")) }
+            }
+            resumePending(container: container)
+        }
+    }
+
     private static func reportJournalFailure(_ error: Error) {
         let message = "Your data is saved locally, but the backup request could not be saved: \(error.localizedDescription)"
         Task { @MainActor in AppRuntimeState.shared.updateUserDataSyncStatus(.degraded(message)) }
@@ -338,6 +352,7 @@ actor BoundaryCloudBackupExportQueue {
 
     @concurrent
     private static func export(container: ModelContainer, reason: BoundaryCloudBackupReason, sessionRevision: Int) async {
+        guard (try? BackupLocalJournal.pending(for: container)) != nil else { return }
         let canExport = await MainActor.run {
             guard AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else { return false }
             AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
@@ -395,6 +410,20 @@ nonisolated enum UserDataCloudBackupSafetyError: LocalizedError {
     }
 }
 
+nonisolated enum UserDataCloudRestorePause: LocalizedError {
+    case accountNotConfirmed
+    case localSaveFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .accountNotConfirmed:
+            "Restore paused because the iCloud account could not be confirmed. Choose Restore Cloud Backup again in Settings → Storage to restore from the currently signed-in account."
+        case .localSaveFailed:
+            "Automatic restore paused after a local save failed. Choose Restore Cloud Backup again in Settings → Storage when you are ready to retry."
+        }
+    }
+}
+
 nonisolated final class UserDataCloudBackupService {
     private let localContainer: ModelContainer
     private let backupStore: any UserDataCloudBackupStoring
@@ -418,6 +447,15 @@ nonisolated final class UserDataCloudBackupService {
     func exportCurrentBackup(replacingRemote: Bool = false, expectedSessionRevision: Int? = nil) async throws -> UserDataCloudBackupRemoteSnapshot {
         let trace = WGJPerformance.begin("backup.export")
         defer { WGJPerformance.end(trace) }
+        if replacingRemote {
+            // Persist the explicit choice before waiting behind a stalled download.
+            // Its stale ticket can no longer enter the restore transaction.
+            try LocalStoreWriteBarrier.exclusively {
+                try PersistentRestoreRecovery.requireHealthyStore(localContainer)
+                try BackupLocalJournal.reconcileRestore(for: localContainer)
+                try BackupLocalJournal.saveRestore(nil, for: localContainer)
+            }
+        }
         await BackupOperationGate.shared.acquire()
         // Keep the operation gate held through cleanup, but return as soon as the
         // cloud commit and its local acknowledgment are durable.
@@ -435,6 +473,13 @@ nonisolated final class UserDataCloudBackupService {
             guard await AppRuntimeState.shared.cloudBackupSessionRevision == expectedSessionRevision else { throw CancellationError() }
         }
         try PersistentRestoreRecovery.requireHealthyStore(localContainer)
+        try LocalStoreWriteBarrier.exclusively {
+            try PersistentRestoreRecovery.requireHealthyStore(localContainer)
+            try BackupLocalJournal.reconcileRestore(for: localContainer)
+            guard try BackupLocalJournal.restoreRequest(for: localContainer) == nil else { throw LocalStoreWriteBarrier.RestoreInProgress() }
+        }
+        let lease = await CloudBackupBackgroundLease.begin()
+        defer { Task { @MainActor in lease.end() } }
         let account = try await backupStore.accountIdentifier()
         var state = try BackupLocalJournal.state(for: localContainer)
         let pending = try BackupLocalJournal.pending(for: localContainer)
@@ -590,69 +635,151 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     func restoreLatestBackup(replacingLocalData: Bool = false, previousGeneration: Bool = false) async throws -> UserDataCloudBackupRestoreResult? {
+        // This intent must survive even the first account lookup failing or the
+        // process exiting while offline. Only this explicit call may bind an
+        // unknown account. A deferred unbound request needs a fresh user choice;
+        // the account may have changed while the app was closed.
+        let bindingSessionRevision = await AppRuntimeState.shared.cloudBackupSessionRevision
+        let request = try LocalStoreWriteBarrier.exclusively {
+            try PersistentRestoreRecovery.requireHealthyStore(localContainer)
+            try BackupLocalJournal.reconcileRestore(for: localContainer)
+            let request = BackupLocalJournal.RestoreRequest(account: nil,
+                replacingLocalData: replacingLocalData, previousGeneration: previousGeneration)
+            // Explicit recovery choices supersede paused or downloading attempts.
+            // The write barrier and transaction ticket prevent a stale commit.
+            try BackupLocalJournal.saveRestore(request, for: localContainer)
+            return request
+        }
+        return try await resumeRestore(request, bindingSessionRevision: bindingSessionRevision)
+    }
+
+    @discardableResult
+    func resumePendingRestore() async throws -> UserDataCloudBackupRestoreResult? {
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: localContainer) }
+        _ = try await finishRestoreCleanup()
+        guard let request = try BackupLocalJournal.restoreRequest(for: localContainer) else { return nil }
+        return try await resumeRestore(request)
+    }
+
+    private func resumeRestore(_ original: BackupLocalJournal.RestoreRequest, bindingSessionRevision: Int? = nil) async throws -> UserDataCloudBackupRestoreResult? {
         await BackupOperationGate.shared.acquire()
         defer { Task { await BackupOperationGate.shared.release() } }
+        let lease = await CloudBackupBackgroundLease.begin()
+        defer { Task { @MainActor in lease.end() } }
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: localContainer) }
+        guard var request = try BackupLocalJournal.restoreRequest(for: localContainer),
+              request.ticket == original.ticket else { return nil }
         let sessionRevision = await MainActor.run { AppRuntimeState.shared.cloudBackupSessionRevision }
-        let restoreAccount = try await backupStore.accountIdentifier()
-        let headMetadata = try await backupStore.fetchBackupMetadata()
-        guard let record = try await (previousGeneration ? backupStore.fetchPreviousBackup() : backupStore.fetchBackup()) else {
-            return nil
-        }
-
-        let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
-        try payload.validate()
-
-        if !replacingLocalData {
-            let checkContext = ModelContext(localContainer)
-            guard try Self.isLocalUserDataEmpty(context: checkContext) else {
+        do {
+            guard request.requiresExplicitRetry != true else { throw UserDataCloudRestorePause.localSaveFailed }
+            guard request.account != nil || bindingSessionRevision != nil else { throw UserDataCloudRestorePause.accountNotConfirmed }
+            if let bindingSessionRevision, bindingSessionRevision != sessionRevision {
+                throw UserDataCloudBackupSafetyError.accountChanged
+            }
+            let account = try await backupStore.accountIdentifier()
+            guard await AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else {
+                throw UserDataCloudBackupSafetyError.accountChanged
+            }
+            guard request.account == nil || request.account == account else { throw UserDataCloudBackupSafetyError.accountChanged }
+            request.account = account
+            try updateRestore(request)
+            let headMetadata = try await backupStore.fetchBackupMetadata()
+            if request.pinned, request.head != headMetadata { throw UserDataCloudBackupSafetyError.remoteChanged }
+            request.head = headMetadata
+            request.pinned = true
+            try updateRestore(request)
+            guard let record = try await (request.previousGeneration ? backupStore.fetchPreviousBackup() : backupStore.fetchBackup()) else {
+                try clearRestore(request.ticket)
                 return nil
             }
-        }
-
-        guard try await backupStore.accountIdentifier() == restoreAccount else { throw UserDataCloudBackupSafetyError.accountChanged }
-        let latestMetadata = try await backupStore.fetchBackupMetadata()
-        guard latestMetadata == headMetadata else { throw UserDataCloudBackupSafetyError.remoteChanged }
-        let pendingBeforeRestore = try BackupLocalJournal.pending(for: localContainer)
-        do {
-            try restoreTransaction.commit(
-                replacingLocalData: replacingLocalData,
-                mergeDatabaseGraph: { context in
-                    try payload.mergeDatabaseGraph(into: context)
-                },
-                relinkRelationships: { context in
-                    try payload.relinkRelationships(in: context)
+            let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+            try payload.validate()
+            if !request.replacingLocalData {
+                guard try Self.isLocalUserDataEmpty(context: ModelContext(localContainer)) else {
+                    try clearRestore(request.ticket)
+                    return nil
                 }
-            )
+            }
+            guard try await backupStore.accountIdentifier() == request.account else { throw UserDataCloudBackupSafetyError.accountChanged }
+            guard try await backupStore.fetchBackupMetadata() == headMetadata else { throw UserDataCloudBackupSafetyError.remoteChanged }
+            let oldState = try BackupLocalJournal.state(for: localContainer)
+            let cleanup = oldState.account == request.account
+                ? try BackupLocalJournal.knownRecordNames(for: localContainer) : []
+            request.stateAfterCommit = .init(account: request.account, generation: headMetadata?.generation,
+                legacyUpdatedAt: headMetadata?.generation == nil ? headMetadata?.updatedAt : nil,
+                garbageRecords: cleanup.isEmpty ? nil : cleanup)
+            request.pendingBeforeCommit = try BackupLocalJournal.pending(for: localContainer)
+            try updateRestore(request)
+            try restoreTransaction.commit(replacingLocalData: request.replacingLocalData, restoreTicket: request.ticket, replacementPayload: payload,
+                mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+                relinkRelationships: { try payload.relinkRelationships(in: $0) })
+            try LocalStoreWriteBarrier.exclusively {
+                if BackupLocalJournal.directory(for: localContainer) == nil {
+                    // Memory-only test/preview stores have no crash recovery receipt.
+                    if let state = request.stateAfterCommit { try BackupLocalJournal.save(state, for: localContainer) }
+                    if let pending = request.pendingBeforeCommit { try BackupLocalJournal.finish(pending, for: localContainer) }
+                    try BackupLocalJournal.saveRestoreCleanup(request.cleanupBefore, for: localContainer)
+                    try BackupLocalJournal.saveRestore(nil, for: localContainer)
+                } else { try BackupLocalJournal.reconcileRestore(for: localContainer) }
+            }
+            HistoryAnalyticsCache.shared.clear()
+            // Emit once for this commit, before any asynchronous cleanup. Cleanup
+            // retries (including crash recovery) must never reset a newer workout.
+            await MainActor.run {
+                NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil,
+                    userInfo: ["cleanupBefore": request.cleanupBefore])
+            }
+            let cleanupWarnings = try await finishRestoreCleanup()
+            await MainActor.run {
+                AppRuntimeState.shared.recordSuccessfulCloudBackup(.init(updatedAt: record.updatedAt,
+                    contentSummary: payload.contentSummary), sessionRevision: sessionRevision)
+            }
+            return .init(restoredAt: record.updatedAt, cleanupWarnings: cleanupWarnings)
         } catch let error as PersistentRestoreRecovery.RecoveryRequired {
+            // A known failed local transaction needs a deliberate retry after
+            // rollback. A process interruption still retains its resumable intent.
+            let pause = Result {
+                try LocalStoreWriteBarrier.exclusively {
+                    try BackupLocalJournal.pauseRestore(request.ticket, for: localContainer)
+                }
+            }
             await MainActor.run { AppRuntimeState.shared.requiresStorageRecovery = true }
+            try pause.get()
+            throw error
+        } catch {
+            // Transport/cancellation errors keep the request for the next foreground
+            // or launch. Invalid data and changed accounts/heads require a new choice.
+            if error is UserDataCloudBackupSafetyError || error is UserDataCloudRestoreValidationError || error is BackupArchiveError || error is DecodingError {
+                try clearRestore(request.ticket)
+            }
             throw error
         }
-        let oldState = try BackupLocalJournal.state(for: localContainer)
-        // Failed uploads are not discoverable through the remote head. Keep their
-        // record identities until cleanup succeeds, but never cross account scopes.
-        let cleanup = oldState.account == restoreAccount
-            ? try BackupLocalJournal.knownRecordNames(for: localContainer) : []
-        try BackupLocalJournal.save(.init(
-            account: restoreAccount, generation: headMetadata?.generation,
-            legacyUpdatedAt: headMetadata?.generation == nil ? headMetadata?.updatedAt : nil,
-            garbageRecords: cleanup.isEmpty ? nil : cleanup
-        ), for: localContainer)
-        if let pending = pendingBeforeRestore {
-            try BackupLocalJournal.finish(pending, for: localContainer)
-        }
+    }
+
+    func finishRestoreCleanup() async throws -> [AppDataArtifactCleanupWarning] {
+        guard let cutoff = try BackupLocalJournal.restoreCleanup(for: localContainer) else { return [] }
         HistoryAnalyticsCache.shared.clear()
-        let cleanupWarnings = await artifactCleanupQueue.enqueue(Set(AppDataArtifact.allCases))
-        await MainActor.run {
-            AppRuntimeState.shared.recordSuccessfulCloudBackup(UserDataCloudBackupRemoteSnapshot(
-                updatedAt: record.updatedAt,
-                contentSummary: payload.contentSummary
-            ), sessionRevision: sessionRevision)
+        let warnings = await artifactCleanupQueue.enqueue(Set(AppDataArtifact.allCases), before: cutoff)
+        try LocalStoreWriteBarrier.exclusively {
+            if try BackupLocalJournal.restoreCleanup(for: localContainer) == cutoff {
+                try BackupLocalJournal.saveRestoreCleanup(nil, for: localContainer)
+            }
         }
-        NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil)
-        return UserDataCloudBackupRestoreResult(
-            restoredAt: record.updatedAt,
-            cleanupWarnings: cleanupWarnings
-        )
+        return warnings
+    }
+
+    private func updateRestore(_ request: BackupLocalJournal.RestoreRequest) throws {
+        try LocalStoreWriteBarrier.exclusively {
+            guard try BackupLocalJournal.restoreRequest(for: localContainer)?.ticket == request.ticket else { throw CancellationError() }
+            try BackupLocalJournal.saveRestore(request, for: localContainer)
+        }
+    }
+
+    private func clearRestore(_ ticket: UUID) throws {
+        try LocalStoreWriteBarrier.exclusively {
+            guard try BackupLocalJournal.restoreRequest(for: localContainer)?.ticket == ticket else { return }
+            try BackupLocalJournal.saveRestore(nil, for: localContainer)
+        }
     }
 
     private static func makeEncoder() -> JSONEncoder {
@@ -878,5 +1005,23 @@ nonisolated struct CloudKitUserDataCloudBackupStore: IncrementalBackupStoring {
             throw CloudKitContainerAvailabilityError.unavailable
         }
         return database
+    }
+}
+
+/// A best-effort execution window, never a substitute for durable operation state.
+@MainActor
+private final class CloudBackupBackgroundLease {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+    static func begin() -> CloudBackupBackgroundLease {
+        let lease = CloudBackupBackgroundLease()
+        lease.identifier = UIApplication.shared.beginBackgroundTask(withName: "WGJ cloud backup") { [weak lease] in
+            lease?.end()
+        }
+        return lease
+    }
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
     }
 }

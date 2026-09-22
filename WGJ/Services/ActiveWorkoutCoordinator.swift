@@ -83,6 +83,9 @@ nonisolated struct ModelContainerActiveWorkoutPersistence: ActiveWorkoutPersiste
 @MainActor
 @Observable
 final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     private(set) var storedSnapshot: ActiveWorkoutStoredSnapshot?
     private(set) var persistenceWarning: String?
 
@@ -134,6 +137,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             }
             return ActiveWorkoutMutationReceipt(revision: snapshot.revision, session: snapshot.session)
         }
+        snapshot.mutationTimestamp = Date.now.timeIntervalSince1970
         snapshot.revision &+= 1
         storedSnapshot = snapshot
         persistenceWarning = nil
@@ -249,6 +253,15 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         }
     }
 
+    /// A restore may finish after the user has started or edited a workout.
+    /// Keep those newer edits and their pending snapshot write intact.
+    @discardableResult
+    func clearInMemory(savedBefore cutoff: Date) -> Bool {
+        guard storedSnapshot?.mutationDate ?? .distantPast <= cutoff else { return false }
+        clearInMemory()
+        return true
+    }
+
     func clearInMemory() {
         saveTask?.cancel()
         saveTask = nil
@@ -283,7 +296,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             case .written, .unchanged:
                 lastPersistedRevision = snapshot.revision
                 persistenceWarning = nil
-            case .rejectedStale:
+            case .rejectedStale, .rejectedInvalidated:
                 break
             }
         } catch is CancellationError {

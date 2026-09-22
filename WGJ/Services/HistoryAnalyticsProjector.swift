@@ -28,7 +28,8 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                         from: set, session: session, exercise: row.exercise,
                         completedAt: completedAt, sourceSessionUpdatedAt: sourceUpdatedAt
                     ).map { [$0] } ?? []
-                    for stage in dropStagesBySetID?[set.id] ?? set.dropStages ?? [] {
+                    let stages = dropStagesBySetID.map { $0[set.id, default: []] } ?? set.dropStages ?? []
+                    for stage in stages {
                         let values = WorkoutSessionSet(
                             id: stage.id, sessionExerciseID: row.exercise.id, sortOrder: set.sortOrder,
                             isWarmup: set.isWarmup, targetLoadUnit: stage.targetLoadUnit,
@@ -320,7 +321,7 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
 
         if didMutate {
             do {
-                try backgroundContext.saveWithRecoveryProtection()
+                try backgroundContext.saveWithRecoveryProtection(purpose: .maintenance)
                 HistoryAnalyticsCache.shared.invalidate(container: container)
             } catch {
                 failedSessionIDs.formUnion(processedSessionIDs)

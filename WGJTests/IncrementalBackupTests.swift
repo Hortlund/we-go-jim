@@ -1,9 +1,616 @@
+import CloudKit
 import SwiftData
 import XCTest
 @testable import WGJ
 
 @MainActor
 final class IncrementalBackupTests: XCTestCase {
+    func testHistoryAndCatalogMaintenanceDeferDuringPendingRestore() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 1)
+        let request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: target)
+        let maintenance: [(ModelContext) throws -> Void] = [
+            { _ = try ProfileRepository(modelContext: $0).bootstrapProfileIdentitySnapshot(preferredDisplayName: nil) },
+            { _ = try ProfileWidgetRepository(modelContext: $0).enabledConfigurationSnapshots() },
+            { _ = try HistoryProjectionRepository(modelContext: $0).backfillIfNeeded() },
+            { _ = try WorkoutSessionRepository(modelContext: $0).backfillCompletedSessionSummariesIfNeeded() },
+            { try ExerciseCatalogRepository(modelContext: $0).ensureSeedImportedIfNeeded() }
+        ]
+        for operation in maintenance {
+            let context = ModelContext(target)
+            context.autosaveEnabled = false
+            XCTAssertThrowsError(try operation(context)) { XCTAssertTrue($0 is LocalStoreWriteBarrier.RestoreInProgress) }
+            context.rollback()
+            XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
+            XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        }
+        _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store).resumePendingRestore()
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+    }
+
+    func testMaintenanceSaveDefersMixedUserEditsUntilExplicitSave() throws {
+        let container = try makeContainer(workouts: 0)
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: container)
+        context.insert(UserProfile(displayName: "Unsaved edit"))
+        context.insert(HistoryProjectionCheckpoint(version: 1))
+        XCTAssertThrowsError(try context.saveWithRecoveryProtection(purpose: .maintenance))
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.ticket, request.ticket)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<UserProfile>()), 0)
+        try context.saveWithRecoveryProtection()
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: container))
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Unsaved edit")
+    }
+
+    func testNewRestoreSupersedesPausedFileAndClearingCannotResurrectIt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("paused.store"), cloudKitDatabase: .none)
+        let container = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let old = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(old, for: container)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.pauseRestore(old.ticket, for: container) }
+        let pausedURL = try XCTUnwrap(BackupLocalJournal.directory(for: container)).appendingPathComponent("restore-paused.json")
+        let pausedBytes = try Data(contentsOf: pausedURL)
+        let next = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: true)
+        try BackupLocalJournal.saveRestore(next, for: container)
+        // Simulate termination after persisting a new choice but before removing
+        // its predecessor. The new explicit choice must always take precedence.
+        try pausedBytes.write(to: pausedURL)
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.ticket, next.ticket)
+        XCTAssertNotEqual(try BackupLocalJournal.restoreRequest(for: container)?.requiresExplicitRetry, true)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.pauseRestore(old.ticket, for: container) }
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.ticket, next.ticket)
+        try BackupLocalJournal.saveRestore(nil, for: container)
+        let reopened = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: reopened))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pausedURL.path))
+    }
+
+    func testCacheMaintenancePreservesPendingRestoreAndItStillResumes() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let context = ModelContext(target)
+        let expired = Date.now.addingTimeInterval(-100 * 24 * 60 * 60)
+        context.insert(CachedCoachNarrative(weekStart: expired, revisionKey: "old", headline: "Old", body: "Old", updatedAt: expired))
+        context.insert(CachedCoachFollowUpNarrative(weekStart: expired, revisionKey: "old", headline: "Old",
+            followUpKind: .whatImproved, body: "Old", updatedAt: expired))
+        try context.saveWithRecoveryProtection()
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected transport failure") }
+        catch ArchiveTestError.publication { }
+        let ticket = try XCTUnwrap(BackupLocalJournal.restoreRequest(for: target)).ticket
+
+        try await AppBackgroundStore(container: target).pruneCoachCache()
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<CachedCoachNarrative>()), 0)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<CachedCoachFollowUpNarrative>()), 0)
+        let cache = CoachNarrativeCacheRepository(modelContext: ModelContext(target))
+        for headline in ["Inserted", "Updated"] {
+            try cache.saveRecap(.init(headline: headline, body: "Cache", availabilityMode: .generated),
+                weekStart: .distantPast, revisionKey: "current")
+            XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, ticket)
+        }
+        _ = try await service.resumePendingRestore()
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+    }
+
+    func testCacheSavesStillCancelRestoreForMixedUserInsertUpdateAndDelete() throws {
+        for operation in ["insert", "update", "delete"] {
+            let target = try makeContainer(workouts: 0)
+            let context = ModelContext(target)
+            context.autosaveEnabled = false
+            let profile = UserProfile(displayName: "Original")
+            context.insert(profile)
+            try context.saveWithRecoveryProtection()
+            try BackupLocalJournal.saveRestore(.init(account: "account-a", replacingLocalData: true, previousGeneration: false), for: target)
+            switch operation {
+            case "insert": context.insert(UserProfile(displayName: "New"))
+            case "update": profile.displayName = "Edited"
+            default: context.delete(profile)
+            }
+            try CoachNarrativeCacheRepository(modelContext: context).saveRecap(
+                .init(headline: "Cache", body: "Cache", availabilityMode: .generated), weekStart: .now, revisionKey: "new")
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target), operation)
+        }
+    }
+
+    func testCloudChunkNetworkFailureKeepsRestoreIntentForRetry() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 1)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextCloudChunkRead(.networkFailure)
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected network failure") }
+        catch let error as CKError { XCTAssertEqual(error.code, .networkFailure) }
+        XCTAssertNotNil(try BackupLocalJournal.restoreRequest(for: target))
+        _ = try await service.resumePendingRestore()
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+    }
+
+    func testRestoreEmitsOneCompletionEventEvenWhenCleanupNeedsRetry() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 1)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let suite = "RestoreEvent.\(UUID())"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let cleanup = AppDataArtifactCleanupQueue(defaultsSuiteName: suite) { _ in throw CancellationError() }
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store, artifactCleanupQueue: cleanup)
+        let event = expectation(description: "One reset for the actual commit")
+        event.assertForOverFulfill = true
+        let observer = NotificationCenter.default.addObserver(forName: .wgjUserDataRestoreDidComplete,
+            object: nil, queue: nil) { notification in
+                XCTAssertNotNil(notification.userInfo?["cleanupBefore"] as? Date)
+                event.fulfill()
+            }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let result = try await service.restoreLatestBackup(replacingLocalData: true)
+        XCTAssertFalse(try XCTUnwrap(result).cleanupWarnings.isEmpty)
+        _ = await cleanup.retryPending()
+        try BackupLocalJournal.saveRestoreCleanup(.now, for: target)
+        _ = try await service.resumePendingRestore()
+        await fulfillment(of: [event], timeout: 1)
+    }
+
+    func testUnboundRestoreSurvivesReopenButRequiresExplicitAccountChoice() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("intent.store"), cloudKitDatabase: .none)
+        func open() throws -> ModelContainer {
+            try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        }
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        await waitForCleanup()
+        do {
+            let target = try open()
+            await store.failNextAccountLookup()
+            do {
+                _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store).restoreLatestBackup(replacingLocalData: true)
+                XCTFail("Expected account lookup failure")
+            } catch ArchiveTestError.publication { }
+            let request = try XCTUnwrap(BackupLocalJournal.restoreRequest(for: target))
+            XCTAssertNil(request.account)
+            XCTAssertFalse(request.pinned)
+        }
+        let reopened = try open()
+        await store.changeAccount()
+        let service = UserDataCloudBackupService(localContainer: reopened, backupStore: store)
+        let callsBeforeRetry = await store.accountLookupCount
+        do { _ = try await service.resumePendingRestore(); XCTFail("Unbound intent must not adopt another account automatically") }
+        catch UserDataCloudRestorePause.accountNotConfirmed { }
+        let callsAfterRetry = await store.accountLookupCount
+        XCTAssertEqual(callsBeforeRetry, callsAfterRetry)
+        XCTAssertEqual(try ModelContext(reopened).fetchCount(FetchDescriptor<WorkoutSession>()), 0)
+        XCTAssertNotNil(try BackupLocalJournal.restoreRequest(for: reopened))
+        _ = try await service.restoreLatestBackup(replacingLocalData: true)
+        XCTAssertEqual(try BackupLocalJournal.state(for: reopened).account, "account-b")
+        XCTAssertEqual(try ModelContext(reopened).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: reopened))
+    }
+
+    func testAccountChangeWhileExplicitRestoreWaitsForGateCancelsBinding() async throws {
+        let target = try makeContainer(workouts: 0)
+        let store = MemoryArchiveStore()
+        await BackupOperationGate.shared.acquire()
+        let task = Task { try await UserDataCloudBackupService(localContainer: target, backupStore: store)
+            .restoreLatestBackup(replacingLocalData: true) }
+        await assertEventually { (try? BackupLocalJournal.restoreRequest(for: target)) != nil }
+        AppRuntimeState.shared.resetCloudBackupSession()
+        await store.changeAccount()
+        await BackupOperationGate.shared.release()
+        do { _ = try await task.value; XCTFail("The account changed after the explicit choice") }
+        catch UserDataCloudBackupSafetyError.accountChanged { }
+        let calls = await store.accountLookupCount
+        XCTAssertEqual(calls, 0)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+    }
+
+    func testUncommittedInterruptedRestoreStillResumesAfterRollback() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("interrupted.store"), cloudKitDatabase: .none)
+        func open() throws -> ModelContainer {
+            try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        }
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 1)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        do {
+            let target = try open()
+            let context = ModelContext(target)
+            context.insert(UserProfile(displayName: "Before interruption"))
+            try context.saveWithRecoveryProtection()
+            let request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+            try BackupLocalJournal.saveRestore(request, for: target)
+            // Leave the rollback marker just as termination during the transaction
+            // would, without running the service's handled-save-failure branch.
+            _ = try PersistentRestoreRecovery.prepare(container: target, ticket: request.ticket)
+        }
+        try PersistentRestoreRecovery.recoverIfNeeded(configurations: [configuration])
+        let reopened = try open()
+        XCTAssertEqual(try ModelContext(reopened).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Before interruption")
+        _ = try await UserDataCloudBackupService(localContainer: reopened, backupStore: store).resumePendingRestore()
+        XCTAssertEqual(try ModelContext(reopened).fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: reopened))
+    }
+
+    func testPermanentRestoreFormatErrorsClearIntentAndLeaveLocalDataUsable() async throws {
+        for failure in RestoreFixtureFailure.allCases {
+            let store = MemoryArchiveStore()
+            let source = try makeContainer(workouts: 1)
+            _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+            let target = try makeContainer(workouts: 2)
+            let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+            await store.failNextRestore(failure)
+            do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected invalid backup error") }
+            catch { XCTAssertTrue(error is DecodingError || error is BackupArchiveError, "Unexpected error: \(error)") }
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target), "\(failure)")
+            XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+            let resumed = try await service.resumePendingRestore()
+            XCTAssertNil(resumed)
+            // A format failure must not leave a phantom restore blocking backups.
+            let fetched = try await store.fetchManifest()
+            let remote = try XCTUnwrap(fetched)
+            try BackupLocalJournal.save(.init(account: "account-a", generation: remote.generation, manifest: remote), for: target)
+            _ = try await service.exportCurrentBackup()
+        }
+    }
+
+    func testBoundRestoreRejectsAccountSwitchDuringRetry() async throws {
+        let target = try makeContainer(workouts: 0)
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 1)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected failure") }
+        catch ArchiveTestError.publication { }
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.account, "account-a")
+        await store.changeAccount()
+        do { _ = try await service.resumePendingRestore(); XCTFail("Must reject a different account") }
+        catch UserDataCloudBackupSafetyError.accountChanged { }
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 0)
+    }
+
+    func testExplicitPreviousRestoreSupersedesFailedLatestRestore() async throws {
+        let source = try makeContainer(workouts: 1)
+        let store = MemoryArchiveStore()
+        let exporter = UserDataCloudBackupService(localContainer: source, backupStore: store)
+        _ = try await exporter.exportCurrentBackup()
+        let context = ModelContext(source)
+        context.insert(WorkoutSession(name: "New generation", status: .completed, endedAt: .now))
+        try context.saveWithRecoveryProtection()
+        _ = try await exporter.exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected failure") }
+        catch ArchiveTestError.publication { }
+        XCTAssertNotNil(try BackupLocalJournal.restoreRequest(for: target))
+        _ = try await service.restoreLatestBackup(replacingLocalData: true, previousGeneration: true)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+    }
+
+    func testExplicitDeviceBackupSupersedesDownloadingRestore() async throws {
+        let source = try makeContainer(workouts: 1)
+        let target = try makeContainer(workouts: 2)
+        let store = MemoryArchiveStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        let started = expectation(description: "Restore download suspended")
+        await store.pauseDownload(started: started)
+        let restore = Task { try await service.restoreLatestBackup(replacingLocalData: true) }
+        await fulfillment(of: [started], timeout: 2)
+        let export = Task { try await service.exportCurrentBackup(replacingRemote: true) }
+        // The export cancels the old intent before waiting for its network request.
+        for _ in 0..<1000 {
+            if try BackupLocalJournal.restoreRequest(for: target) == nil { break }
+            await Task.yield()
+        }
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        await store.resumeDownload()
+        do { _ = try await restore.value; XCTFail("Old restore must not commit") }
+        catch is CancellationError { }
+        _ = try await export.value
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        let remote = try await store.fetchBackupMetadata()
+        XCTAssertEqual(remote?.contentSummary?.completedWorkoutCount, 2)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+    }
+
+    func testReplacementRepairsDuplicateHistoryIDsAndReopens() async throws {
+        let source = try makeContainer(workouts: 1)
+        let sourceContext = ModelContext(source)
+        let session = try XCTUnwrap(sourceContext.fetch(FetchDescriptor<WorkoutSession>()).first)
+        let exercise = WorkoutSessionExercise(sessionID: session.id, catalogExerciseUUID: "pull-up",
+            exerciseNameSnapshot: "Pull-up", categorySnapshot: "Back", muscleSummarySnapshot: "Back", session: session)
+        let set = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: 12, isCompleted: true, sessionExercise: exercise)
+        let drop = WorkoutSessionDropStage(sessionSetID: set.id, actualReps: 5, isCompleted: true, sessionSet: set)
+        let group = WorkoutSessionSupersetGroup(sessionID: session.id, roundRestSeconds: 90, session: session)
+        let cardio = WorkoutSessionCardioBlock(sessionID: session.id, phase: .preWorkout,
+            catalogExerciseUUID: "run", exerciseNameSnapshot: "Run", categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs", targetDurationSeconds: 60, actualDurationSeconds: 60,
+            isCompleted: true, session: session)
+        sourceContext.insert(exercise); sourceContext.insert(set); sourceContext.insert(drop)
+        sourceContext.insert(group); sourceContext.insert(cardio)
+        try sourceContext.saveWithRecoveryProtection()
+        let store = MemoryArchiveStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("duplicates.store"), cloudKitDatabase: .none)
+        func open() throws -> ModelContainer {
+            try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        }
+        // Exercise each duplicated identity independently, including cascading parents.
+        for duplicateKind in 0..<6 {
+            let target = try open()
+            let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+            _ = try await service.restoreLatestBackup(replacingLocalData: true)
+            let context = ModelContext(target)
+            switch duplicateKind {
+            case 0: context.insert(WorkoutSession(id: session.id, name: "Duplicate", status: .completed, endedAt: .now))
+            case 1: context.insert(WorkoutSessionExercise(id: exercise.id, sessionID: session.id,
+                catalogExerciseUUID: "pull-up", exerciseNameSnapshot: "Duplicate", categorySnapshot: "Back", muscleSummarySnapshot: "Back"))
+            case 2: context.insert(WorkoutSessionSet(id: set.id, sessionExerciseID: exercise.id, actualReps: 1, isCompleted: true))
+            case 3: context.insert(WorkoutSessionDropStage(id: drop.id, sessionSetID: set.id, actualReps: 1, isCompleted: true))
+            case 4: context.insert(WorkoutSessionSupersetGroup(id: group.id, sessionID: session.id, roundRestSeconds: 0))
+            default: context.insert(WorkoutSessionCardioBlock(id: cardio.id, sessionID: session.id, phase: .preWorkout,
+                catalogExerciseUUID: "run", exerciseNameSnapshot: "Duplicate", categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs", targetDurationSeconds: 1))
+            }
+            try context.saveWithRecoveryProtection()
+            switch duplicateKind {
+            case 0: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+            case 1: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSessionExercise>()), 2)
+            case 2: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSessionSet>()), 2)
+            case 3: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSessionDropStage>()), 2)
+            case 4: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSessionSupersetGroup>()), 2)
+            default: XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSessionCardioBlock>()), 2)
+            }
+            _ = try await service.restoreLatestBackup(replacingLocalData: true)
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        }
+        let reopened = try open()
+        let read = ModelContext(reopened)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSessionExercise>()), 1)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSessionSet>()), 1)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSessionDropStage>()), 1)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSessionSupersetGroup>()), 1)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSessionCardioBlock>()), 1)
+        XCTAssertEqual(try read.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).first?.actualDurationSeconds, 60)
+        let restoredSet = try XCTUnwrap(read.fetch(FetchDescriptor<WorkoutSessionSet>()).first)
+        XCTAssertEqual(restoredSet.actualReps, 12)
+        XCTAssertEqual(restoredSet.sessionExercise?.session?.id, session.id)
+        XCTAssertEqual(try read.fetch(FetchDescriptor<WorkoutSessionDropStage>()).first?.sessionSet?.id, set.id)
+    }
+
+    func testPackedHistoryBoundsUploadsAndIncludesEditsBelowMaximumTimestamp() throws {
+        let container = try makeContainer(workouts: 2500)
+        let context = ModelContext(container)
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        let batches = try BackupHistoryBatch.make(sessions)
+        XCTAssertTrue(batches.allSatisfy { $0.entries.count <= 64 })
+        XCTAssertLessThan(batches.count, 80)
+        XCTAssertEqual(Set(batches.flatMap { $0.entries.map(\.id) }), Set(sessions.map(\.id)))
+        let first = try BackupExportPlan.build(container: container, previous: nil)
+        defer { first.cleanUp() }
+        context.insert(WorkoutSession(name: "Added", status: .completed, endedAt: .now))
+        try context.saveWithRecoveryProtection()
+        let added = try BackupExportPlan.build(container: container, previous: first.manifest)
+        defer { added.cleanUp() }
+        XCTAssertLessThanOrEqual(added.chunkFiles.count, 2)
+        let group = try XCTUnwrap(batches.first { $0.entries.count > 2 })
+        let a = try XCTUnwrap(sessions.first { $0.id == group.entries[0].id })
+        let b = try XCTUnwrap(sessions.first { $0.id == group.entries[1].id })
+        a.updatedAt = .distantFuture
+        try context.saveWithRecoveryProtection()
+        let future = try BackupExportPlan.build(container: container, previous: added.manifest)
+        defer { future.cleanUp() }
+        b.name = "Changed below the maximum date"
+        b.updatedAt = .now
+        try context.saveWithRecoveryProtection()
+        let changed = try BackupExportPlan.build(container: container, previous: future.manifest)
+        defer { changed.cleanUp() }
+        XCTAssertEqual(changed.chunkFiles.count, 1)
+        context.delete(b)
+        try context.saveWithRecoveryProtection()
+        let deleted = try BackupExportPlan.build(container: container, previous: changed.manifest)
+        defer { deleted.cleanUp() }
+        XCTAssertEqual(deleted.manifest.summary.completedWorkoutCount, 2500)
+        XCTAssertFalse(deleted.chunkFiles.isEmpty)
+    }
+
+    func testPendingRestoreRetriesTransportFailureAndStopsAfterNewLocalSave() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected transport failure") }
+        catch ArchiveTestError.publication { }
+        XCTAssertNotNil(try BackupLocalJournal.restoreRequest(for: target))
+        _ = try await service.resumePendingRestore()
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected transport failure") }
+        catch ArchiveTestError.publication { }
+        let context = ModelContext(target)
+        context.insert(UserProfile(displayName: "New local edit"))
+        try context.saveWithRecoveryProtection()
+        let result = try await service.resumePendingRestore()
+        XCTAssertNil(result)
+        XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "New local edit")
+    }
+
+    func testFailedPersistentRestoreRollsBackAndWaitsForExplicitRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("restore.store")
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
+        func open() throws -> ModelContainer {
+            try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        }
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        do {
+            let container = try open()
+            let context = ModelContext(container)
+            context.insert(UserProfile(displayName: "Original"))
+            try context.saveWithRecoveryProtection()
+            let requestURL = try XCTUnwrap(BackupLocalJournal.directory(for: container)).appendingPathComponent("restore.json")
+            var originalRequestBytes: Data?
+            var originalFileNumber: NSNumber?
+            let transaction = UserDataCloudRestoreTransaction(container: container, dependencies: .init(save: {
+                originalRequestBytes = try Data(contentsOf: requestURL)
+                originalFileNumber = try FileManager.default.attributesOfItem(atPath: requestURL.path)[.systemFileNumber] as? NSNumber
+                try $0.save()
+                throw ArchiveTestError.publication // Simulate failure after SQLite commits, before the receipt.
+            }))
+            do {
+                _ = try await UserDataCloudBackupService(localContainer: container, backupStore: store,
+                    restoreTransaction: transaction).restoreLatestBackup(replacingLocalData: true)
+                XCTFail("Expected interrupted transaction")
+            } catch is PersistentRestoreRecovery.RecoveryRequired { }
+            XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.requiresExplicitRetry, true)
+            // The pause reuses the same file/inode and bytes; it requires no JSON
+            // rewrite or new data allocation when the transaction ran out of space.
+            let pausedURL = requestURL.deletingLastPathComponent().appendingPathComponent("restore-paused.json")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: requestURL.path))
+            XCTAssertEqual(try Data(contentsOf: pausedURL), originalRequestBytes)
+            XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: pausedURL.path)[.systemFileNumber] as? NSNumber,
+                try XCTUnwrap(originalFileNumber))
+        }
+        try PersistentRestoreRecovery.recoverIfNeeded(configurations: [configuration])
+        let reopened = try open()
+        XCTAssertEqual(try ModelContext(reopened).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Original")
+        let service = UserDataCloudBackupService(localContainer: reopened, backupStore: store)
+        for _ in 0..<2 {
+            do { _ = try await service.resumePendingRestore(); XCTFail("Known save failure must not loop automatically") }
+            catch UserDataCloudRestorePause.localSaveFailed { }
+        }
+        XCTAssertEqual(try ModelContext(reopened).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Original")
+        _ = try await service.restoreLatestBackup(replacingLocalData: true)
+        XCTAssertEqual(try ModelContext(reopened).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: reopened))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: reopened))
+        AppRuntimeState.shared.requiresStorageRecovery = false
+    }
+
+    func testReplacementReusesHistoryAndRelinksChildrenFromRemovedParents() async throws {
+        let source = try makeContainer(workouts: 0)
+        let sourceContext = ModelContext(source)
+        let session = WorkoutSession(name: "Keep", status: .completed, endedAt: .now)
+        let exercise = WorkoutSessionExercise(sessionID: session.id, catalogExerciseUUID: "pull-up",
+            exerciseNameSnapshot: "Pull-up", categorySnapshot: "Back", muscleSummarySnapshot: "Back", session: session)
+        let set = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: 12, isCompleted: true, sessionExercise: exercise)
+        sourceContext.insert(session); sourceContext.insert(exercise); sourceContext.insert(set)
+        try sourceContext.saveWithRecoveryProtection()
+        let store = MemoryArchiveStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let context = ModelContext(target)
+        let oldParent = WorkoutSession(name: "Remove", status: .completed, endedAt: .now)
+        let kept = WorkoutSession(id: session.id, name: "Old", status: .completed, endedAt: .now)
+        let oldExercise = WorkoutSessionExercise(id: exercise.id, sessionID: oldParent.id, catalogExerciseUUID: "pull-up",
+            exerciseNameSnapshot: "Old name", categorySnapshot: "Back", muscleSummarySnapshot: "Back", session: oldParent)
+        let oldSet = WorkoutSessionSet(id: set.id, sessionExerciseID: oldExercise.id, actualReps: 3, isCompleted: true, sessionExercise: oldExercise)
+        context.insert(oldParent); context.insert(kept); context.insert(oldExercise); context.insert(oldSet)
+        try context.saveWithRecoveryProtection()
+        _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store).restoreLatestBackup(replacingLocalData: true)
+        let read = ModelContext(target)
+        XCTAssertEqual(try read.fetchCount(FetchDescriptor<WorkoutSession>()), 1)
+        let restoredExercise = try XCTUnwrap(read.fetch(FetchDescriptor<WorkoutSessionExercise>()).first)
+        XCTAssertEqual(restoredExercise.session?.id, session.id)
+        let restoredSet = try XCTUnwrap(read.fetch(FetchDescriptor<WorkoutSessionSet>()).first)
+        XCTAssertEqual(restoredSet.id, set.id)
+        XCTAssertEqual(restoredSet.actualReps, 12)
+        XCTAssertEqual(restoredSet.sessionExercise?.id, exercise.id)
+        XCTAssertEqual(try read.fetch(FetchDescriptor<CompletedSetFact>()).first?.reps, 12)
+    }
+
+    func testPendingRestoreRejectsChangedCloudHead() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        let export = UserDataCloudBackupService(localContainer: source, backupStore: store)
+        _ = try await export.exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        await store.failNextDownload()
+        do { _ = try await service.restoreLatestBackup(replacingLocalData: true); XCTFail("Expected transport failure") }
+        catch ArchiveTestError.publication { }
+        let context = ModelContext(source)
+        context.insert(UserProfile(displayName: "New cloud version"))
+        try context.saveWithRecoveryProtection()
+        _ = try await export.exportCurrentBackup()
+        do { _ = try await service.resumePendingRestore(); XCTFail("Must not restore another version silently") }
+        catch UserDataCloudBackupSafetyError.remoteChanged { }
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 0)
+    }
+
+    func testPerWorkoutArchiveMigratesToPackedHistoryAndBothGenerationsRestore() async throws {
+        let source = try makeContainer(workouts: 130)
+        let context = ModelContext(source)
+        let directory = try BackupTemporaryFiles.makeArchiveDirectory()
+        defer { BackupTemporaryFiles.remove(directory) }
+        var references: [BackupChunkReference] = []
+        var files: [String: URL] = [:]
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        for id in [nil] + sessions.map({ Optional($0.id) }) {
+            let (data, summary) = try UserDataBackupPayloadCodec.makeChunk(context: context, sessionID: id)
+            let reference = BackupChunkReference(key: id?.uuidString ?? "shared", digest: BackupArchiveCodec.digest(data),
+                sourceUpdatedAt: .now, summary: summary)
+            let url = directory.appendingPathComponent(reference.recordName)
+            try BackupArchiveCodec.encode(data).write(to: url)
+            references.append(reference)
+            files[reference.recordName] = url
+        }
+        let old = BackupManifest(generation: UUID().uuidString, updatedAt: .now, chunks: references,
+            previousGenerations: [], summary: try UserDataCloudBackupContentSummary.loadLocal(context: context))
+        let store = MemoryArchiveStore()
+        try await store.saveArchive(old, chunkFiles: files, expectedGeneration: nil, expectedAccount: "account-a")
+        try BackupLocalJournal.save(.init(account: "account-a", generation: old.generation, manifest: old), for: source)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let current = try await store.fetchManifest()
+        XCTAssertLessThan(try XCTUnwrap(current).chunks.count, 10)
+        for previous in [false, true] {
+            let target = try makeContainer(workouts: 0)
+            _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store)
+                .restoreLatestBackup(replacingLocalData: true, previousGeneration: previous)
+            XCTAssertEqual(Set(try ModelContext(target).fetch(FetchDescriptor<WorkoutSession>()).map(\.id)), Set(sessions.map(\.id)))
+        }
+    }
+
     func testChunkEncodingPreservesExistingBytesAndDigest() throws {
         let container = try makeContainer(workouts: 2)
         let context = ModelContext(container)
@@ -363,6 +970,8 @@ final class IncrementalBackupTests: XCTestCase {
         _ = try await service.exportCurrentBackup()
         XCTAssertEqual(try BackupLocalJournal.state(for: container).generation, manifest.generation)
         XCTAssertNil(try BackupLocalJournal.state(for: container).attemptedManifest)
+        let publications = await store.publicationCount
+        XCTAssertEqual(publications, 1)
     }
 
     func testFailedRetentionCleanupRetriesWithoutPublishingAnotherGeneration() async throws {
@@ -496,6 +1105,8 @@ final class IncrementalBackupTests: XCTestCase {
 }
 
 private enum ArchiveTestError: Error { case publication }
+private enum RestoreFixtureFailure: CaseIterable { case metadata, payload, compressed, chunk, missingCloudChunk, missingCloudBatch }
+
 
 private actor MemoryArchiveStore: IncrementalBackupStoring {
     private var current: BackupManifest?
@@ -510,12 +1121,33 @@ private actor MemoryArchiveStore: IncrementalBackupStoring {
         cleanupContinuation = nil
     }
     private var chunks: [String: Data] = [:]
+    private var restoreFailure: RestoreFixtureFailure?
+    func failNextRestore(_ failure: RestoreFixtureFailure) { restoreFailure = failure }
+    private var cloudChunkError: CKError.Code?
+    func failNextCloudChunkRead(_ error: CKError.Code) { cloudChunkError = error }
+    private(set) var accountLookupCount = 0
+    private var failAccountLookup = false
+    func failNextAccountLookup() { failAccountLookup = true }
+    private var downloadStarted: XCTestExpectation?
+    private var downloadContinuation: CheckedContinuation<Void, Never>?
+    func pauseDownload(started: XCTestExpectation) { downloadStarted = started }
+    func resumeDownload() {
+        downloadStarted = nil
+        downloadContinuation?.resume()
+        downloadContinuation = nil
+    }
+    private var failDownload = false
+    func failNextDownload() { failDownload = true }
     private var failPublication = false
     private var account = "account-a"
     private(set) var lastUploadedChunkCount = 0
     private(set) var publicationCount = 0
 
-    func accountIdentifier() async throws -> String { account }
+    func accountIdentifier() async throws -> String {
+        accountLookupCount += 1
+        if failAccountLookup { failAccountLookup = false; throw ArchiveTestError.publication }
+        return account
+    }
     func changeAccount() { account = "account-b" }
     func failNextCleanup() { failCleanup = true }
     func removeOrphanedRecords(_ names: Set<String>, retaining: BackupManifest) async throws {
@@ -566,9 +1198,45 @@ private actor MemoryArchiveStore: IncrementalBackupStoring {
         publicationCount += 1
     }
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
-        current.map { .init(updatedAt: $0.updatedAt, contentSummary: $0.summary, generation: $0.generation) }
+        if restoreFailure == .metadata {
+            restoreFailure = nil
+            return try JSONDecoder().decode(UserDataCloudBackupRemoteMetadata.self, from: Data("{}".utf8))
+        }
+        return current.map { .init(updatedAt: $0.updatedAt, contentSummary: $0.summary, generation: $0.generation) }
     }
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? {
+        if let downloadStarted {
+            await withCheckedContinuation { continuation in
+                downloadContinuation = continuation
+                downloadStarted.fulfill()
+            }
+        }
+        if let failure = restoreFailure {
+            restoreFailure = nil
+            switch failure {
+            case .payload:
+                return .init(updatedAt: .now, payloadData: Data("{}".utf8), contentSummary: nil)
+            case .compressed:
+                _ = try BackupArchiveCodec.decode(Data("WGJZ1\0bad compressed bytes".utf8))
+            case .chunk:
+                try UserDataBackupPayloadCodec.Combiner().append(Data("not JSON".utf8))
+            case .missingCloudChunk:
+                cloudChunkError = .unknownItem
+            case .missingCloudBatch:
+                _ = try await CloudKitUserDataCloudBackupStore.requiredArchiveRecords(recordIDs: [CKRecord.ID(recordName: "missing")]) {
+                    throw CKError(.unknownItem)
+                }
+            case .metadata: XCTFail("Metadata error should have been consumed first")
+            }
+        }
+        if let code = cloudChunkError {
+            cloudChunkError = nil
+            let id = CKRecord.ID(recordName: "chunk")
+            _ = try await CloudKitUserDataCloudBackupStore.requiredArchiveRecords(recordIDs: [id]) {
+                [id: .failure(CKError(code))]
+            }
+        }
+        if failDownload { failDownload = false; throw ArchiveTestError.publication }
         guard let current else { return nil }
         return try record(current)
     }

@@ -120,7 +120,7 @@ nonisolated final class ExerciseCatalogSyncService {
             state.lastUpdateCursor = nil
             state.lastRefreshAttemptAt = now
             state.lastErrorMessage = nil
-            try modelContext.saveWithRecoveryProtection()
+            try modelContext.saveWithRecoveryProtection(purpose: .maintenance)
         } catch {
             let importError = error
             modelContext.rollback()
@@ -131,7 +131,7 @@ nonisolated final class ExerciseCatalogSyncService {
                 failureState.lastRefreshAttemptAt = nowProvider()
                 failureState.lastErrorMessage = String(describing: importError)
                 do {
-                    try modelContext.saveWithRecoveryProtection()
+                    try modelContext.saveWithRecoveryProtection(purpose: .maintenance)
                 } catch {
                     modelContext.rollback()
                 }
@@ -149,7 +149,7 @@ nonisolated final class ExerciseCatalogSyncService {
 
         let created = ExerciseCatalogSyncState()
         modelContext.insert(created)
-        try modelContext.saveWithRecoveryProtection()
+        try modelContext.saveWithRecoveryProtection(purpose: .maintenance)
         return created
     }
 

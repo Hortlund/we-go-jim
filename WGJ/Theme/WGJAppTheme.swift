@@ -125,6 +125,9 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class WGJThemePreferences {
+    // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
+    nonisolated deinit { }
+
     static let shared = WGJThemePreferences()
     static let storageKey = "appearance.theme"
 

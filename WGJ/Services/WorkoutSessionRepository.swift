@@ -203,11 +203,11 @@ nonisolated final class WorkoutSessionRepository {
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
     }
 
-    private func saveUserDataChanges() throws {
+    private func saveUserDataChanges(purpose: LocalStoreSavePurpose = .userEdit) throws {
         guard autoSaveChanges else { return }
         guard modelContext.hasChanges else { return }
         try prepareWorkoutCommit()
-        try modelContext.saveWithRecoveryProtection()
+        try modelContext.saveWithRecoveryProtection(purpose: purpose)
         needsHistoryRebuildBeforeSave = false
     }
 
@@ -1156,7 +1156,7 @@ nonisolated final class WorkoutSessionRepository {
     func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
         _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
         let count = try HistoryRecordRebuilder.rebuild(in: modelContext)
-        if modelContext.hasChanges { try saveUserDataChanges() }
+        if modelContext.hasChanges { try saveUserDataChanges(purpose: .maintenance) }
         if count > 0 {
             invalidateAnalyticsCache()
             publishWeeklyGoalWidgetProgress()

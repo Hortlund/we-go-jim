@@ -57,14 +57,14 @@
 		A20000000000000000000001 /* Project-ReleaseLike.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Project-ReleaseLike.xcconfig"; sourceTree = "<group>"; };
 		A20000000000000000000002 /* WGJ-App-ReleaseLike.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "WGJ-App-ReleaseLike.xcconfig"; sourceTree = "<group>"; };
 		A20000000000000000000003 /* WGJ-Widget-ReleaseLike.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "WGJ-Widget-ReleaseLike.xcconfig"; sourceTree = "<group>"; };
-		C85A31C52F367BAE00217B62 /* WGJ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WGJ.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		C85A31D42F367BAF00217B62 /* WGJTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C85A32002F39A7B000217B62 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		A20000000000000000000005 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		A30000000000000000000001 /* Unit.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Unit.xctestplan; sourceTree = "<group>"; };
 		A30000000000000000000002 /* UISmoke.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = UISmoke.xctestplan; sourceTree = "<group>"; };
 		A30000000000000000000003 /* Lifecycle.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Lifecycle.xctestplan; sourceTree = "<group>"; };
+		C85A31C52F367BAE00217B62 /* WGJ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WGJ.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C85A31D42F367BAF00217B62 /* WGJTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C85A32002F39A7B000217B62 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -143,6 +143,27 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A20000000000000000000004 /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* Version.xcconfig */,
+				A20000000000000000000001 /* Project-ReleaseLike.xcconfig */,
+				A20000000000000000000002 /* WGJ-App-ReleaseLike.xcconfig */,
+				A20000000000000000000003 /* WGJ-Widget-ReleaseLike.xcconfig */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000004 /* TestPlans */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000001 /* Unit.xctestplan */,
+				A30000000000000000000002 /* UISmoke.xctestplan */,
+				A30000000000000000000003 /* Lifecycle.xctestplan */,
+			);
+			path = TestPlans;
+			sourceTree = "<group>";
+		};
 		C85A31BC2F367BAE00217B62 = {
 			isa = PBXGroup;
 			children = (
@@ -156,17 +177,6 @@
 				C85A31C62F367BAE00217B62 /* Products */,
 				C8BCCBA12FD57ABF007D886C /* Recovered References */,
 			);
-			sourceTree = "<group>";
-		};
-		A20000000000000000000004 /* Configuration */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000005 /* Version.xcconfig */,
-				A20000000000000000000001 /* Project-ReleaseLike.xcconfig */,
-				A20000000000000000000002 /* WGJ-App-ReleaseLike.xcconfig */,
-				A20000000000000000000003 /* WGJ-Widget-ReleaseLike.xcconfig */,
-			);
-			path = Configuration;
 			sourceTree = "<group>";
 		};
 		C85A31C62F367BAE00217B62 /* Products */ = {
@@ -195,16 +205,6 @@
 				5FDCCDC93B7C462386C9807A /* WGJ/WidgetShared */,
 			);
 			name = "Recovered References";
-			sourceTree = "<group>";
-		};
-		A30000000000000000000004 /* TestPlans */ = {
-			isa = PBXGroup;
-			children = (
-				A30000000000000000000001 /* Unit.xctestplan */,
-				A30000000000000000000002 /* UISmoke.xctestplan */,
-				A30000000000000000000003 /* Lifecycle.xctestplan */,
-			);
-			path = TestPlans;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -499,6 +499,29 @@
 			};
 			name = Debug;
 		};
+		A10000000000000000000001 /* Dev Preview */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A20000000000000000000001 /* Project-ReleaseLike.xcconfig */;
+			buildSettings = {
+			};
+			name = "Dev Preview";
+		};
+		A10000000000000000000002 /* Dev Preview */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A20000000000000000000002 /* WGJ-App-ReleaseLike.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				CODE_SIGN_ENTITLEMENTS = "WGJ/WGJ-Debug.entitlements";
+				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev;
+				WGJ_APP_DISPLAY_NAME = "We Go Jim Dev";
+				WGJ_APP_ENVIRONMENT = development;
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
+				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;
+				WGJ_CLOUDKIT_ENVIRONMENT = Development;
+				WGJ_URL_SCHEME = "wgj-dev";
+			};
+			name = "Dev Preview";
+		};
 		A10000000000000000000003 /* Dev Preview */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A20000000000000000000003 /* WGJ-Widget-ReleaseLike.xcconfig */;
@@ -506,6 +529,45 @@
 				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev.WGJWidgetExtension;
 				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
 				WGJ_URL_SCHEME = "wgj-dev";
+			};
+			name = "Dev Preview";
+		};
+		A10000000000000000000004 /* Dev Preview */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJimTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WGJ.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WGJ";
+			};
+			name = "Dev Preview";
+		};
+		A10000000000000000000005 /* Dev Preview */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJimUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = WGJ;
 			};
 			name = "Dev Preview";
 		};
@@ -583,13 +645,6 @@
 			};
 			name = Release;
 		};
-		A10000000000000000000001 /* Dev Preview */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = A20000000000000000000001 /* Project-ReleaseLike.xcconfig */;
-			buildSettings = {
-			};
-			name = "Dev Preview";
-		};
 		C85A31E92F367BAF00217B62 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -644,22 +699,6 @@
 			};
 			name = Release;
 		};
-		A10000000000000000000002 /* Dev Preview */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = A20000000000000000000002 /* WGJ-App-ReleaseLike.xcconfig */;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
-				CODE_SIGN_ENTITLEMENTS = "WGJ/WGJ-Debug.entitlements";
-				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev;
-				WGJ_APP_DISPLAY_NAME = "We Go Jim Dev";
-				WGJ_APP_ENVIRONMENT = development;
-				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim.dev;
-				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim.dev;
-				WGJ_CLOUDKIT_ENVIRONMENT = Development;
-				WGJ_URL_SCHEME = "wgj-dev";
-			};
-			name = "Dev Preview";
-		};
 		C85A31EC2F367BAF00217B62 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -700,26 +739,6 @@
 			};
 			name = Release;
 		};
-		A10000000000000000000004 /* Dev Preview */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJimTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WGJ.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WGJ";
-			};
-			name = "Dev Preview";
-		};
 		C85A31EF2F367BAF00217B62 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -757,25 +776,6 @@
 				TEST_TARGET_NAME = WGJ;
 			};
 			name = Release;
-		};
-		A10000000000000000000005 /* Dev Preview */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJimUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = WGJ;
-			};
-			name = "Dev Preview";
 		};
 /* End XCBuildConfiguration section */
 

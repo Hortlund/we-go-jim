@@ -1159,6 +1159,15 @@ final class ActiveWorkoutPresentationState {
         restTimerState?.dismissRestTimerPopup()
     }
 
+    func reconcileAfterRestore(
+        savedBefore cutoff: Date,
+        coordinator: ActiveWorkoutCoordinator,
+        restTimerState: RestTimerState
+    ) {
+        guard coordinator.clearInMemory(savedBefore: cutoff) else { return }
+        clearActiveWorkout(restTimerState: restTimerState)
+    }
+
     func restoreActiveSessionIfMissing(
         coordinator: ActiveWorkoutCoordinator,
         modelContext: ModelContext,

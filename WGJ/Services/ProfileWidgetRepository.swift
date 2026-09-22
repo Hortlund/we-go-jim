@@ -31,7 +31,7 @@ nonisolated final class ProfileWidgetRepository {
     }
 
     func configurations() throws -> [ProfileWidgetConfig] {
-        try ensureDefaultConfigsIfNeeded()
+        try ensureDefaultConfigsIfNeeded(purpose: .maintenance)
         return try fetchConfigurations()
     }
 
@@ -189,7 +189,7 @@ nonisolated final class ProfileWidgetRepository {
         try saveUserDataChanges()
     }
 
-    private func ensureDefaultConfigsIfNeeded() throws {
+    private func ensureDefaultConfigsIfNeeded(purpose: LocalStoreSavePurpose = .userEdit) throws {
         let existing = try fetchConfigurations()
         var didChange = false
         var seen: Set<ProfileWidgetKind> = []
@@ -241,7 +241,7 @@ nonisolated final class ProfileWidgetRepository {
         }
 
         if didInsert || didChange {
-            try modelContext.saveWithRecoveryProtection()
+            try modelContext.saveWithRecoveryProtection(purpose: purpose)
         }
     }
 

@@ -74,6 +74,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                BoundaryCloudBackupScheduler.resumeOperations(container: modelContext.container)
                 restTimerState.handleRestTimerExpirationIfNeeded()
                 scheduleResumeCriticalMaintenanceIfNeeded()
                 if activeWorkoutPresentationState.activeSessionID == nil {
@@ -157,8 +158,8 @@ struct ContentView: View {
             NotificationCenter.default
                 .publisher(for: .wgjUserDataRestoreDidComplete)
                 .receive(on: RunLoop.main)
-        ) { _ in
-            handleUserDataRestoreCompleted()
+        ) { notification in
+            handleUserDataRestoreCompleted(notification)
         }
     }
 
@@ -343,7 +344,7 @@ struct ContentView: View {
 
     private func requestStartupCloudBackupStatusCheckIfNeeded() {
         guard appRuntimeState.cloudSyncEnabled else { return }
-        BoundaryCloudBackupScheduler.resumePending(container: modelContext.container)
+        BoundaryCloudBackupScheduler.resumeOperations(container: modelContext.container)
         startupCloudBackupStatusCheckTask = CloudBackupStatusCheckScheduler.checkMetadataBestEffort(
             container: modelContext.container
         )
@@ -370,9 +371,14 @@ struct ContentView: View {
         requestWarmups(trigger: .activeWorkoutEnded)
     }
 
-    private func handleUserDataRestoreCompleted() {
-        activeWorkoutCoordinator.clearInMemory()
-        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+    private func handleUserDataRestoreCompleted(_ notification: Notification) {
+        if let cutoff = notification.userInfo?["cleanupBefore"] as? Date {
+            activeWorkoutPresentationState.reconcileAfterRestore(
+                savedBefore: cutoff,
+                coordinator: activeWorkoutCoordinator,
+                restTimerState: restTimerState
+            )
+        }
         requestNewDeferredMaintenanceRun()
         handleWorkoutHistoryChanged()
     }
@@ -774,7 +780,7 @@ struct ContentView: View {
                     return existing
                 }
 
-                return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
+                return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile(purpose: .maintenance))
             }
             if appRuntimeState.cloudSyncEnabled {
                 await backgroundStore.scheduleProfileNameUpgrade(profile: snapshot)
