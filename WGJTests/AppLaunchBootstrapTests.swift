@@ -8,6 +8,27 @@ final class AppLaunchBootstrapTests: XCTestCase {
         case storeOpen
     }
 
+    func testPendingCloudRestoreDoesNotBlockPublishingLocalStore() async throws {
+        let state = makeState()
+        let container = try AppSchema.makeInMemoryContainer(name: UUID().uuidString)
+        let context = ModelContext(container)
+        context.insert(UserProfile(displayName: "Available offline"))
+        try context.saveWithRecoveryProtection()
+        let request = BackupLocalJournal.RestoreRequest(account: "bound-account", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: container)
+        state.resolveIfNeeded {
+            ModelContainerBootstrap(container: container, cloudRuntimeMode: .checking,
+                cloudFeaturesEnabled: true, userDataSyncEnabled: false, cloudSyncEnabled: true,
+                cloudSyncErrorDescription: nil)
+        }
+        await assertEventually { state.resolvedBootstrap != nil }
+        XCTAssertNil(state.recoveryState)
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<UserProfile>()).first?.displayName, "Available offline")
+        let pending = try XCTUnwrap(BackupLocalJournal.restoreRequest(for: container))
+        XCTAssertEqual(pending.ticket, request.ticket)
+        XCTAssertFalse(pending.pinned, "Bootstrap must not start a cloud download before publishing local UI")
+    }
+
     func testPersistentStoreFailureShowsRecoveryInsteadOfReadyContent() async {
         let state = makeState()
 

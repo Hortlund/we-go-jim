@@ -2,6 +2,59 @@ import XCTest
 @testable import WGJ
 
 final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
+    func testInvalidationRejectsDelayedOldWriteAndPreservesNewMutationAfterReopen() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cutoff = Date(timeIntervalSince1970: 1_700_000_000.75)
+        let old = makeStoredSnapshot(revision: 10, name: "Before restore")
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        // Cleanup can finish before an already queued old write reaches the actor.
+        try await store.invalidateSnapshotsSavedBefore(cutoff)
+        let rejected = try await store.save(old)
+        XCTAssertEqual(rejected, .rejectedInvalidated)
+        let empty = try await store.loadStoredSnapshot()
+        XCTAssertNil(empty)
+
+        var newer = old
+        newer.revision += 1
+        newer.mutationTimestamp = cutoff.addingTimeInterval(0.125).timeIntervalSince1970
+        newer.scrollOffsetY = 72 // Presentation-only edits do not touch session.updatedAt.
+        let saved = try await store.save(newer)
+        XCTAssertEqual(saved, .written)
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        try await reopened.invalidateSnapshotsSavedBefore(cutoff)
+        let restored = try await reopened.loadStoredSnapshot()
+        XCTAssertEqual(restored?.mutationDate, newer.mutationDate)
+        XCTAssertEqual(restored?.scrollOffsetY, 72)
+        let lateOldWrite = try await reopened.save(old)
+        XCTAssertEqual(lateOldWrite, .rejectedInvalidated)
+        let retained = try await reopened.loadStoredSnapshot()
+        XCTAssertEqual(retained?.revision, newer.revision)
+    }
+
+    func testLegacySnapshotAdoptsOriginalFileDateOnceAndKeepsItOnRetry() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("active-workout-snapshot.json")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(makeStoredSnapshot(revision: 2, name: "Legacy"))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "mutationTimestamp")
+        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        let originalDate = Date(timeIntervalSince1970: 1_700_000_000.25)
+        try FileManager.default.setAttributes([.modificationDate: originalDate], ofItemAtPath: file.path)
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let loaded = try await store.loadStoredSnapshot()
+        let migrated = try XCTUnwrap(loaded)
+        XCTAssertEqual(migrated.mutationDate, originalDate)
+        _ = try await store.save(migrated)
+        let cold = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        try await cold.invalidateSnapshotsSavedBefore(originalDate.addingTimeInterval(0.125))
+        let removed = try await cold.loadStoredSnapshot()
+        XCTAssertNil(removed)
+    }
+
     func testRevisionlessSnapshotDecodesAsZero() throws {
         let snapshot = makeStoredSnapshot(revision: 7, name: "Legacy")
         let encoded = try JSONEncoder().encode(snapshot)

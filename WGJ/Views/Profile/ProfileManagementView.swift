@@ -250,7 +250,7 @@ struct ProfileManagementView: View {
 
         do {
             let profile = try profileRepository.currentProfileSnapshot()
-                ?? ProfileIdentitySnapshot(profile: try profileRepository.loadOrCreateProfile())
+                ?? ProfileIdentitySnapshot(profile: try profileRepository.loadOrCreateProfile(purpose: .maintenance))
             apply(profile: profile)
 
             if cloudSyncEnabled {

@@ -23,7 +23,7 @@ nonisolated enum PersistentRestoreRecovery {
         }
     }
 
-    static func prepare(container: ModelContainer) throws -> URL? {
+    static func prepare(container: ModelContainer, ticket: UUID? = nil) throws -> URL? {
         let configurations = Array(container.configurations)
         guard let directory = directory(configurations: configurations) else { return nil }
         let marker = directory.appendingPathComponent("pending.json")
@@ -37,16 +37,37 @@ nonisolated enum PersistentRestoreRecovery {
             try copyDatabase(from: config.url, to: destination, standalone: true)
             snapshots.append(FileSnapshot(destination: config.url, snapshot: destination))
         }
+        if let ticket {
+            try BackupArchiveCodec.json(ticket).write(to: directory.appendingPathComponent("ticket.json"), options: .atomic)
+        }
         try BackupArchiveCodec.json(snapshots).write(to: marker, options: .atomic)
         return directory
     }
 
-    static func complete(_ directory: URL?) throws {
+    static func complete(_ directory: URL?, committed: Bool = false) throws {
         guard let directory else { return }
         let marker = directory.appendingPathComponent("pending.json")
+        if committed, FileManager.default.fileExists(atPath: directory.appendingPathComponent("ticket.json").path) {
+            // Atomic rename is the transaction commit point. Keep its receipt
+            // until the backup journal has acknowledged it, even across termination.
+            try FileManager.default.moveItem(at: marker, to: directory.appendingPathComponent("committed.json"))
+            return
+        }
         if FileManager.default.fileExists(atPath: marker.path) { try FileManager.default.removeItem(at: marker) }
         // The marker is the commit point; leftover copies are disposable after it is removed.
         try? FileManager.default.removeItem(at: directory)
+    }
+
+    static func committedTicket(container: ModelContainer) throws -> UUID? {
+        guard let directory = directory(configurations: Array(container.configurations)),
+              FileManager.default.fileExists(atPath: directory.appendingPathComponent("committed.json").path) else { return nil }
+        return try JSONDecoder().decode(UUID.self, from: Data(contentsOf: directory.appendingPathComponent("ticket.json")))
+    }
+
+    static func acknowledge(container: ModelContainer) throws {
+        guard let directory = directory(configurations: Array(container.configurations)) else { return }
+        guard !FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending.json").path) else { throw RecoveryRequired() }
+        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
     }
 
     static func recoverIfNeeded(configurations: [ModelConfiguration]) throws {

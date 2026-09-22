@@ -54,11 +54,12 @@ extension CloudKitUserDataCloudBackupStore {
         for offset in stride(from: 0, to: manifest.chunks.count, by: 50) {
             try Task.checkCancellation()
             let references = manifest.chunks[offset..<min(offset + 50, manifest.chunks.count)]
-            let records = try await database.records(for: references.map { CKRecord.ID(recordName: $0.recordName) },
-                desiredKeys: [UserDataCloudBackupDescriptor.Field.payloadAsset])
+            let ids = references.map { CKRecord.ID(recordName: $0.recordName) }
+            let records = try await Self.requiredArchiveRecords(recordIDs: ids) {
+                try await database.records(for: ids, desiredKeys: [UserDataCloudBackupDescriptor.Field.payloadAsset])
+            }
             for reference in references {
-                guard let result = records[CKRecord.ID(recordName: reference.recordName)] else { throw BackupArchiveError.missingChunk }
-                let record = try result.get()
+                guard let record = records[CKRecord.ID(recordName: reference.recordName)] else { throw BackupArchiveError.missingChunk }
                 let data = try BackupArchiveCodec.decode(assetData(record))
                 guard BackupArchiveCodec.digest(data) == reference.digest else { throw BackupArchiveError.corruptChunk }
                 try combiner.append(data)
@@ -69,6 +70,21 @@ extension CloudKitUserDataCloudBackupStore {
             payloadData: try combiner.finish(generatedAt: manifest.updatedAt),
             contentSummary: manifest.summary, generation: manifest.generation
         )
+    }
+
+    /// Every referenced chunk is required. Unlike a head lookup, an absent chunk
+    /// is a broken archive, not a transport failure to retry on each foreground.
+    nonisolated static func requiredArchiveRecords(
+        recordIDs: [CKRecord.ID],
+        fetch: () async throws -> [CKRecord.ID: Result<CKRecord, Error>]
+    ) async throws -> [CKRecord.ID: CKRecord] {
+        do {
+            let records = try resolveRecords(await fetch(), requestedIDs: recordIDs)
+            guard recordIDs.allSatisfy({ records[$0] != nil }) else { throw BackupArchiveError.missingChunk }
+            return records
+        } catch let error as CKError where error.code == .unknownItem {
+            throw BackupArchiveError.missingChunk
+        }
     }
 
     /// Uses only fields already present on WGJUserDataBackup. No new server indexes or subscriptions.

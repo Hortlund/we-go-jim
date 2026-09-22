@@ -46,28 +46,37 @@ nonisolated final class UserDataCloudRestoreTransaction {
 
     func commit(
         replacingLocalData: Bool,
+        restoreTicket: UUID? = nil,
+        replacementPayload: UserDataCloudBackupPayload? = nil,
         mergeDatabaseGraph: (ModelContext) throws -> Void,
         relinkRelationships: (ModelContext) throws -> Void
     ) throws {
         try LocalStoreWriteBarrier.exclusively {
-            try commitExclusively(replacingLocalData: replacingLocalData,
+            try commitExclusively(replacingLocalData: replacingLocalData, restoreTicket: restoreTicket, replacementPayload: replacementPayload,
                 mergeDatabaseGraph: mergeDatabaseGraph, relinkRelationships: relinkRelationships)
         }
     }
 
     private func commitExclusively(
         replacingLocalData: Bool,
+        restoreTicket: UUID? = nil,
+        replacementPayload: UserDataCloudBackupPayload? = nil,
         mergeDatabaseGraph: (ModelContext) throws -> Void,
         relinkRelationships: (ModelContext) throws -> Void
     ) throws {
+        if let restoreTicket {
+            guard try BackupLocalJournal.restoreRequest(for: container)?.ticket == restoreTicket else {
+                throw CancellationError()
+            }
+        }
         let context = ModelContext(container)
         context.autosaveEnabled = false
-        let recovery = try PersistentRestoreRecovery.prepare(container: container)
+        let recovery = try PersistentRestoreRecovery.prepare(container: container, ticket: restoreTicket)
         var attemptedSave = false
         do {
             try dependencies.checkpoint(.afterValidation)
             if replacingLocalData {
-                try AppDataDeletionService(modelContext: context).stageLocalDataDeletion()
+                try AppDataDeletionService(modelContext: context).stageLocalDataDeletion(preservingHistory: replacementPayload)
                 try dependencies.checkpoint(.afterDeletionStaged)
             }
 
@@ -83,7 +92,7 @@ nonisolated final class UserDataCloudRestoreTransaction {
                 attemptedSave = true
                 try dependencies.save(context)
             }
-            try PersistentRestoreRecovery.complete(recovery)
+            try PersistentRestoreRecovery.complete(recovery, committed: true)
         } catch {
             context.rollback()
             if attemptedSave, recovery != nil { throw PersistentRestoreRecovery.RecoveryRequired() }
@@ -93,7 +102,7 @@ nonisolated final class UserDataCloudRestoreTransaction {
     }
 
     private func rebuildCompletedSessionSummariesAndFacts(in context: ModelContext) throws {
-        _ = try HistoryProjectionRepository(modelContext: context).backfillIfNeeded(persistChanges: false)
+        try HistoryProjectionRepository(modelContext: context).rebuildAllForRestore()
         _ = try HistoryRecordRebuilder.rebuild(in: context)
     }
 }

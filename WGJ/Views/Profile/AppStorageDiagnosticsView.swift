@@ -7,8 +7,6 @@ struct AppStorageDiagnosticsView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
-    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
-    @Environment(RestTimerState.self) private var restTimerState
 
     @State private var snapshot = AppStorageSnapshot.empty
     @State private var isLoading = false
@@ -116,7 +114,7 @@ struct AppStorageDiagnosticsView: View {
         VStack(alignment: .leading, spacing: 10) {
             WGJSectionHeader(
                 "Cleanup",
-                subtitle: "Remove temporary files and cached data."
+                subtitle: "Remove cached exercise images and unused backup files."
             )
 
             Button {
@@ -268,12 +266,12 @@ struct AppStorageDiagnosticsView: View {
         isClearing = true
         Task.detached(priority: .utility) {
             do {
-                try AppStorageDiagnosticsService.clearCachesAndTemporaryFiles()
+                try AppStorageCleanupService.clearDisposableFiles()
                 let loadedSnapshot = AppStorageDiagnosticsService.snapshot()
                 await MainActor.run {
                     snapshot = loadedSnapshot
                     isClearing = false
-                    showAlert(title: "Storage Cleared", message: "Disposable cache and temporary files were removed.")
+                    showAlert(title: "Storage Cleared", message: "Cached exercise images and unused backup files were removed.")
                 }
             } catch {
                 await MainActor.run {
@@ -323,7 +321,8 @@ struct AppStorageDiagnosticsView: View {
                     snapshot = loadedSnapshot
                     isRestoringCloudBackup = false
                     if let restoreResult {
-                        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+                        // The root handles the restore event using its original cutoff.
+                        // A workout started during restore must stay visible here.
                         let message = restoreResult.cleanupWarnings.isEmpty
                             ? "CloudKit backup was restored on this device."
                             : "CloudKit backup was restored. Some old local artifacts will be cleaned up automatically on the next launch."
@@ -370,13 +369,6 @@ nonisolated private enum AppStorageDiagnosticsService {
         return AppStorageSnapshot(rows: rows)
     }
 
-    static func clearCachesAndTemporaryFiles(fileManager: FileManager = .default) throws {
-        if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            try removeContents(of: caches, fileManager: fileManager)
-        }
-        try removeContents(of: fileManager.temporaryDirectory, fileManager: fileManager)
-    }
-
     private static func row(title: String, url: URL?, fileManager: FileManager) -> AppStorageRow {
         let contents = files(in: url, fileManager: fileManager) { _ in true }
         return AppStorageRow(
@@ -397,17 +389,6 @@ nonisolated private enum AppStorageDiagnosticsService {
             .sorted { $0.bytes > $1.bytes }
 
         return AppStorageRow(title: "SwiftData Stores", bytes: bytes, files: Array(largestFiles.prefix(25)))
-    }
-
-    private static func removeContents(of directory: URL, fileManager: FileManager) throws {
-        guard fileManager.fileExists(atPath: directory.path) else { return }
-        let contents = try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        )
-        for fileURL in contents {
-            try? fileManager.removeItem(at: fileURL)
-        }
     }
 
     private static func files(

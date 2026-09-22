@@ -12,20 +12,19 @@ nonisolated struct AppDataArtifactCleanupWarning: Equatable, Sendable {
 }
 
 actor AppDataArtifactCleanupQueue {
-    static let shared = AppDataArtifactCleanupQueue { artifact in
+    static let shared = AppDataArtifactCleanupQueue(datedCleanup: { artifact, cutoff in
         switch artifact {
         case .activeWorkoutSnapshot:
-            try await ActiveWorkoutSnapshotStore.shared.invalidateSnapshotsSavedBefore(.now)
-            try await ActiveWorkoutSnapshotStore.shared.delete()
+            try await ActiveWorkoutSnapshotStore.shared.invalidateSnapshotsSavedBefore(cutoff)
         case .weeklyGoalWidgetSnapshot:
             WeeklyGoalWidgetPublisher()?.clear()
         case .exerciseImageCache:
             AppDataDeletionService.removeExerciseImageCacheDirectory()
         }
-    }
+    })
 
     private let defaults: UserDefaults
-    private let cleanup: @Sendable (AppDataArtifact) async throws -> Void
+    private let cleanup: @Sendable (AppDataArtifact, Date) async throws -> Void
     private var pendingRun: Task<[AppDataArtifactCleanupWarning], Never>?
     private var runGeneration: UInt64 = 0
     private var artifactRevisions: [AppDataArtifact: UInt64] = [:]
@@ -36,7 +35,7 @@ actor AppDataArtifactCleanupQueue {
         cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void
     ) {
         self.defaults = defaults
-        self.cleanup = cleanup
+        self.cleanup = { artifact, _ in try await cleanup(artifact) }
     }
 
     init(
@@ -44,10 +43,21 @@ actor AppDataArtifactCleanupQueue {
         cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void
     ) {
         self.defaults = UserDefaults(suiteName: defaultsSuiteName) ?? .standard
-        self.cleanup = cleanup
+        self.cleanup = { artifact, _ in try await cleanup(artifact) }
     }
 
-    func enqueue(_ artifacts: Set<AppDataArtifact>) async -> [AppDataArtifactCleanupWarning] {
+    init(defaults: UserDefaults = .standard,
+         datedCleanup: @escaping @Sendable (AppDataArtifact, Date) async throws -> Void) {
+        self.defaults = defaults
+        self.cleanup = datedCleanup
+    }
+
+    func enqueue(_ artifacts: Set<AppDataArtifact>, before cutoff: Date = .now) async -> [AppDataArtifactCleanupWarning] {
+        var cutoffs = defaults.dictionary(forKey: "appDataArtifactCleanupQueue.cutoffs") as? [String: Double] ?? [:]
+        for artifact in artifacts {
+            cutoffs[artifact.rawValue] = max(cutoffs[artifact.rawValue] ?? -Double.greatestFiniteMagnitude, cutoff.timeIntervalSince1970)
+        }
+        defaults.set(cutoffs, forKey: "appDataArtifactCleanupQueue.cutoffs")
         for artifact in artifacts { artifactRevisions[artifact, default: 0] &+= 1 }
         setPendingArtifacts(pendingArtifacts().union(artifacts))
         return await scheduleRetry()
@@ -80,7 +90,9 @@ actor AppDataArtifactCleanupQueue {
         for artifact in AppDataArtifact.allCases where pending.contains(artifact) {
             let revision = artifactRevisions[artifact, default: 0]
             do {
-                try await cleanup(artifact)
+                let cutoffs = defaults.dictionary(forKey: "appDataArtifactCleanupQueue.cutoffs") as? [String: Double] ?? [:]
+                let cutoff = Date(timeIntervalSince1970: cutoffs[artifact.rawValue] ?? Date.now.timeIntervalSince1970)
+                try await cleanup(artifact, cutoff)
                 if artifactRevisions[artifact, default: 0] == revision {
                     var remaining = pendingArtifacts()
                     remaining.remove(artifact)

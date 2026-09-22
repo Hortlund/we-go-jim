@@ -86,6 +86,7 @@ nonisolated enum ActiveWorkoutSnapshotWriteResult: Equatable, Sendable {
     case written
     case unchanged
     case rejectedStale(currentRevision: UInt64)
+    case rejectedInvalidated
 }
 
 nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
@@ -96,6 +97,12 @@ nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
 
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     var revision: UInt64
+    // Numeric seconds retain subsecond precision independently of the legacy
+    // ISO-8601 date encoder. Nil is accepted only for older snapshot files.
+    var mutationTimestamp: TimeInterval?
+    var mutationDate: Date {
+        max(session.updatedAt, Date(timeIntervalSince1970: mutationTimestamp ?? session.updatedAt.timeIntervalSince1970))
+    }
     var session: ActiveWorkoutRuntimeSession
     var restTimer: RestTimerSnapshot?
     var presentationMode: ActiveWorkoutStoredPresentationMode?
@@ -107,6 +114,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     init(
         revision: UInt64 = 0,
         session: ActiveWorkoutRuntimeSession,
+        mutationDate: Date? = nil,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
@@ -115,6 +123,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
         previousSetSnapshotsByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     ) {
         self.revision = revision
+        self.mutationTimestamp = (mutationDate ?? session.updatedAt).timeIntervalSince1970
         self.session = session
         self.restTimer = restTimer
         self.presentationMode = presentationMode
@@ -126,6 +135,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case revision
+        case mutationTimestamp
         case session
         case restTimer
         case presentationMode
@@ -138,6 +148,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         revision = try container.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
+        mutationTimestamp = try container.decodeIfPresent(TimeInterval.self, forKey: .mutationTimestamp)
         session = try container.decode(ActiveWorkoutRuntimeSession.self, forKey: .session)
         restTimer = try container.decodeIfPresent(RestTimerSnapshot.self, forKey: .restTimer)
         presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
@@ -760,19 +771,25 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             cachedSnapshotData = nil
             return nil
         }
-        if try isSnapshotInvalidated(url) {
+        let data = try Data(contentsOf: url)
+        let snapshot = try decodeSnapshot(data, at: url)
+        if let cutoff = try invalidationCutoff(), snapshot.mutationDate <= cutoff {
             cachedSnapshotData = nil
             try? FileManager.default.removeItem(at: url)
             return nil
         }
-        let data = try Data(contentsOf: url)
         cachedSnapshotData = data
+        return snapshot
+    }
+
+    private func decodeSnapshot(_ data: Data, at url: URL) throws -> ActiveWorkoutStoredSnapshot {
         if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
             return ActiveWorkoutStoredSnapshot(
                 revision: storedSnapshot.revision,
                 session: session,
+                mutationDate: try snapshotMutationDate(storedSnapshot, at: url),
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
                 scrollTarget: storedSnapshot.scrollTarget,
@@ -784,7 +801,18 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
 
         var session = try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
         session.normalizeSetRestToExerciseDefaults()
-        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil, presentationMode: nil, scrollTarget: nil)
+        return ActiveWorkoutStoredSnapshot(session: session, mutationDate: max(session.updatedAt, try legacySnapshotDate(at: url)))
+    }
+
+    private func snapshotMutationDate(_ snapshot: ActiveWorkoutStoredSnapshot, at url: URL) throws -> Date {
+        guard snapshot.mutationTimestamp == nil else { return snapshot.mutationDate }
+        return max(snapshot.session.updatedAt, try legacySnapshotDate(at: url))
+    }
+
+    private func legacySnapshotDate(at url: URL) throws -> Date {
+        // Older versions did not persist presentation/rest-timer mutation times.
+        // Preserve their original file boundary when migrating, never a retry's write time.
+        try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date ?? .distantPast
     }
 
     func save(
@@ -800,6 +828,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         let normalizedSnapshot = ActiveWorkoutStoredSnapshot(
             revision: snapshot.revision,
             session: normalizedSession,
+            mutationDate: snapshot.mutationDate,
             restTimer: snapshot.restTimer?.isExpired == true ? nil : snapshot.restTimer,
             presentationMode: snapshot.presentationMode,
             scrollTarget: snapshot.scrollTarget,
@@ -808,6 +837,9 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             previousSetSnapshotsByExerciseID: snapshot.previousSetSnapshotsByExerciseID
         )
         let currentSnapshot = try loadStoredSnapshot()
+        if let cutoff = try invalidationCutoff(), normalizedSnapshot.mutationDate <= cutoff {
+            return .rejectedInvalidated
+        }
         if let currentRevision = currentSnapshot?.revision,
            normalizedSnapshot.revision < currentRevision {
             return .rejectedStale(currentRevision: currentRevision)
@@ -914,7 +946,9 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         )
         let existingCutoff = try invalidationCutoff()
         let resolvedCutoff = max(existingCutoff ?? .distantPast, cutoff)
-        let markerData = try encoder.encode(resolvedCutoff)
+        // ISO-8601 encoding truncates subsecond cutoffs and can leave a stale
+        // snapshot from the same second eligible for restore.
+        let markerData = try JSONEncoder().encode(resolvedCutoff)
         try markerData.write(to: invalidationURL, options: [.atomic])
 
         let url = snapshotURL
@@ -942,16 +976,14 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         guard FileManager.default.fileExists(atPath: invalidationURL.path) else {
             return nil
         }
-        return try decoder.decode(Date.self, from: Data(contentsOf: invalidationURL))
+        let data = try Data(contentsOf: invalidationURL)
+        if let precise = try? JSONDecoder().decode(Date.self, from: data) { return precise }
+        return try decoder.decode(Date.self, from: data)
     }
 
     private func isSnapshotInvalidated(_ url: URL) throws -> Bool {
         guard let cutoff = try invalidationCutoff() else { return false }
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        guard let modificationDate = attributes[.modificationDate] as? Date else {
-            return true
-        }
-        return modificationDate <= cutoff
+        return try decodeSnapshot(Data(contentsOf: url), at: url).mutationDate <= cutoff
     }
 
     nonisolated private static func defaultBaseDirectory() -> URL {

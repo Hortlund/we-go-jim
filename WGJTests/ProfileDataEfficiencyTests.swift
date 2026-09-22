@@ -5,6 +5,40 @@ import XCTest
 
 @MainActor
 final class ProfileDataEfficiencyTests: XCTestCase {
+    func testAutomaticIdentityAndWidgetSetupDoNotCancelPendingRestore() async throws {
+        let container = try container()
+        let request = BackupLocalJournal.RestoreRequest(account: "test", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: container)
+        do {
+            _ = try await ProfileViewController().loadPublishedProfileIdentity(
+                cloudSyncEnabled: false, backgroundStore: AppBackgroundStore(container: container))
+            XCTFail("Automatic profile creation should defer")
+        } catch is LocalStoreWriteBarrier.RestoreInProgress { }
+        let context = ModelContext(container)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<UserProfile>()), 0)
+        XCTAssertThrowsError(try ProfileWidgetRepository(modelContext: context).enabledConfigurationSnapshots())
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<ProfileWidgetConfig>()), 0)
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.ticket, request.ticket)
+        // An explicit user choice still cancels the queued replacement and saves.
+        try ProfileRepository(modelContext: ModelContext(container)).updateDisplayName("Chosen name")
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: container))
+        XCTAssertEqual(try ProfileRepository(modelContext: ModelContext(container)).currentProfileSnapshot()?.displayName, "Chosen name")
+    }
+
+    func testLateAutomaticCloudNameUpgradeDefersWithoutCancellingRestore() async throws {
+        let container = try container()
+        let profile = try ProfileRepository(modelContext: ModelContext(container))
+            .bootstrapProfileIdentitySnapshot(preferredDisplayName: nil)
+        let provider = SuspendedProfileNameProvider()
+        let task = await AppBackgroundStore(container: container).scheduleProfileNameUpgrade(profile: profile, provider: provider)
+        let request = BackupLocalJournal.RestoreRequest(account: "test", replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: container)
+        await provider.release("Cloud name")
+        await task?.value
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: container)?.ticket, request.ticket)
+        XCTAssertEqual(try ProfileRepository(modelContext: ModelContext(container)).currentProfileSnapshot()?.displayName, "Athlete")
+    }
+
     func testWidgetReorderPersistsDistinctTrendInstancesAndAvoidsNoOpBackup() throws {
         let container = try container()
         let context = ModelContext(container)

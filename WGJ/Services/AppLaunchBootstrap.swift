@@ -70,6 +70,16 @@ final class AppLaunchBootstrapState {
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let bootstrap = try await resolver()
+                try LocalStoreWriteBarrier.exclusively {
+                    try BackupLocalJournal.reconcileRestore(for: bootstrap.container)
+                }
+                // Finish only local committed-restore cleanup before hydration.
+                // ContentView resumes cloud operations after local UI is available.
+                if try BackupLocalJournal.restoreCleanup(for: bootstrap.container) != nil {
+                    _ = try? await UserDataCloudBackupService(localContainer: bootstrap.container,
+                        backupStore: CloudKitUserDataCloudBackupStore()).finishRestoreCleanup()
+                }
+                try PersistentRestoreRecovery.requireHealthyStore(bootstrap.container)
                 guard !Task.isCancelled else { return }
 
                 guard let self else { return }

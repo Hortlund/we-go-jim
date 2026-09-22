@@ -24,7 +24,7 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
     var workoutSets: [WorkoutSetBackup]
     var workoutDropStages: [WorkoutDropStageBackup]
 
-    init(context: ModelContext, sessionID: UUID? = nil, includeShared: Bool = true, includeHistory: Bool = true, templateID: UUID? = nil, includeTemplates: Bool = true) throws {
+    init(context: ModelContext, sessionID: UUID? = nil, sessionIDs: Set<UUID>? = nil, includeShared: Bool = true, includeHistory: Bool = true, templateID: UUID? = nil, includeTemplates: Bool = true) throws {
         profiles = includeShared ? try context.fetch(FetchDescriptor<UserProfile>()).map(BackupProfile.init) : []
         profileWidgets = includeShared ? try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map(BackupProfileWidget.init) : []
         customExercises = includeShared ? try context.fetch(FetchDescriptor<ExerciseCatalogItem>(predicate: #Predicate { $0.sourceName == "custom" })).map(BackupCustomExercise.init) : []
@@ -52,6 +52,10 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
         let completedSessions: [WorkoutSession]
         if !includeHistory {
             completedSessions = []
+        } else if let sessionIDs {
+            completedSessions = sessionIDs.isEmpty ? [] : try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate {
+                sessionIDs.contains($0.id) && $0.statusRaw == completedStatus
+            }))
         } else if let sessionID {
             completedSessions = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate {
                 $0.id == sessionID && $0.statusRaw == completedStatus
@@ -1647,11 +1651,21 @@ nonisolated enum UserDataBackupPayloadCodec {
     }
 
     static func makeChunk(context: ModelContext, sessionID: UUID?, templateID: UUID? = nil) throws -> (Data, UserDataCloudBackupContentSummary) {
-        var payload = try UserDataCloudBackupPayload(
+        let payload = try UserDataCloudBackupPayload(
             context: context, sessionID: sessionID,
             includeShared: sessionID == nil && templateID == nil, includeHistory: sessionID != nil,
             templateID: templateID, includeTemplates: templateID != nil
         )
+        return try encodeChunk(payload)
+    }
+
+    static func makeHistoryChunk(context: ModelContext, sessionIDs: Set<UUID>) throws -> (Data, UserDataCloudBackupContentSummary) {
+        try encodeChunk(UserDataCloudBackupPayload(context: context, sessionIDs: sessionIDs,
+            includeShared: false, includeTemplates: false))
+    }
+
+    private static func encodeChunk(_ input: UserDataCloudBackupPayload) throws -> (Data, UserDataCloudBackupContentSummary) {
+        var payload = input
         payload.generatedAt = .distantPast
         // Only the final representation needs sorted keys. Sorting both encodings
         // doubles that work for every changed workout without changing its digest.
@@ -1673,7 +1687,10 @@ nonisolated enum UserDataBackupPayloadCodec {
         private var scalars: [String: Any] = [:]
 
         func append(_ data: Data) throws {
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let decoded: Any
+            do { decoded = try JSONSerialization.jsonObject(with: data) }
+            catch { throw BackupArchiveError.corruptChunk }
+            guard let object = decoded as? [String: Any],
                   object["schemaVersion"] as? Int == 2 else { throw BackupArchiveError.invalidManifest }
             for (key, value) in object {
                 if let rows = value as? [Any] { arrays[key, default: []].append(contentsOf: rows) }

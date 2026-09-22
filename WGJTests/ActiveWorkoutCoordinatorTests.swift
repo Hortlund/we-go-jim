@@ -3,6 +3,100 @@ import XCTest
 
 @MainActor
 final class ActiveWorkoutCoordinatorTests: XCTestCase {
+    func testRestoreKeepsNewerWorkoutPresentationTimerAndPendingEdits() async throws {
+        for startsNewWorkout in [false, true] {
+            let cutoff = Date.now
+            let oldDate = cutoff.addingTimeInterval(-10)
+            let original = ActiveWorkoutRuntimeSession(name: "Original", updatedAt: oldDate)
+            let store = RecordingActiveWorkoutSnapshotStore(
+                initialSnapshot: ActiveWorkoutStoredSnapshot(session: original, mutationDate: oldDate)
+            )
+            let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+            await coordinator.restore()
+            if startsNewWorkout {
+                coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "New workout")))
+            } else {
+                coordinator.send(.updateMetadata(name: "Edited workout", notes: "Keep these edits"))
+            }
+            let session = try XCTUnwrap(coordinator.storedSnapshot?.session)
+            let presentation = ActiveWorkoutPresentationState()
+            presentation.present(sessionID: session.id)
+            presentation.collapseActiveWorkout()
+            let timer = RestTimerState()
+            let endsAt = Date.now.addingTimeInterval(120)
+            timer.restTimerEndsAt = endsAt
+            timer.restTimerExerciseName = "Pull-up"
+            let sourceSetID = UUID()
+            timer.restTimerSourceSetID = sourceSetID
+
+            presentation.reconcileAfterRestore(savedBefore: cutoff, coordinator: coordinator, restTimerState: timer)
+            await coordinator.flushSnapshot()
+
+            XCTAssertEqual(presentation.activeSessionID, session.id)
+            XCTAssertTrue(presentation.isActiveWorkoutStripCollapsed)
+            XCTAssertEqual(timer.restTimerEndsAt, endsAt)
+            XCTAssertEqual(timer.restTimerSourceSetID, sourceSetID)
+            XCTAssertEqual(coordinator.storedSnapshot?.session, session)
+            let persisted = await store.lastSnapshot()
+            XCTAssertEqual(persisted?.session, session)
+        }
+    }
+
+    func testRestoreClearsOlderWorkoutPresentationAndTimerTogether() {
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: RecordingActiveWorkoutSnapshotStore(), persistence: StubActiveWorkoutPersistence()
+        )
+        let session = ActiveWorkoutRuntimeSession(name: "Before restore")
+        coordinator.send(.start(session), persist: false)
+        let presentation = ActiveWorkoutPresentationState()
+        presentation.present(sessionID: session.id)
+        let timer = RestTimerState()
+        timer.restTimerEndsAt = Date.now.addingTimeInterval(120)
+        timer.restTimerExerciseName = "Pull-up"
+
+        presentation.reconcileAfterRestore(savedBefore: .now, coordinator: coordinator, restTimerState: timer)
+
+        XCTAssertNil(coordinator.storedSnapshot)
+        XCTAssertNil(presentation.activeSessionID)
+        XCTAssertFalse(presentation.isActiveWorkoutPresented)
+        XCTAssertFalse(presentation.isActiveWorkoutStripCollapsed)
+        XCTAssertNil(timer.restTimerEndsAt)
+        XCTAssertNil(timer.restTimerExerciseName)
+    }
+
+    func testRestoreResetUsesPersistedMutationTimeAfterCoordinatorRecreation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let first = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        first.send(.start(ActiveWorkoutRuntimeSession(name: "Keep", updatedAt: .distantPast)))
+        let cutoff = Date.now
+        first.send(.updateScrollOffsetY(100), persist: false)
+        await first.flushSnapshot()
+        let second = ActiveWorkoutCoordinator(snapshotStore: ActiveWorkoutSnapshotStore(baseDirectory: directory),
+            persistence: StubActiveWorkoutPersistence())
+        await second.restore()
+        XCTAssertNotNil(second.storedSnapshot)
+        XCTAssertFalse(second.clearInMemory(savedBefore: cutoff))
+        XCTAssertEqual(second.storedSnapshot?.scrollOffsetY, 100)
+        XCTAssertTrue(second.clearInMemory(savedBefore: .distantFuture))
+    }
+
+    func testRestoreResetPreservesNewerWorkoutEditsAndPendingSave() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence())
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Old")))
+        let cutoff = Date.now
+        coordinator.send(.updateMetadata(name: "Newer edit", notes: "Keep me"))
+        XCTAssertFalse(coordinator.clearInMemory(savedBefore: cutoff))
+        await coordinator.flushSnapshot()
+        let saved = await store.lastSnapshot()
+        XCTAssertEqual(saved?.session.name, "Newer edit")
+        XCTAssertEqual(coordinator.storedSnapshot?.session.notes, "Keep me")
+        XCTAssertTrue(coordinator.clearInMemory(savedBefore: .distantFuture))
+        XCTAssertNil(coordinator.storedSnapshot)
+    }
+
     func testActiveWorkoutCallersDoNotAccessSnapshotStoreDirectly() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

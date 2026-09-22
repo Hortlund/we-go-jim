@@ -45,14 +45,14 @@ nonisolated final class ProfileRepository {
     }
 
     @discardableResult
-    func loadOrCreateProfile() throws -> UserProfile {
+    func loadOrCreateProfile(purpose: LocalStoreSavePurpose = .userEdit) throws -> UserProfile {
         if let existing = try currentProfile() {
             return existing
         }
 
         let profile = UserProfile(displayName: Self.localDefaultDisplayName)
         modelContext.insert(profile)
-        try saveUserDataChanges()
+        try saveUserDataChanges(purpose: purpose)
         return profile
     }
 
@@ -78,7 +78,7 @@ nonisolated final class ProfileRepository {
 
             existing.displayName = preferredDisplayName
             existing.updatedAt = .now
-            try saveUserDataChanges()
+            try saveUserDataChanges(purpose: .maintenance)
             return existing
         }
 
@@ -89,7 +89,7 @@ nonisolated final class ProfileRepository {
         )
         let profile = UserProfile(displayName: preferredDisplayName)
         modelContext.insert(profile)
-        try saveUserDataChanges()
+        try saveUserDataChanges(purpose: .maintenance)
         return profile
     }
 
@@ -121,14 +121,14 @@ nonisolated final class ProfileRepository {
                shouldReplaceDefaultDisplayName(for: existing, with: sanitizedPreferredName) {
                 existing.displayName = sanitizedPreferredName
                 existing.updatedAt = .now
-                try saveUserDataChanges()
+                try saveUserDataChanges(purpose: .maintenance)
             }
             return ProfileIdentitySnapshot(profile: existing)
         }
 
         let profile = UserProfile(displayName: sanitizedPreferredName ?? Self.localDefaultDisplayName)
         modelContext.insert(profile)
-        try saveUserDataChanges()
+        try saveUserDataChanges(purpose: .maintenance)
         return ProfileIdentitySnapshot(profile: profile)
     }
 
@@ -347,7 +347,7 @@ nonisolated final class ProfileRepository {
         return currentName.isEmpty || currentName == Self.localDefaultDisplayName
     }
 
-    private func saveUserDataChanges() throws {
-        try modelContext.saveWithRecoveryProtection()
+    private func saveUserDataChanges(purpose: LocalStoreSavePurpose = .userEdit) throws {
+        try modelContext.saveWithRecoveryProtection(purpose: purpose)
     }
 }
