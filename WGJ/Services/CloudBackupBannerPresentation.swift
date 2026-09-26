@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// Delays activity as one continuous session across cloud checks and transfers.
-/// A fast success stays quiet; failures still surface immediately.
+/// Shows status immediately and delays only the animated activity runner.
+/// Cloud checks and transfers share one continuous activity session.
 @MainActor
 @Observable
 final class CloudBackupBannerPresentation {
@@ -23,28 +23,27 @@ final class CloudBackupBannerPresentation {
     init(delay: Duration = .seconds(1)) { self.delay = delay }
 
     func update(_ input: Input) {
+        let wasSheetPresented = latestInput?.isSheetPresented == true
         latestInput = input
         guard !input.isSheetPresented else { reset(); return }
         let active = input.operationID != nil || input.status.state == .checking || input.status.state == .pending
+        // The sheet already displayed this result; do not repeat it on dismissal.
+        if !active, wasSheetPresented { reset(); return }
         if active {
+            status = input.status
             dismissTask?.cancel()
             if !isActive {
                 isActive = true
-                status = nil
                 showsActivity = false
                 revealTask = Task { [weak self, delay] in
                     try? await Task.sleep(for: delay)
                     guard !Task.isCancelled, let self, self.isActive else { return }
                     self.showsActivity = true
-                    self.status = self.latestInput?.status
                 }
-            } else if showsActivity {
-                status = input.status
             }
             return
         }
 
-        let wasVisible = showsActivity
         isActive = false
         showsActivity = false
         revealTask?.cancel()
@@ -53,8 +52,6 @@ final class CloudBackupBannerPresentation {
         case .localOnly:
             reset()
         case .checked, .backedUp:
-            // Do not flash a success for work that never needed a banner.
-            guard wasVisible else { return }
             showResult(input.status, for: .seconds(3))
         case .checkFailed, .degraded:
             showResult(input.status, for: .seconds(5))
