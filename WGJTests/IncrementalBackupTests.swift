@@ -1,10 +1,143 @@
 import CloudKit
 import SwiftData
 import XCTest
+import os
 @testable import WGJ
 
 @MainActor
 final class IncrementalBackupTests: XCTestCase {
+    func testUnboundAutomaticRestoreRejectsBeforeReservingProgressOrWaitingForGate() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let center = CloudBackupProgressCenter()
+        let request = BackupLocalJournal.RestoreRequest(account: nil, replacingLocalData: true, previousGeneration: false)
+        try BackupLocalJournal.saveRestore(request, for: target)
+        let lookupsBefore = await store.accountLookupCount
+        await BackupOperationGate.shared.acquire()
+        let rejected = expectation(description: "Unbound observer rejects while the operation gate is held")
+        let automatic = Task {
+            defer { rejected.fulfill() }
+            do {
+                _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+                    .resumePendingRestore()
+                XCTFail("Automatic restore must require an explicitly bound account")
+            } catch UserDataCloudRestorePause.accountNotConfirmed { }
+            catch { XCTFail("Unexpected error: \(error)") }
+        }
+        await fulfillment(of: [rejected], timeout: 2)
+        XCTAssertTrue(center.operations.isEmpty)
+        XCTAssertNil(center.presentedOperation)
+        await BackupOperationGate.shared.release()
+        await automatic.value
+        let lookupsAfter = await store.accountLookupCount
+        XCTAssertEqual(lookupsAfter, lookupsBefore)
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
+        let result = try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+            .restoreLatestBackup(replacingLocalData: true)
+        XCTAssertNotNil(result)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        await waitForCleanup()
+    }
+
+    func testAutomaticRestoreRetryReusesVisibleErrorUntilSuccessfulCommit() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let center = CloudBackupProgressCenter()
+        await store.failNextDownload()
+        do {
+            _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+                .restoreLatestBackup(replacingLocalData: true)
+            XCTFail("Expected download failure")
+        } catch ArchiveTestError.publication { }
+        let original = try XCTUnwrap(center.presentedOperation)
+        XCTAssertFalse(original.isRunning)
+        let downloadStarted = expectation(description: "Automatic retry is downloading")
+        await store.pauseDownload(started: downloadStarted)
+        let retry = Task {
+            try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+                .resumePendingRestore()
+        }
+        await fulfillment(of: [downloadStarted], timeout: 5)
+        XCTAssertTrue(center.presentedOperation === original)
+        XCTAssertTrue(original.isRunning)
+        XCTAssertEqual(original.progress.stage, .downloading)
+        XCTAssertEqual(center.operations.count, 1)
+        await store.resumeDownload()
+        let result = try await retry.value
+        XCTAssertNotNil(result)
+        guard case .success = original.outcome else { return XCTFail("Retry did not report success") }
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        await waitForCleanup()
+    }
+
+    func testExportPreparationReportsActualArchivePartCounts() throws {
+        let container = try makeContainer(workouts: 80)
+        let updates = OSAllocatedUnfairLock(initialState: [CloudBackupProgressUpdate]())
+        let reporter = CloudBackupProgressReporter { update in updates.withLock { $0.append(update) } }
+        let plan = try BackupExportPlan.build(container: container, previous: nil, progress: reporter)
+        defer { plan.cleanUp() }
+        let observed = updates.withLock { $0 }
+        XCTAssertEqual(observed.first?.completed, 0)
+        XCTAssertEqual(observed.last?.completed, plan.manifest.chunks.count)
+        XCTAssertEqual(observed.last?.total, plan.manifest.chunks.count)
+        XCTAssertEqual(observed.map(\.completed), (0...plan.manifest.chunks.count).map(Optional.some))
+        XCTAssertTrue(observed.allSatisfy { $0.stage == .preparing })
+    }
+
+    func testRestoreProgressStaysActiveThroughDownloadAndFinishesAfterCommit() async throws {
+        let store = MemoryArchiveStore()
+        let source = try makeContainer(workouts: 2)
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+        let target = try makeContainer(workouts: 0)
+        let center = CloudBackupProgressCenter()
+        let downloadStarted = expectation(description: "Download began")
+        await store.pauseDownload(started: downloadStarted)
+        let restore = Task {
+            try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+                .restoreLatestBackup(replacingLocalData: true)
+        }
+        await fulfillment(of: [downloadStarted], timeout: 5)
+        let operation = try XCTUnwrap(center.presentedOperation)
+        XCTAssertTrue(operation.isRunning)
+        XCTAssertEqual(operation.progress.stage, .downloading)
+        XCTAssertTrue(center.hasForegroundOperation)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 0)
+        let duplicate = try await UserDataCloudBackupService(localContainer: target, backupStore: store, progressCenter: center)
+            .resumePendingRestore()
+        XCTAssertNil(duplicate)
+        XCTAssertEqual(center.operations.count, 1)
+        await store.resumeDownload()
+        _ = try await restore.value
+        XCTAssertFalse(operation.isRunning)
+        XCTAssertFalse(center.hasForegroundOperation)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        guard case .success = operation.outcome else { return XCTFail("Restore did not report success") }
+        XCTAssertEqual(center.presentedOperation?.id, operation.id)
+        await waitForCleanup()
+    }
+
+    func testBackupFailureEndsProgressWithoutClaimingSuccess() async throws {
+        let center = CloudBackupProgressCenter()
+        let store = MemoryArchiveStore()
+        let container = try makeContainer(workouts: 2)
+        await store.failNextPublication()
+        do {
+            _ = try await UserDataCloudBackupService(localContainer: container, backupStore: store, progressCenter: center)
+                .exportCurrentBackup(showsProgress: true)
+            XCTFail("Expected publication failure")
+        } catch { }
+        let operation = try XCTUnwrap(center.presentedOperation)
+        XCTAssertFalse(operation.isRunning)
+        XCTAssertNil(center.activeOperation)
+        guard case .failure = operation.outcome else { return XCTFail("Failure was not presented") }
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        await waitForCleanup()
+    }
+
     func testHistoryAndCatalogMaintenanceDeferDuringPendingRestore() async throws {
         let store = MemoryArchiveStore()
         let source = try makeContainer(workouts: 2)

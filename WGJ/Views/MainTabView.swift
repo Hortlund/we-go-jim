@@ -9,6 +9,7 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isKeyboardVisible = false
+    @State private var backupProgress = CloudBackupProgressCenter.shared
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -106,6 +107,14 @@ struct MainTabView: View {
             .overlay(alignment: .top) {
                 CloudBackupStatusBannerHost(topSafeAreaInset: proxy.safeAreaInsets.top)
                     .ignoresSafeArea(edges: .top)
+            }
+            .sheet(item: $backupProgress.presentedOperation, onDismiss: { backupProgress.didDismiss() }) { operation in
+                CloudBackupProgressSheet(operation: operation)
+            }
+            .task {
+                #if DEBUG
+                await CloudBackupProgressUITestScenario.installIfRequested()
+                #endif
             }
             .fullScreenCover(
                 item: $workoutCompletionPresentationState.presentedWorkout,
@@ -210,6 +219,7 @@ private struct CloudBackupStatusBannerHost: View {
 
     @State private var banner: UserDataSyncStatusSnapshot?
     @State private var dismissTask: Task<Void, Never>?
+    @State private var backupProgress = CloudBackupProgressCenter.shared
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -217,7 +227,7 @@ private struct CloudBackupStatusBannerHost: View {
 
     var body: some View {
         cloudBackupTopBanner
-            .onChange(of: userDataSyncStatus) { _, newValue in
+            .onChange(of: userDataSyncStatus, initial: true) { _, newValue in
                 handleCloudBackupStatusChanged(newValue)
             }
             .onDisappear {
@@ -228,14 +238,27 @@ private struct CloudBackupStatusBannerHost: View {
 
     @ViewBuilder
     private var cloudBackupTopBanner: some View {
-        if let banner {
+        if let operation = backupProgress.activeOperation, backupProgress.presentedOperation == nil {
+            WGJTransientBanner(
+                title: operation.title,
+                message: operation.progress.countDescription.map { "\(operation.progress.stage.rawValue) \($0)" } ?? operation.progress.stage.rawValue,
+                icon: operation.kind == .backup ? "icloud.and.arrow.up" : "icloud.and.arrow.down",
+                tint: WGJTheme.accentBlue,
+                style: .topDocked,
+                topInset: topSafeAreaInset,
+                showsActivity: operation.progress.stage != .waiting
+            )
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("cloud-backup-status-banner")
+        } else if let banner, backupProgress.presentedOperation == nil {
             WGJTransientBanner(
                 title: cloudBackupBannerTitle(for: banner),
                 message: cloudBackupBannerMessage(for: banner),
                 icon: cloudBackupBannerIcon(for: banner),
                 tint: cloudBackupBannerTint(for: banner),
                 style: .topDocked,
-                topInset: topSafeAreaInset
+                topInset: topSafeAreaInset,
+                showsActivity: banner.state == .checking || banner.state == .pending
             )
             .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
