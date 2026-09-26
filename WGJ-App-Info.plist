@@ -1,23 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>$(WGJ_APP_DISPLAY_NAME)</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>WGJ Template</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.hortlund.wgj.template</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>WGJAppEnvironment</key>
-	<string>$(WGJ_APP_ENVIRONMENT)</string>
-	<key>WGJAppGroupIdentifier</key>
-	<string>$(WGJ_APP_GROUP_IDENTIFIER)</string>
-	<key>WGJCloudKitEnvironment</key>
-	<string>$(WGJ_CLOUDKIT_ENVIRONMENT)</string>
-	<key>WGJCloudKitContainerIdentifier</key>
-	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
-	<key>WGJURLScheme</key>
-	<string>$(WGJ_URL_SCHEME)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -37,51 +42,16 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleDocumentTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeName</key>
-			<string>WGJ Template</string>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>LSHandlerRank</key>
-			<string>Owner</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>com.hortlund.wgj.template</string>
-			</array>
-		</dict>
-	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save workout images to your photo library.</string>
-	<key>UTExportedTypeDeclarations</key>
-	<array>
-		<dict>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.json</string>
-			</array>
-			<key>UTTypeDescription</key>
-			<string>WGJ Template</string>
-			<key>UTTypeIdentifier</key>
-			<string>com.hortlund.wgj.template</string>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>wgjtemplate</string>
-				</array>
-			</dict>
-		</dict>
-	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -107,5 +77,35 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>WGJ Template</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.hortlund.wgj.template</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wgjtemplate</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>WGJAppEnvironment</key>
+	<string>$(WGJ_APP_ENVIRONMENT)</string>
+	<key>WGJAppGroupIdentifier</key>
+	<string>$(WGJ_APP_GROUP_IDENTIFIER)</string>
+	<key>WGJCloudKitContainerIdentifier</key>
+	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
+	<key>WGJCloudKitEnvironment</key>
+	<string>$(WGJ_CLOUDKIT_ENVIRONMENT)</string>
+	<key>WGJURLScheme</key>
+	<string>$(WGJ_URL_SCHEME)</string>
 </dict>
 </plist>
