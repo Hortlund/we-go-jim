@@ -92,6 +92,7 @@ extension UserDataCloudBackupContentSummary {
 }
 
 nonisolated protocol UserDataCloudBackupStoring: Sendable {
+    func reportingProgress(_ progress: CloudBackupProgressReporter) -> any UserDataCloudBackupStoring
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord, expectedUpdatedAt: Date?) async throws
     func deleteBackup() async throws
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord?
@@ -101,6 +102,7 @@ nonisolated protocol UserDataCloudBackupStoring: Sendable {
 }
 
 extension UserDataCloudBackupStoring {
+    nonisolated func reportingProgress(_ progress: CloudBackupProgressReporter) -> any UserDataCloudBackupStoring { self }
     nonisolated func accountIdentifier() async throws -> String { "local-test-store" }
     nonisolated func fetchPreviousBackup() async throws -> UserDataCloudBackupRemoteRecord? { nil }
 }
@@ -138,6 +140,7 @@ nonisolated enum UserDataCloudBackupDescriptor {
 
 nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     case manual
+    case retry
     case workoutCompleted
     case workoutCompletionTemplateSaved
     case workoutDeleted
@@ -152,6 +155,8 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
         switch self {
         case .manual:
             return "manual backup"
+        case .retry:
+            return "backup retry"
         case .workoutCompleted:
             return "workout completion"
         case .workoutCompletionTemplateSaved:
@@ -217,7 +222,7 @@ nonisolated enum BoundaryCloudBackupScheduler {
                 guard !Task.isCancelled,
                       let current = try? BackupLocalJournal.pending(for: container),
                       current.ticket == pending.ticket, current.retryAfter <= .now else { return }
-                await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: .manual, sessionRevision: revision)
+                await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: .retry, sessionRevision: revision)
             }
         } catch { reportJournalFailure(error) }
     }
@@ -325,7 +330,7 @@ actor BoundaryCloudBackupExportQueue {
         var completions = pendingRequest?.completions ?? []
         if let completion { completions.append(completion) }
         pendingRequest = BoundaryCloudBackupRequest(
-            container: container, reason: reason, sessionRevision: sessionRevision, completions: completions
+            container: container, reason: completions.isEmpty ? reason : .manual, sessionRevision: sessionRevision, completions: completions
         )
         guard !isProcessing else { return }
 
@@ -363,7 +368,7 @@ actor BoundaryCloudBackupExportQueue {
             let exportedSnapshot = try await UserDataCloudBackupService(
                 localContainer: container,
                 backupStore: CloudKitUserDataCloudBackupStore()
-            ).exportCurrentBackup(expectedSessionRevision: sessionRevision)
+            ).exportCurrentBackup(expectedSessionRevision: sessionRevision, showsProgress: reason == .manual)
             await MainActor.run {
                 AppRuntimeState.shared.recordSuccessfulCloudBackup(exportedSnapshot, sessionRevision: sessionRevision)
             }
@@ -429,22 +434,40 @@ nonisolated final class UserDataCloudBackupService {
     private let backupStore: any UserDataCloudBackupStoring
     private let restoreTransaction: UserDataCloudRestoreTransaction
     private let artifactCleanupQueue: AppDataArtifactCleanupQueue
+    private let progressCenter: CloudBackupProgressCenter?
 
     init(
         localContainer: ModelContainer,
         backupStore: any UserDataCloudBackupStoring,
         restoreTransaction: UserDataCloudRestoreTransaction? = nil,
-        artifactCleanupQueue: AppDataArtifactCleanupQueue = .shared
+        artifactCleanupQueue: AppDataArtifactCleanupQueue = .shared,
+        progressCenter: CloudBackupProgressCenter? = nil
     ) {
         self.localContainer = localContainer
         self.backupStore = backupStore
         self.restoreTransaction = restoreTransaction
             ?? UserDataCloudRestoreTransaction(container: localContainer)
         self.artifactCleanupQueue = artifactCleanupQueue
+        self.progressCenter = progressCenter
     }
 
     @discardableResult
-    func exportCurrentBackup(replacingRemote: Bool = false, expectedSessionRevision: Int? = nil) async throws -> UserDataCloudBackupRemoteSnapshot {
+    func exportCurrentBackup(replacingRemote: Bool = false, expectedSessionRevision: Int? = nil, showsProgress: Bool = false) async throws -> UserDataCloudBackupRemoteSnapshot {
+        let center = await MainActor.run { [progressCenter] in progressCenter ?? CloudBackupProgressCenter.shared }
+        let operation = await center.begin(kind: .backup, foreground: showsProgress || replacingRemote)
+        let progress = await operation.reporter
+        do {
+            let result = try await exportBackup(replacingRemote: replacingRemote, expectedSessionRevision: expectedSessionRevision, progress: progress)
+            await center.finish(operation, outcome: .success("Your saved data is backed up to iCloud."))
+            return result
+        } catch {
+            await center.finish(operation, outcome: .failure("Your data is still saved on this device. \(error.localizedDescription)"))
+            throw error
+        }
+    }
+
+    private func exportBackup(replacingRemote: Bool, expectedSessionRevision: Int?, progress: CloudBackupProgressReporter) async throws -> UserDataCloudBackupRemoteSnapshot {
+        let backupStore = backupStore.reportingProgress(progress)
         let trace = WGJPerformance.begin("backup.export")
         defer { WGJPerformance.end(trace) }
         if replacingRemote {
@@ -480,6 +503,7 @@ nonisolated final class UserDataCloudBackupService {
         }
         let lease = await CloudBackupBackgroundLease.begin()
         defer { Task { @MainActor in lease.end() } }
+        progress(.checking)
         let account = try await backupStore.accountIdentifier()
         var state = try BackupLocalJournal.state(for: localContainer)
         let pending = try BackupLocalJournal.pending(for: localContainer)
@@ -527,11 +551,12 @@ nonisolated final class UserDataCloudBackupService {
             state.attemptedManifest = nil
         }
 
+        progress(.preparing)
         let snapshot: UserDataCloudBackupRemoteSnapshot
         if let archive = backupStore as? any IncrementalBackupStoring {
             let previous = state.manifest?.generation == remote?.generation ? state.manifest : try await archive.fetchManifest()
             guard previous?.generation == remote?.generation else { throw UserDataCloudBackupSafetyError.remoteChanged }
-            let plan = try BackupExportPlan.build(container: localContainer, previous: previous, attempted: state.attemptedManifest)
+            let plan = try BackupExportPlan.build(container: localContainer, previous: previous, attempted: state.attemptedManifest, progress: progress)
             defer { plan.cleanUp() }
             if let previous, previous.chunks == plan.manifest.chunks, state.attemptedManifest == nil {
                 // Avoid advancing retention or uploading manifests for a no-op save.
@@ -555,6 +580,7 @@ nonisolated final class UserDataCloudBackupService {
             state.account = account
             state.attemptedManifest = plan.manifest
             try BackupLocalJournal.save(state, for: localContainer)
+            progress(.uploading)
             try await WGJPerformance.measureAsync("backup.upload") {
                 try await archive.saveArchive(plan.manifest, chunkFiles: plan.chunkFiles, expectedGeneration: previous?.generation, expectedAccount: account)
             }
@@ -564,11 +590,13 @@ nonisolated final class UserDataCloudBackupService {
             snapshot = UserDataCloudBackupRemoteSnapshot(updatedAt: plan.manifest.updatedAt, contentSummary: plan.manifest.summary)
         } else {
             let (record, exported) = try makeExportRecord()
+            progress(.uploading)
             try await backupStore.saveBackup(record, expectedUpdatedAt: remote?.updatedAt)
             state.legacyUpdatedAt = record.updatedAt
             state.account = account
             snapshot = exported
         }
+        progress(.finishing)
         try BackupLocalJournal.save(state, for: localContainer)
         if let pending { try BackupLocalJournal.finish(pending, for: localContainer) }
         acknowledgedCleanup = state
@@ -662,6 +690,34 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     private func resumeRestore(_ original: BackupLocalJournal.RestoreRequest, bindingSessionRevision: Int? = nil) async throws -> UserDataCloudBackupRestoreResult? {
+        guard try BackupLocalJournal.restoreRequest(for: localContainer)?.ticket == original.ticket else { return nil }
+        // An automatic observer must not reserve an unbound request ahead of
+        // the explicit call that is allowed to bind its iCloud account. Keep the
+        // checks inside the gate too, since the durable request can change.
+        guard original.requiresExplicitRetry != true else { throw UserDataCloudRestorePause.localSaveFailed }
+        guard original.account != nil || bindingSessionRevision != nil else { throw UserDataCloudRestorePause.accountNotConfirmed }
+        let center = await MainActor.run { [progressCenter] in progressCenter ?? CloudBackupProgressCenter.shared }
+        // Foreground/launch hooks can observe the same durable request while its
+        // first download is still running. Keep one operation and one result UI.
+        guard let operation = await center.beginRestore(requestID: original.ticket, foreground: true) else { return nil }
+        let progress = await operation.reporter
+        do {
+            let result = try await performRestore(original, bindingSessionRevision: bindingSessionRevision, progress: progress)
+            let message = result.map { result in
+                result.cleanupWarnings.isEmpty
+                    ? "Your backup has been restored on this device."
+                    : "Your backup has been restored. Some old local files will be cleaned up automatically on the next launch."
+            } ?? "No backup was restored. Check your cloud backup and try again."
+            await center.finish(operation, outcome: result == nil ? .failure(message) : .success(message))
+            return result
+        } catch {
+            await center.finish(operation, outcome: .failure(error.localizedDescription))
+            throw error
+        }
+    }
+
+    private func performRestore(_ original: BackupLocalJournal.RestoreRequest, bindingSessionRevision: Int?, progress: CloudBackupProgressReporter) async throws -> UserDataCloudBackupRestoreResult? {
+        let backupStore = backupStore.reportingProgress(progress)
         await BackupOperationGate.shared.acquire()
         defer { Task { await BackupOperationGate.shared.release() } }
         let lease = await CloudBackupBackgroundLease.begin()
@@ -676,6 +732,7 @@ nonisolated final class UserDataCloudBackupService {
             if let bindingSessionRevision, bindingSessionRevision != sessionRevision {
                 throw UserDataCloudBackupSafetyError.accountChanged
             }
+            progress(.checking)
             let account = try await backupStore.accountIdentifier()
             guard await AppRuntimeState.shared.cloudBackupSessionRevision == sessionRevision else {
                 throw UserDataCloudBackupSafetyError.accountChanged
@@ -688,10 +745,12 @@ nonisolated final class UserDataCloudBackupService {
             request.head = headMetadata
             request.pinned = true
             try updateRestore(request)
+            progress(.downloading)
             guard let record = try await (request.previousGeneration ? backupStore.fetchPreviousBackup() : backupStore.fetchBackup()) else {
                 try clearRestore(request.ticket)
                 return nil
             }
+            progress(.validating)
             let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
             try payload.validate()
             if !request.replacingLocalData {
@@ -710,7 +769,8 @@ nonisolated final class UserDataCloudBackupService {
                 garbageRecords: cleanup.isEmpty ? nil : cleanup)
             request.pendingBeforeCommit = try BackupLocalJournal.pending(for: localContainer)
             try updateRestore(request)
-            try restoreTransaction.commit(replacingLocalData: request.replacingLocalData, restoreTicket: request.ticket, replacementPayload: payload,
+            progress(.restoring)
+            try restoreTransaction.commit(replacingLocalData: request.replacingLocalData, restoreTicket: request.ticket, replacementPayload: payload, progress: progress,
                 mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
                 relinkRelationships: { try payload.relinkRelationships(in: $0) })
             try LocalStoreWriteBarrier.exclusively {
@@ -729,6 +789,7 @@ nonisolated final class UserDataCloudBackupService {
                 NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil,
                     userInfo: ["cleanupBefore": request.cleanupBefore])
             }
+            progress(.finishing)
             let cleanupWarnings = try await finishRestoreCleanup()
             await MainActor.run {
                 AppRuntimeState.shared.recordSuccessfulCloudBackup(.init(updatedAt: record.updatedAt,
@@ -812,6 +873,13 @@ nonisolated struct CloudKitUserDataCloudBackupStore: IncrementalBackupStoring {
 
     let database: CKDatabase?
     let cloudContainer: CKContainer?
+    var progress = CloudBackupProgressReporter()
+
+    func reportingProgress(_ progress: CloudBackupProgressReporter) -> any UserDataCloudBackupStoring {
+        var store = self
+        store.progress = progress
+        return store
+    }
 
     init(container: CKContainer? = nil) {
         self.cloudContainer = container ?? AppRuntimeConfig.makeCloudKitContainer()

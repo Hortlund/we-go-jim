@@ -51,6 +51,7 @@ extension CloudKitUserDataCloudBackupStore {
         try manifest.validate()
         let combiner = UserDataBackupPayloadCodec.Combiner()
         let database = try requireDatabase()
+        progress(.downloading, completed: 0, total: manifest.chunks.count)
         for offset in stride(from: 0, to: manifest.chunks.count, by: 50) {
             try Task.checkCancellation()
             let references = manifest.chunks[offset..<min(offset + 50, manifest.chunks.count)]
@@ -64,6 +65,7 @@ extension CloudKitUserDataCloudBackupStore {
                 guard BackupArchiveCodec.digest(data) == reference.digest else { throw BackupArchiveError.corruptChunk }
                 try combiner.append(data)
             }
+            progress(.downloading, completed: min(offset + 50, manifest.chunks.count), total: manifest.chunks.count)
         }
         return UserDataCloudBackupRemoteRecord(
             updatedAt: manifest.updatedAt,
@@ -109,6 +111,7 @@ extension CloudKitUserDataCloudBackupStore {
 
         // Files are bounded to changed aggregates and uploaded in small batches.
         let files = chunkFiles.sorted { $0.key < $1.key }
+        progress(.uploading, completed: 0, total: files.count)
         for offset in stride(from: 0, to: files.count, by: 50) {
             try Task.checkCancellation()
             guard try await accountIdentifier() == expectedAccount else { throw UserDataCloudBackupSafetyError.accountChanged }
@@ -126,8 +129,10 @@ extension CloudKitUserDataCloudBackupStore {
                 guard let result = results.saveResults[record.recordID] else { throw BackupArchiveError.missingChunk }
                 _ = try result.get()
             }
+            progress(.uploading, completed: min(offset + 50, files.count), total: files.count)
         }
 
+        progress(.finishing)
         let url = try BackupTemporaryFiles.write(BackupArchiveCodec.encode(BackupArchiveCodec.json(manifest)), prefix: "WGJManifest-")
         defer { BackupTemporaryFiles.remove(url) }
         let generationRecord = CKRecord(

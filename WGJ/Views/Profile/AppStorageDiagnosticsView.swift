@@ -341,6 +341,8 @@ struct AppStorageDiagnosticsView: View {
     }
 
     private func showAlert(title: String, message: String) {
+        // The progress sheet owns the backup/restore result while it is visible.
+        guard CloudBackupProgressCenter.shared.presentedOperation == nil else { return }
         alertTitle = title
         alertMessage = message
         showingAlert = true

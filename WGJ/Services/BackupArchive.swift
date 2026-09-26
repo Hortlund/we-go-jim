@@ -389,7 +389,7 @@ nonisolated struct BackupExportPlan {
 
     func cleanUp() { BackupTemporaryFiles.remove(temporaryDirectory) }
 
-    static func build(container: ModelContainer, previous: BackupManifest?, attempted: BackupManifest? = nil) throws -> Self {
+    static func build(container: ModelContainer, previous: BackupManifest?, attempted: BackupManifest? = nil, progress: CloudBackupProgressReporter = .init()) throws -> Self {
         try WGJPerformance.measure("backup.plan") {
             let context = ModelContext(container)
             context.autosaveEnabled = false
@@ -404,7 +404,14 @@ nonisolated struct BackupExportPlan {
                 var files: [String: URL] = [:]
                 var rawBytes = 0
                 var compressedBytes = 0
+                let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>()).sorted(by: { $0.id.uuidString < $1.id.uuidString })
+                let completed = WorkoutSessionStatus.completed.rawValue
+                let sessions = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.statusRaw == completed }))
+                let historyBatches = try BackupHistoryBatch.make(sessions)
+                let totalParts = 1 + templates.count + historyBatches.count
+                progress(.preparing, completed: 0, total: totalParts)
                 func append(key: String, updatedAt: Date, fingerprint: String? = nil, payload: () throws -> (Data, UserDataCloudBackupContentSummary)) throws {
+                    defer { progress(.preparing, completed: chunks.count, total: totalParts) }
                     if key != "shared", let cached = old[key],
                        fingerprint.map({ cached.sourceFingerprint == $0 }) ?? (cached.sourceUpdatedAt == updatedAt) {
                         chunks.append(cached)
@@ -434,14 +441,12 @@ nonisolated struct BackupExportPlan {
                 try append(key: "shared", updatedAt: .distantPast) {
                     try UserDataBackupPayloadCodec.makeChunk(context: context, sessionID: nil)
                 }
-                for template in try context.fetch(FetchDescriptor<WorkoutTemplate>()).sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+                for template in templates {
                     try append(key: "template-\(template.id.uuidString)", updatedAt: template.updatedAt) {
                         try UserDataBackupPayloadCodec.makeChunk(context: context, sessionID: nil, templateID: template.id)
                     }
                 }
-                let completed = WorkoutSessionStatus.completed.rawValue
-                let sessions = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.statusRaw == completed }))
-                for batch in try BackupHistoryBatch.make(sessions) {
+                for batch in historyBatches {
                     try append(key: batch.key, updatedAt: batch.updatedAt, fingerprint: batch.fingerprint) {
                         try UserDataBackupPayloadCodec.makeHistoryChunk(context: context, sessionIDs: Set(batch.entries.map(\.id)))
                     }

@@ -4,9 +4,10 @@ nonisolated enum WorkoutIdleTimerPolicy {
     static func shouldDisableIdleTimer(
         isSceneActive: Bool,
         keepsScreenAwake: Bool,
-        hasActiveWorkout: Bool
+        hasActiveWorkout: Bool,
+        hasForegroundBackupOperation: Bool = false
     ) -> Bool {
-        isSceneActive && keepsScreenAwake && hasActiveWorkout
+        isSceneActive && (hasForegroundBackupOperation || (keepsScreenAwake && hasActiveWorkout))
     }
 }
 
@@ -29,12 +30,14 @@ nonisolated final class WorkoutIdleTimerController {
     func update(
         isSceneActive: Bool,
         keepsScreenAwake: Bool,
-        hasActiveWorkout: Bool
+        hasActiveWorkout: Bool,
+        hasForegroundBackupOperation: Bool = false
     ) {
         let nextValue = WorkoutIdleTimerPolicy.shouldDisableIdleTimer(
             isSceneActive: isSceneActive,
             keepsScreenAwake: keepsScreenAwake,
-            hasActiveWorkout: hasActiveWorkout
+            hasActiveWorkout: hasActiveWorkout,
+            hasForegroundBackupOperation: hasForegroundBackupOperation
         )
         guard nextValue != currentValue else { return }
         currentValue = nextValue

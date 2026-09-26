@@ -765,6 +765,7 @@ struct WGJTransientBanner: View {
     var tint: Color = WGJTheme.success
     var style: Style = .floating
     var topInset: CGFloat = 0
+    var showsActivity = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -797,6 +798,13 @@ struct WGJTransientBanner: View {
         .padding(.top, style == .topDocked ? topInset + 12 : 14)
         .padding(.bottom, style == .topDocked ? 16 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            if showsActivity {
+                WGJActivityRunner(tint: tint)
+                    .padding(.horizontal, style == .topDocked ? 20 : 14)
+                    .padding(.bottom, 4)
+            }
+        }
         .background {
             bannerShape
                 .fill(WGJTheme.cardStrong.opacity(style == .topDocked ? 0.94 : 0.96))

@@ -122,6 +122,9 @@ struct ContentView: View {
         .onChange(of: appRuntimeState.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
         }
+        .onChange(of: CloudBackupProgressCenter.shared.hasForegroundOperation) { _, _ in
+            updateIdleTimerState()
+        }
         .onChange(of: activeWorkoutCoordinator.storedSnapshot?.session.id) { _, _ in
             updateIdleTimerState()
         }
@@ -863,7 +866,8 @@ struct ContentView: View {
         workoutIdleTimerController.update(
             isSceneActive: scenePhase == .active,
             keepsScreenAwake: appRuntimeState.keepsScreenAwake,
-            hasActiveWorkout: activeWorkoutCoordinator.storedSnapshot != nil
+            hasActiveWorkout: activeWorkoutCoordinator.storedSnapshot != nil,
+            hasForegroundBackupOperation: CloudBackupProgressCenter.shared.hasForegroundOperation
         )
     }
 }

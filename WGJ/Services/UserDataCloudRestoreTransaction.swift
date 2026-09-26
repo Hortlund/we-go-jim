@@ -48,11 +48,12 @@ nonisolated final class UserDataCloudRestoreTransaction {
         replacingLocalData: Bool,
         restoreTicket: UUID? = nil,
         replacementPayload: UserDataCloudBackupPayload? = nil,
+        progress: CloudBackupProgressReporter = .init(),
         mergeDatabaseGraph: (ModelContext) throws -> Void,
         relinkRelationships: (ModelContext) throws -> Void
     ) throws {
         try LocalStoreWriteBarrier.exclusively {
-            try commitExclusively(replacingLocalData: replacingLocalData, restoreTicket: restoreTicket, replacementPayload: replacementPayload,
+            try commitExclusively(replacingLocalData: replacingLocalData, restoreTicket: restoreTicket, replacementPayload: replacementPayload, progress: progress,
                 mergeDatabaseGraph: mergeDatabaseGraph, relinkRelationships: relinkRelationships)
         }
     }
@@ -61,6 +62,7 @@ nonisolated final class UserDataCloudRestoreTransaction {
         replacingLocalData: Bool,
         restoreTicket: UUID? = nil,
         replacementPayload: UserDataCloudBackupPayload? = nil,
+        progress: CloudBackupProgressReporter,
         mergeDatabaseGraph: (ModelContext) throws -> Void,
         relinkRelationships: (ModelContext) throws -> Void
     ) throws {
@@ -84,11 +86,13 @@ nonisolated final class UserDataCloudRestoreTransaction {
             try dependencies.checkpoint(.afterGraphMerge)
             try relinkRelationships(context)
             try dependencies.checkpoint(.afterRelationshipLink)
+            progress(.rebuilding)
             try rebuildCompletedSessionSummariesAndFacts(in: context)
             try dependencies.checkpoint(.afterProjectionRebuild)
             try dependencies.checkpoint(.beforeSave)
 
             if context.hasChanges {
+                progress(.saving)
                 attemptedSave = true
                 try dependencies.save(context)
             }
