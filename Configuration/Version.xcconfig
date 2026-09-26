@@ -1,3 +1,3 @@
 // Version shared by the app, widget, and test bundles in every configuration.
-MARKETING_VERSION = 1.4.4
+MARKETING_VERSION = 1.4.5
 CURRENT_PROJECT_VERSION = 1
