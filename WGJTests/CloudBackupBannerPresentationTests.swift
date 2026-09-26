@@ -3,14 +3,19 @@ import XCTest
 
 @MainActor
 final class CloudBackupBannerPresentationTests: XCTestCase {
-    func testFastCheckAndBackupDoNotFlashActivityOrSuccess() async throws {
+    func testFastCheckAndBackupShowStatusAndSuccessWithoutAnimation() async throws {
         let presentation = CloudBackupBannerPresentation(delay: .milliseconds(50))
         presentation.update(input(.checking))
+        XCTAssertEqual(presentation.status?.state, .checking)
+        XCTAssertFalse(presentation.showsActivity)
         presentation.update(input(.pending, operationID: UUID()))
+        XCTAssertEqual(presentation.status?.state, .pending)
+        XCTAssertFalse(presentation.showsActivity)
         presentation.update(input(.backedUp))
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertFalse(presentation.showsActivity)
-        XCTAssertNil(presentation.status)
+        XCTAssertEqual(presentation.status?.state, .backedUp)
+        presentation.reset()
     }
 
     func testSlowActivitySurvivesStageChangesAndShowsCompletion() async throws {

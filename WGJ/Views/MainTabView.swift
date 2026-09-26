@@ -241,7 +241,7 @@ private struct CloudBackupStatusBannerHost: View {
 
     @ViewBuilder
     private var cloudBackupTopBanner: some View {
-        if let operation = backupProgress.activeOperation, presentation.showsActivity, backupProgress.presentedOperation == nil {
+        if let operation = backupProgress.activeOperation, backupProgress.presentedOperation == nil {
             WGJTransientBanner(
                 title: operation.title,
                 message: operation.progress.countDescription.map { "\(operation.progress.stage.rawValue) \($0)" } ?? operation.progress.stage.rawValue,
@@ -249,7 +249,7 @@ private struct CloudBackupStatusBannerHost: View {
                 tint: WGJTheme.accentBlue,
                 style: .topDocked,
                 topInset: topSafeAreaInset,
-                showsActivity: operation.progress.stage != .waiting
+                showsActivity: presentation.showsActivity && operation.progress.stage != .waiting
             )
             .allowsHitTesting(false)
             .accessibilityIdentifier("cloud-backup-status-banner")
@@ -261,7 +261,7 @@ private struct CloudBackupStatusBannerHost: View {
                 tint: cloudBackupBannerTint(for: banner),
                 style: .topDocked,
                 topInset: topSafeAreaInset,
-                showsActivity: banner.state == .checking || banner.state == .pending
+                showsActivity: presentation.showsActivity && (banner.state == .checking || banner.state == .pending)
             )
             .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
