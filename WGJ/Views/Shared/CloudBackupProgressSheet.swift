@@ -3,19 +3,23 @@ import SwiftUI
 struct CloudBackupProgressSheet: View {
     @Environment(\.dismiss) private var dismiss
     let operation: CloudBackupOperation
+    @State private var contentHeight: CGFloat = 360
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(spacing: 24) {
                 Image(systemName: symbol)
-                    .font(.system(size: 36, weight: .medium))
+                    .font(.system(size: 32, weight: .medium))
                     .foregroundStyle(tint)
+                    .frame(width: 72, height: 72)
+                    .background(tint.opacity(0.12), in: Circle())
                     .accessibilityHidden(true)
 
                 Text(operation.title)
                     .font(.title2.bold())
                     .foregroundStyle(WGJTheme.textPrimary)
                     .accessibilityAddTraits(.isHeader)
+                    .multilineTextAlignment(.center)
 
                 if operation.isRunning {
                     VStack(alignment: .leading, spacing: 12) {
@@ -42,16 +46,26 @@ struct CloudBackupProgressSheet: View {
                     Text(resultMessage)
                         .font(.body)
                         .foregroundStyle(WGJTheme.textSecondary)
-                    Button("Done") { dismiss() }
+                    Button { dismiss() } label: {
+                        Text("Done").frame(maxWidth: .infinity)
+                    }
                         .buttonStyle(WGJPrimaryButtonStyle())
                         .accessibilityIdentifier("cloud-backup-progress-done")
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(28)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.top, 32)
+            .padding(.bottom, 24)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                contentHeight = max(300, height)
+            }
         }
         .background(WGJTheme.bgBase)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.height(contentHeight), .large])
         .presentationDragIndicator(operation.isRunning ? .hidden : .visible)
         .interactiveDismissDisabled(operation.isRunning)
         .accessibilityIdentifier("cloud-backup-progress-sheet")

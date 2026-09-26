@@ -217,28 +217,31 @@ private struct CloudBackupStatusBannerHost: View {
 
     let topSafeAreaInset: CGFloat
 
-    @State private var banner: UserDataSyncStatusSnapshot?
-    @State private var dismissTask: Task<Void, Never>?
+    @State private var presentation = CloudBackupBannerPresentation()
     @State private var backupProgress = CloudBackupProgressCenter.shared
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
     }
 
+    private var presentationInput: CloudBackupBannerPresentation.Input {
+        .init(status: userDataSyncStatus, operationID: backupProgress.activeOperation?.id,
+              isSheetPresented: backupProgress.presentedOperation != nil)
+    }
+
     var body: some View {
         cloudBackupTopBanner
-            .onChange(of: userDataSyncStatus, initial: true) { _, newValue in
-                handleCloudBackupStatusChanged(newValue)
+            .onChange(of: presentationInput, initial: true) { _, input in
+                presentation.update(input)
             }
-            .onDisappear {
-                dismissTask?.cancel()
-                dismissTask = nil
-            }
+            .onDisappear { presentation.reset() }
+            .animation(overlayAnimation, value: presentation.showsActivity)
+            .animation(overlayAnimation, value: presentation.status)
     }
 
     @ViewBuilder
     private var cloudBackupTopBanner: some View {
-        if let operation = backupProgress.activeOperation, backupProgress.presentedOperation == nil {
+        if let operation = backupProgress.activeOperation, presentation.showsActivity, backupProgress.presentedOperation == nil {
             WGJTransientBanner(
                 title: operation.title,
                 message: operation.progress.countDescription.map { "\(operation.progress.stage.rawValue) \($0)" } ?? operation.progress.stage.rawValue,
@@ -250,7 +253,7 @@ private struct CloudBackupStatusBannerHost: View {
             )
             .allowsHitTesting(false)
             .accessibilityIdentifier("cloud-backup-status-banner")
-        } else if let banner, backupProgress.presentedOperation == nil {
+        } else if let banner = presentation.status, backupProgress.presentedOperation == nil {
             WGJTransientBanner(
                 title: cloudBackupBannerTitle(for: banner),
                 message: cloudBackupBannerMessage(for: banner),
@@ -263,41 +266,7 @@ private struct CloudBackupStatusBannerHost: View {
             .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
             .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(overlayAnimation, value: banner)
             .accessibilityIdentifier("cloud-backup-status-banner")
-        }
-    }
-
-    private func handleCloudBackupStatusChanged(_ status: UserDataSyncStatusSnapshot) {
-        switch status.state {
-        case .localOnly:
-            dismissTask?.cancel()
-            dismissTask = nil
-            withAnimation(overlayAnimation) {
-                banner = nil
-            }
-        case .pending, .checking:
-            dismissTask?.cancel()
-            dismissTask = nil
-            withAnimation(overlayAnimation) {
-                banner = status
-            }
-        case .checked, .backedUp, .checkFailed, .degraded:
-            withAnimation(overlayAnimation) {
-                banner = status
-            }
-            scheduleDismiss(after: status.state == .checked || status.state == .backedUp ? 3 : 5)
-        }
-    }
-
-    private func scheduleDismiss(after seconds: UInt64) {
-        dismissTask?.cancel()
-        dismissTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled else { return }
-            withAnimation(overlayAnimation) {
-                banner = nil
-            }
         }
     }
 

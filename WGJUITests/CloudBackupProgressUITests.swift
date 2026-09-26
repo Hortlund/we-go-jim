@@ -32,7 +32,13 @@ final class CloudBackupProgressUITests: XCTestCase {
         XCTAssertTrue(title.exists)
         XCTAssertFalse(app.buttons["cloud-backup-progress-done"].exists)
         XCTAssertTrue(app.staticTexts["Restore complete"].waitForExistence(timeout: 20))
-        app.buttons["cloud-backup-progress-done"].tap()
+        let done = app.buttons["cloud-backup-progress-done"]
+        XCTAssertGreaterThan(done.frame.width, app.frame.width * 0.75)
+        let completion = XCTAttachment(screenshot: app.screenshot())
+        completion.name = "Restore complete polished"
+        completion.lifetime = .keepAlways
+        add(completion)
+        done.tap()
         XCTAssertFalse(app.staticTexts["Restore complete"].waitForExistence(timeout: 1))
     }
 
