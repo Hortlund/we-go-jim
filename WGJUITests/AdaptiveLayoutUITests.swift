@@ -220,7 +220,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertLessThan(graph.frame.maxY, app.frame.maxY - 100)
         graph.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
         let selectedContext = app.staticTexts["profile-trend-context-fixture-pull-up-maxReps"]
-        let selectedFirst = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "8 reps · Bodyweight"), object: selectedContext)
+        let selectedFirst = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "8 reps"), object: selectedContext)
         XCTAssertEqual(XCTWaiter.wait(for: [selectedFirst], timeout: 3), .completed, selectedContext.label)
 
         let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -516,7 +516,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         app.buttons["exercise-progress-range-allTime"].tap()
         let context = app.staticTexts["exercise-progress-set-context"]
         XCTAssertTrue(context.waitForExistence(timeout: 4))
-        XCTAssertEqual(context.label, "6 reps · +10 kg")
+        XCTAssertEqual(context.label, "10 kg × 6 reps")
         let note = app.otherElements["exercise-progress-load-note"]
         XCTAssertTrue(note.exists || app.staticTexts["exercise-progress-load-note"].exists)
         let scroll = app.scrollViews.firstMatch
@@ -530,7 +530,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         chart.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-        let earlierSet = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "10 reps · Bodyweight"), object: context)
+        let earlierSet = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "10 reps"), object: context)
         XCTAssertEqual(XCTWaiter.wait(for: [earlierSet], timeout: 3), .completed)
 
         for _ in 0..<6 {
@@ -559,11 +559,10 @@ final class AdaptiveLayoutUITests: XCTestCase {
         app.buttons["History"].firstMatch.tap()
         let card = app.buttons["history-session-card"].firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 8))
-        XCTAssertTrue(card.label.contains("6 reps · +10 kg"))
+        XCTAssertTrue(card.label.contains("10 kg × 6 reps"))
         card.tap()
         let guidance = app.staticTexts["Weight is added weight. Bodyweight is not included."]
-        for _ in 0..<8 where !guidance.isHittable { app.swipeUp() }
-        XCTAssertTrue(guidance.exists)
+        XCTAssertFalse(guidance.exists)
     }
 
     @MainActor

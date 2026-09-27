@@ -10,11 +10,15 @@ nonisolated struct ExerciseSetPerformance: Codable, Hashable, Sendable {
         guard kilograms > 0 else { return addedWeight ? "Bodyweight" : "No added weight" }
         let value = unit == .lb ? kilograms / 0.45359237 : kilograms
         let suffix = unit == .lb ? "lb" : "kg"
-        return "\(addedWeight ? "+" : "")\(WGJFormatters.decimalString(value)) \(suffix)"
+        return "\(WGJFormatters.decimalString(value)) \(suffix)"
     }
 
     func label(unit: TemplateLoadUnit, addedWeight: Bool, assistance: Bool = false) -> String {
-        "\(reps) \(reps == 1 ? "rep" : "reps") · \(loadLabel(unit: unit, addedWeight: addedWeight, assistance: assistance))"
+        let repsText = "\(reps) \(reps == 1 ? "rep" : "reps")"
+        let loadText = loadLabel(unit: unit, addedWeight: addedWeight, assistance: assistance)
+        if assistance { return "\(repsText) · \(loadText)" }
+        guard kilograms > 0 else { return repsText }
+        return "\(loadText) × \(repsText)"
     }
 
     func hasSameLoad(as other: Self) -> Bool {

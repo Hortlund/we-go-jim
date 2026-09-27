@@ -512,10 +512,6 @@ struct HistoryDetailView: View {
             if exercise.usesAssistance {
                 Text("Weight is machine assistance. Less assistance is harder.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
             }
-            if exercise.usesAddedWeight {
-                Text("Weight is added weight. Bodyweight is not included.")
-                    .font(.caption).foregroundStyle(WGJTheme.textSecondary)
-            }
 
             if isExpanded, hasLoadedLocalState {
                 HistoryExerciseDetailEditorCard(
