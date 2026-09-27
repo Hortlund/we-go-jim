@@ -1521,7 +1521,10 @@ private struct HistoryExerciseDetailEditorCard: View {
     let exerciseIndexTitle: String
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
+    private let loadedPreviousPerformanceResolution: WorkoutPreviousPerformanceResolution
+    private var previousPerformanceResolution: WorkoutPreviousPerformanceResolution {
+        loadedPreviousPerformanceResolution.remapped(to: localSetDrafts)
+    }
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let preferredLoadUnit: TemplateLoadUnit
@@ -1572,7 +1575,7 @@ private struct HistoryExerciseDetailEditorCard: View {
         self.exerciseIndexTitle = exerciseIndexTitle
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
-        self.previousPerformanceResolution = previousPerformanceResolution
+        self.loadedPreviousPerformanceResolution = previousPerformanceResolution
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.preferredLoadUnit = preferredLoadUnit

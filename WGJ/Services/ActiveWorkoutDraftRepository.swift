@@ -815,30 +815,15 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let exercises = try sessionExercises(sessionID: sessionID)
         guard !exercises.isEmpty else { return [:] }
 
-        let previousMaps = try previousSetMaps(
-            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
-            before: session.startedAt,
-            excludingSessionID: sessionID
-        )
-
-        return Dictionary(
-            exercises.map { exercise in
-                (
-                    exercise.id,
-                    .resolved(
-                        Self.resolvedPreviousMap(
-                            baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
-                            maxSetCount: orderedSessionSets(for: exercise).count
-                        )
-                    )
-                )
-            },
-            uniquingKeysWith: { existing, _ in existing }
+        return try WorkoutPreviousPerformanceLookup(modelContext: modelContext).load(
+            requests: exercises.map { .init(id: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID,
+                templateExerciseID: $0.templateExerciseID, drafts: orderedSessionSets(for: $0).map(WorkoutSessionSetDraft.init(model:))) },
+            templateID: session.templateID, before: session.startedAt, excludingSessionID: sessionID
         )
     }
 
     func preparedFirstRenderSnapshot(sessionID: UUID) throws -> ActiveWorkoutPreparedFirstRenderSnapshot {
-        guard let session = try session(id: sessionID) else {
+        guard try session(id: sessionID) != nil else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
@@ -849,11 +834,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
         let catalogMatchesByUUID = try ExerciseCatalogRepository(modelContext: modelContext)
             .exerciseSnapshotMap(for: Array(Set(exercises.map(\.catalogExerciseUUID))))
-        let previousMaps = try previousSetMaps(
-            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
-            before: session.startedAt,
-            excludingSessionID: sessionID
-        )
+        let previousResolutions = try previousPerformanceResolutionByExerciseID(sessionID: sessionID)
 
         var draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
         var restsByExerciseID: [UUID: Int] = [:]
@@ -875,12 +856,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             draftsByExerciseID[exercise.id] = normalizedDrafts
             restsByExerciseID[exercise.id] = exercise.restSeconds
             notesByExerciseID[exercise.id] = exercise.notes
-            previousResolutionByExerciseID[exercise.id] = .resolved(
-                Self.resolvedPreviousMap(
-                    baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
-                    maxSetCount: normalizedDrafts.count
-                )
-            )
+            previousResolutionByExerciseID[exercise.id] = previousResolutions[exercise.id] ?? .resolved([:])
         }
 
         return ActiveWorkoutPreparedFirstRenderSnapshot(
@@ -1344,26 +1320,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private static func resolvedPreviousMap(
-        baseMap: [Int: WorkoutPreviousSetSnapshot],
-        maxSetCount: Int
-    ) -> [Int: WorkoutPreviousSetSnapshot] {
-        guard maxSetCount > 0, !baseMap.isEmpty else { return [:] }
-
-        let fallback = baseMap[(baseMap.keys.max() ?? 0)]
-        var resolved: [Int: WorkoutPreviousSetSnapshot] = [:]
-        resolved.reserveCapacity(maxSetCount)
-
-        for index in 0..<maxSetCount {
-            if let exact = baseMap[index] {
-                resolved[index] = exact
-            } else if let fallback {
-                resolved[index] = fallback
-            }
-        }
-
-        return resolved
-    }
 
     private static func normalizedDraftsForActiveLogging(
         _ drafts: [WorkoutSessionSetDraft],

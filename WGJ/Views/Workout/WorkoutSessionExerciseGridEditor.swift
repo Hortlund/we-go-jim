@@ -19,7 +19,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     let exerciseAccessibilityIdentifier: String?
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
+    private let loadedPreviousPerformanceResolution: WorkoutPreviousPerformanceResolution
+    private var previousPerformanceResolution: WorkoutPreviousPerformanceResolution {
+        loadedPreviousPerformanceResolution.remapped(to: setDrafts)
+    }
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
@@ -59,6 +62,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onDirtyStateChange: (Bool) -> Void
 
     private let externalIsExpanded: Binding<Bool>?
+    @State private var previousWorkoutPreview: WorkoutPreviousWorkoutSource?
+    @State private var copiedWorkoutName: String?
     @State private var localIsExpanded: Bool
     @State private var projection: WorkoutSessionExerciseGridProjection
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
@@ -134,7 +139,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
-        self.previousPerformanceResolution = previousPerformanceResolution
+        self.loadedPreviousPerformanceResolution = previousPerformanceResolution
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
@@ -177,7 +182,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             ? Self.makeProjection(
                 usesAssistance: usesAssistance,
                 setDrafts: setDrafts.wrappedValue,
-                previousPerformanceResolution: previousPerformanceResolution,
+                previousPerformanceResolution: previousPerformanceResolution.remapped(to: setDrafts.wrappedValue),
                 targetRepMin: targetRepMin,
                 targetRepMax: targetRepMax,
                 restSeconds: restSeconds.wrappedValue,
@@ -250,6 +255,11 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var valueObservedCard: some View {
         lifecycleObservedCard
+            .sheet(item: $previousWorkoutPreview) { source in
+                WorkoutPreviousWorkoutSheet(source: source, drafts: setDrafts, usesAssistance: usesAssistance) {
+                    copyPreviousWorkout(source)
+                }
+            }
             .onChange(of: setDrafts) { previousValue, newValue in
                 handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
             }
@@ -345,6 +355,24 @@ struct WorkoutSessionExerciseGridEditor: View {
                 exerciseNameText
                 if usesAssistance {
                     Text("Log machine assistance. Less assistance is harder.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                }
+
+                if case .noTemplateHistory(let source) = previousPerformanceResolution {
+                    Text("No previous sets in this template.")
+                        .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                        .accessibilityIdentifier("no-template-history")
+                    if let source {
+                        Button("Use last from another workout") {
+                            previousWorkoutPreview = source
+                        }
+                        .font(.caption.weight(.semibold))
+                        .disabled(!isSetEditingEnabled)
+                        .accessibilityIdentifier("preview-other-workout")
+                    }
+                    if let copiedWorkoutName {
+                        Text("Values copied from \(copiedWorkoutName)")
+                            .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                    }
                 }
 
                 Text(summaryLine)
@@ -1075,7 +1103,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func metricPlaceholderText(for overlayState: MetricFieldDisplayState?) -> String {
         guard overlayState == nil else { return "" }
-        return previousPerformanceResolution.isLoading ? "" : "0"
+        return ""
     }
 
     private func metricAccessibilityDescriptor(
@@ -2018,6 +2046,17 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private static func restLabel(for seconds: Int) -> String {
         seconds <= 0 ? "No rest" : formattedRest(seconds)
+    }
+
+    private func copyPreviousWorkout(_ source: WorkoutPreviousWorkoutSource) {
+        guard isSetEditingEnabled else { return }
+        debounceCoordinator.cancelCommit()
+        _ = commitAllBufferedInput(clearsText: true)
+        let updated = WorkoutSetPreviousPerformanceApplicationController.copyOtherWorkout(source, to: setDrafts)
+        guard updated != setDrafts else { return }
+        setDrafts = updated
+        copiedWorkoutName = source.name
+        notifyChanged(drafts: updated)
     }
 
     private func applyPreviousPerformance(at index: Int) {
