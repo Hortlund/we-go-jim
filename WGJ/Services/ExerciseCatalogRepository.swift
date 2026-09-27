@@ -85,6 +85,7 @@ nonisolated final class ExerciseCatalogRepository {
             equipmentSummary: validated.equipmentSummary,
             instructionText: validated.instructionText,
             cardioTrackingProfileRaw: validated.cardioTrackingProfileRaw,
+            loadTrackingRaw: draft.loadTrackingRaw,
             isCurated: false,
             isHidden: false,
             sourceName: "custom",
@@ -113,23 +114,34 @@ nonisolated final class ExerciseCatalogRepository {
                 || exercise.equipmentSummary != validated.equipmentSummary
                 || exercise.instructionText != validated.instructionText
                 || exercise.cardioTrackingProfileRaw != validated.cardioTrackingProfileRaw
+                || exercise.loadTrackingRaw != draft.loadTrackingRaw
                 || Set(exercise.primaryMuscles.map(\.remoteID)) != Set(validated.primaryMuscles.map(\.remoteID))
                 || Set(exercise.secondaryMuscles.map(\.remoteID)) != Set(validated.secondaryMuscles.map(\.remoteID))
                 || Set(exercise.aliases.map(\.value)) != normalizedAliases(validated.aliases, exerciseName: validated.name)
         else { return }
 
+        let previousLoadKind = exercise.loadKind
         exercise.displayName = validated.name
         exercise.categoryName = validated.categoryName
         exercise.equipmentSummary = validated.equipmentSummary
         exercise.instructionText = validated.instructionText
+        exercise.loadTrackingRaw = draft.loadTrackingRaw
         exercise.cardioTrackingProfileRaw = validated.cardioTrackingProfileRaw
         exercise.primaryMuscles = validated.primaryMuscles
         exercise.secondaryMuscles = validated.secondaryMuscles
         exercise.updatedAt = .now
         replaceAliases(on: exercise, aliases: validated.aliases)
         try refreshTemplateSnapshots(for: exercise)
-
+        let loadKindChanged = previousLoadKind != exercise.loadKind
+        if loadKindChanged {
+            _ = try HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(persistChanges: false)
+            _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
+        }
         try saveUserDataChanges()
+        if loadKindChanged {
+            HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
+            WorkoutHistoryChangeBroadcaster.post()
+        }
     }
 
     func deleteCustomExercise(_ exercise: ExerciseCatalogItem) throws {
@@ -143,9 +155,29 @@ nonisolated final class ExerciseCatalogRepository {
             entityID: UUID(),
             entityKey: remoteUUID
         ))
-        try modelContext.saveWithRecoveryProtection()
-        modelContext.delete(exercise)
+        // Retained workouts and templates still need the original load meaning.
+        // Hidden catalog rows remain part of backup/restore but leave the picker.
+        if try hasRetainedReferences(to: remoteUUID) {
+            exercise.loadTrackingRaw = exercise.loadKind.rawValue
+            exercise.isHidden = true
+            exercise.updatedAt = .now
+        } else {
+            modelContext.delete(exercise)
+        }
         try saveUserDataChanges()
+    }
+
+    private func hasRetainedReferences(to id: String) throws -> Bool {
+        if try modelContext.fetchCount(FetchDescriptor<WorkoutSessionExercise>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<CompletedSetFact>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<WorkoutSessionCardioBlock>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<TemplateExercise>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<TemplateExerciseComponent>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<TemplateCardioBlock>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<ActiveWorkoutDraftExercise>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<ActiveWorkoutDraftExerciseComponent>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        if try modelContext.fetchCount(FetchDescriptor<ActiveWorkoutDraftCardioBlock>(predicate: #Predicate { $0.catalogExerciseUUID == id })) > 0 { return true }
+        return false
     }
 
     func allExercises() throws -> [ExerciseCatalogItem] {
@@ -197,7 +229,7 @@ nonisolated final class ExerciseCatalogRepository {
         }
 
         var matchesByUUID: [String: ExerciseCatalogItem] = [:]
-        for exercise in try allExercises() {
+        for exercise in try allExercises() where !(exercise.isHidden && exercise.isCustomExercise) {
             guard normalizedImportMatchToken(exercise.categoryName) == normalizedCategory else {
                 continue
             }
@@ -267,6 +299,7 @@ nonisolated final class ExerciseCatalogRepository {
         let existingExercises = try modelContext.fetch(descriptor)
         if existingExercises.contains(where: {
             $0.remoteUUID != excludedExercise?.remoteUUID
+                && !($0.isHidden && $0.isCustomExercise)
                 && $0.displayName.localizedCaseInsensitiveCompare(name) == .orderedSame
         }) {
             throw ExerciseCatalogRepositoryError.duplicateName

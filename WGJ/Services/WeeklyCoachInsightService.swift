@@ -144,17 +144,19 @@ nonisolated final class WeeklyCoachInsightService {
     ) throws -> (current: WeeklyCoachWeekBucket, baselineBuckets: [Date: WeeklyCoachWeekBucket]) {
         var current = WeeklyCoachWeekBucket()
         var baselineBuckets: [Date: WeeklyCoachWeekBucket] = [:]
+        let assistanceIDs = try ExerciseLoadContextRepository.assistanceIDs(for: Set(facts.map(\.catalogExerciseUUID)), in: modelContext)
+        let weightedIDs = Set(facts.filter { ($0.volumeKg ?? 0) > 0 }.map(\.catalogExerciseUUID))
 
         for fact in facts where !fact.isWarmup {
             if fact.completedAt >= currentWeekStart && fact.completedAt < currentWeekEnd {
-                current.ingest(fact)
+                current.ingest(fact, usesAssistance: assistanceIDs.contains(fact.catalogExerciseUUID), tracksVolume: weightedIDs.contains(fact.catalogExerciseUUID))
                 continue
             }
 
             guard fact.completedAt < currentWeekStart else { continue }
             let factWeekStart = weekStart(for: fact.completedAt)
             var bucket = baselineBuckets[factWeekStart] ?? WeeklyCoachWeekBucket()
-            bucket.ingest(fact)
+            bucket.ingest(fact, usesAssistance: assistanceIDs.contains(fact.catalogExerciseUUID), tracksVolume: weightedIDs.contains(fact.catalogExerciseUUID))
             baselineBuckets[factWeekStart] = bucket
         }
 
@@ -370,14 +372,15 @@ private nonisolated struct WeeklyCoachWeekBucket: Equatable, Sendable {
     var exerciseNamesByUUID: [String: String] = [:]
     var exerciseDatesByUUID: [String: Date] = [:]
 
-    mutating func ingest(_ fact: CompletedSetFact) {
+    mutating func ingest(_ fact: CompletedSetFact, usesAssistance: Bool, tracksVolume: Bool) {
         sessionIDs.insert(fact.sessionID)
+        guard !usesAssistance else { return }
 
         if let volumeKg = fact.volumeKg {
             totalVolume += volumeKg
         }
 
-        let effort = effort(for: fact)
+        let effort = tracksVolume ? (fact.volumeKg ?? 0) : effort(for: fact)
         if effort > 0 {
             effortByExercise[fact.catalogExerciseUUID, default: 0] += effort
         }

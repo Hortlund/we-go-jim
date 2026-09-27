@@ -15,14 +15,15 @@ nonisolated enum ExerciseProgressProjector {
             from: sessions,
             metric: metric,
             displayUnit: dataset.preferredLoadUnit,
+            usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance,
             now: now,
             calendar: calendar
         )
-        let availability = availability(for: metric, hasCompatibleData: !points.isEmpty)
+        let availability = availability(for: metric, hasCompatibleData: !points.isEmpty, usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance)
         let summary = summary(points: points, sessions: sessions)
         let lifetimePoints = self.points(
             from: sessionsInRange(dataset.sessions, range: .allTime, now: now, calendar: calendar),
-            metric: metric, displayUnit: dataset.preferredLoadUnit, now: now, calendar: calendar
+            metric: metric, displayUnit: dataset.preferredLoadUnit, usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance, now: now, calendar: calendar
         )
         let visiblePointIDs = Set(points.map(\.id))
         let milestones = cappedMilestones(
@@ -51,7 +52,8 @@ nonisolated enum ExerciseProgressProjector {
             chartPoints: chartPoints,
             summary: summary,
             milestones: milestones,
-            accessibilitySummary: accessibilitySummary
+            accessibilitySummary: accessibilitySummary,
+            usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance
         )
     }
 
@@ -75,14 +77,16 @@ nonisolated enum ExerciseProgressProjector {
             if session.estimatedOneRepMaxKilograms != nil { availableMetrics.insert(.estimatedOneRepMax) }
             if session.heaviestWeightKilograms != nil { availableMetrics.insert(.heaviestWeight) }
             if session.sessionVolumeKilograms != nil { availableMetrics.insert(.sessionVolume) }
-            if session.bestSetReps != nil { availableMetrics.insert(.bestSetReps) }
+            if dataset.usesAssistance ? session.loadContext?.bestAssistedRepsSet != nil : session.bestSetReps != nil {
+                availableMetrics.insert(.bestSetReps)
+            }
             if availableMetrics.count == ExerciseProgressMetric.allCases.count { break }
         }
 
         return Dictionary(uniqueKeysWithValues: ExerciseProgressMetric.allCases.map { metric in
             (
                 metric,
-                availability(for: metric, hasCompatibleData: availableMetrics.contains(metric))
+                availability(for: metric, hasCompatibleData: availableMetrics.contains(metric), usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance)
             )
         })
     }
@@ -116,9 +120,11 @@ nonisolated enum ExerciseProgressProjector {
         from sessions: [ExerciseProgressSession],
         metric: ExerciseProgressMetric,
         displayUnit: TemplateLoadUnit,
+        usesAddedWeight: Bool, usesAssistance: Bool,
         now: Date,
         calendar: Calendar
     ) -> [ExerciseProgressPoint] {
+        if (usesAddedWeight && metric == .estimatedOneRepMax) || (usesAssistance && metric.isWeighted) { return [] }
         if metric == .workoutFrequency {
             return frequencyPoints(from: sessions, through: now, calendar: calendar)
         }
@@ -129,7 +135,7 @@ nonisolated enum ExerciseProgressProjector {
             case .estimatedOneRepMax: rawValue = session.estimatedOneRepMaxKilograms
             case .heaviestWeight: rawValue = session.heaviestWeightKilograms
             case .sessionVolume: rawValue = session.sessionVolumeKilograms
-            case .bestSetReps: rawValue = session.bestSetReps.map(Double.init)
+            case .bestSetReps: rawValue = usesAssistance ? session.loadContext?.bestAssistedRepsSet.map { Double($0.reps) } : session.bestSetReps.map(Double.init)
             case .totalReps: rawValue = (session.completedSetCount > 0 || session.totalReps > 0) ? Double(session.totalReps) : nil
             case .duration: rawValue = session.durationSeconds
             case .distance: rawValue = session.distanceMeters
@@ -137,10 +143,21 @@ nonisolated enum ExerciseProgressProjector {
             }
             guard let rawValue else { return nil }
             let value = metric.isWeighted ? convertedKilograms(rawValue, to: displayUnit) : rawValue
+            let performance = usesAssistance
+                ? (metric == .bestSetReps ? session.loadContext?.bestAssistedRepsSet : nil)
+                : session.loadContext?.set(for: metric)
+            let context = performance?.label(unit: displayUnit, addedWeight: usesAddedWeight, assistance: usesAssistance)
+                ?? ((metric == .totalReps || metric == .sessionVolume)
+                    ? (usesAssistance
+                        ? session.loadContext?.assistanceRangeLabel(unit: displayUnit) ?? "Assistance not recorded"
+                        : session.loadContext?.rangeLabel(unit: displayUnit, addedWeight: usesAddedWeight))
+                    : nil)
             return ExerciseProgressPoint(
                 id: "\(session.sessionID.uuidString)-\(metric.rawValue)",
                 date: session.completedAt,
-                value: value
+                value: value,
+                context: context,
+                performance: performance
             )
         }
     }
@@ -187,8 +204,15 @@ nonisolated enum ExerciseProgressProjector {
 
     private static func availability(
         for metric: ExerciseProgressMetric,
-        hasCompatibleData: Bool
+        hasCompatibleData: Bool,
+        usesAddedWeight: Bool, usesAssistance: Bool
     ) -> ExerciseProgressAvailability {
+        if usesAssistance && metric.isWeighted {
+            return .init(isAvailable: false, reason: "Assistance is support, not lifted weight. Track reps at the same assistance instead.")
+        }
+        if usesAddedWeight && metric == .estimatedOneRepMax {
+            return .init(isAvailable: false, reason: "A reliable total-load 1RM needs bodyweight at the time of each workout. Track reps and added weight instead.")
+        }
         guard hasCompatibleData else {
             let reason = metric.isWeighted
                 ? "No weighted sets have been completed for this exercise."
@@ -254,7 +278,8 @@ nonisolated enum ExerciseProgressProjector {
             pointID: point.id,
             date: point.date,
             value: point.value,
-            kind: kind
+            kind: kind,
+            context: point.context
         )
     }
 

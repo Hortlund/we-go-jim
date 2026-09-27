@@ -20,6 +20,31 @@ nonisolated enum ExerciseHistorySummaryBuilder {
                 maxReps: facts.map(\.reps).max(), totalReps: facts.reduce(0) { $0 + $1.reps },
                 completedSetCount: facts.count
             )
+            func performance(_ fact: CompletedSetFact) -> ExerciseSetPerformance {
+                .init(reps: fact.reps, kilograms: fact.normalizedWeightKg ?? 0)
+            }
+            // Break rep ties by load so the label always describes one real set.
+            if let bestReps = facts.max(by: { lhs, rhs in
+                lhs.reps == rhs.reps
+                    ? (lhs.normalizedWeightKg ?? 0) < (rhs.normalizedWeightKg ?? 0)
+                    : lhs.reps < rhs.reps
+            }), let heaviestSet = facts.max(by: { lhs, rhs in
+                let left = lhs.normalizedWeightKg ?? 0, right = rhs.normalizedWeightKg ?? 0
+                return left == right ? lhs.reps < rhs.reps : left < right
+            }) {
+                entry.loadContext = .init(bestRepsSet: performance(bestReps), heaviestSet: performance(heaviestSet),
+                    strongestSet: strongest.map(performance),
+                    minimumKilograms: facts.map { $0.normalizedWeightKg ?? 0 }.min() ?? 0,
+                    maximumKilograms: facts.map { $0.normalizedWeightKg ?? 0 }.max() ?? 0)
+            }
+            let knownAssistance = facts.filter { $0.weight != nil }
+            entry.loadContext?.leastAssistanceSet = knownAssistance.min {
+                let a = $0.normalizedWeightKg ?? 0, b = $1.normalizedWeightKg ?? 0
+                return a == b ? $0.reps > $1.reps : a < b
+            }.map(performance)
+            entry.loadContext?.bestAssistedRepsSet = knownAssistance.max {
+                $0.reps == $1.reps ? ($0.normalizedWeightKg ?? 0) > ($1.normalizedWeightKg ?? 0) : $0.reps < $1.reps
+            }.map(performance)
             entry.bestWeight = strongest?.weight
             entry.bestReps = strongest?.reps
             entry.bestBodyweightReps = facts.filter { $0.loadUnit == .bodyweight }.map(\.reps).max()
@@ -67,7 +92,7 @@ nonisolated struct ExerciseHistoryRepository {
     /// Keep SQL limits per metric: newer reps-only sessions must not hide older weighted points.
     /// Freshness is checked once for the batch, canonical fallback once per exercise, and
     /// overlapping summary payloads are decoded once across metrics.
-    func trendEntries(requests: Set<ExerciseTrendRequest>, limit: Int) throws -> [ExerciseTrendRequest: [CompletedExerciseHistoryEntry]] {
+    func trendEntries(requests: Set<ExerciseTrendRequest>, limit: Int, assistanceIDs: Set<String> = []) throws -> [ExerciseTrendRequest: [CompletedExerciseHistoryEntry]] {
         guard !requests.isEmpty else { return [:] }
         let dirty = try dirtySessions()
         var result: [ExerciseTrendRequest: [CompletedExerciseHistoryEntry]] = [:]
@@ -77,7 +102,8 @@ nonisolated struct ExerciseHistoryRepository {
             let fallback = try fallbackEntries(for: exercise, dirty: dirty)
             for request in group {
                 result[request] = try entries(for: exercise, limit: limit, metric: request.metric,
-                    dirty: dirty, fallback: fallback, decoded: &decoded)
+                    dirty: dirty, fallback: fallback, decoded: &decoded,
+                    requiresKnownAssistance: assistanceIDs.contains(exercise) && request.metric == .maxReps)
             }
         }
         return result
@@ -85,7 +111,8 @@ nonisolated struct ExerciseHistoryRepository {
 
     private func entries(for exerciseUUID: String, limit: Int?, metric: ProfileExerciseTrendMetric?,
                          dirty: [WorkoutSession], fallback: [UUID: CompletedExerciseHistoryEntry],
-                         decoded: inout [String: CompletedExerciseHistoryEntry]) throws -> [CompletedExerciseHistoryEntry] {
+                         decoded: inout [String: CompletedExerciseHistoryEntry],
+                         requiresKnownAssistance: Bool = false) throws -> [CompletedExerciseHistoryEntry] {
         let kind: Int
         switch metric {
         case .oneRepMax: kind = 1
@@ -102,18 +129,34 @@ nonisolated struct ExerciseHistoryRepository {
             },
             sortBy: [SortDescriptor(\.completedAt, order: .reverse)]
         )
-        if let limit { descriptor.fetchLimit = max(1, limit) + dirty.count }
-        let summaries = try context.fetch(descriptor)
+        if let limit {
+            descriptor.fetchLimit = requiresKnownAssistance ? max(32, limit + dirty.count) : max(1, limit) + dirty.count
+        }
         let dirtyIDs = Set(dirty.map(\.id))
         var entries = fallback
         let decoder = JSONDecoder()
-        for row in summaries where !dirtyIDs.contains(row.sessionID) {
-            if decoded[row.key] == nil {
-                decoded[row.key] = try decoder.decode(CompletedExerciseHistoryEntry.self, from: row.payload)
+        var compatiblePersistedCount = 0
+        // Assistance eligibility lives in the derived payload. Page past missing
+        // assistance instead of letting those rows consume the chart point limit.
+        while true {
+            try Task.checkCancellation()
+            let summaries = try context.fetch(descriptor)
+            for row in summaries where !dirtyIDs.contains(row.sessionID) {
+                if decoded[row.key] == nil {
+                    decoded[row.key] = try decoder.decode(CompletedExerciseHistoryEntry.self, from: row.payload)
+                }
+                guard let entry = decoded[row.key],
+                      !requiresKnownAssistance || entry.loadContext?.bestAssistedRepsSet != nil else { continue }
+                entries[row.sessionID] = entry
+                compatiblePersistedCount += 1
             }
-            entries[row.sessionID] = decoded[row.key]
+            guard requiresKnownAssistance, let limit,
+                  compatiblePersistedCount < max(1, limit),
+                  summaries.count == descriptor.fetchLimit else { break }
+            descriptor.fetchOffset = (descriptor.fetchOffset ?? 0) + summaries.count
         }
         let ordered = entries.values.filter { entry in
+            if requiresKnownAssistance && entry.loadContext?.bestAssistedRepsSet == nil { return false }
             guard let metric else { return true }
             switch metric {
             case .oneRepMax: return entry.weightedOneRepMaxInKilograms != nil

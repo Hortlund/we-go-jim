@@ -388,7 +388,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let sets = defaultSessionSets(
             sessionExerciseID: created.id,
             restSeconds: created.restSeconds,
-            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary, loadTrackingRaw: catalogItem.loadTrackingRaw)
                 ?? preferredLoadUnit(),
             sessionExercise: created
         )
@@ -1370,7 +1370,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         catalogExercise: TrainingGuidanceCatalogSnapshot?
     ) -> [WorkoutSessionSetDraft] {
         guard TemplateLoadUnit.inferredDefault(
-            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? "", loadTrackingRaw: catalogExercise?.loadTrackingRaw
         ) == .bodyweight else {
             return drafts
         }

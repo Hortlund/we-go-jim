@@ -220,7 +220,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.components = [TemplateExerciseComponentDraft(selection: selection)]
         self.setDrafts = Self.defaultSetDrafts(
             restSeconds: self.restSeconds,
-            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary, loadTrackingRaw: selection.loadTrackingRaw)
                 ?? preferredLoadUnit
         )
         self.superset = nil

@@ -755,6 +755,8 @@ nonisolated enum HistoryOverviewSnapshotLoader {
     ) throws -> [HistoryOverviewSessionSnapshot] {
         let sessionIDs = Set(sessions.map(\.id))
         let exercises = try repository.sessionExercises(sessionIDs: sessionIDs)
+        let addedWeightIDs = try repository.addedWeightExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
+        let assistanceIDs = try repository.assistanceExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
         let exercisesBySessionID = Dictionary(grouping: exercises, by: \.sessionID)
         let setsBySessionExerciseID = Dictionary(
             grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
@@ -768,7 +770,8 @@ nonisolated enum HistoryOverviewSnapshotLoader {
             let rows = HistorySessionSummaryBuilder.rows(
                 for: exercisesBySessionID[session.id, default: []],
                 cardioBlocks: cardioBlocksBySessionID[session.id, default: []],
-                setsBySessionExerciseID: setsBySessionExerciseID
+                setsBySessionExerciseID: setsBySessionExerciseID,
+                addedWeightIDs: addedWeightIDs, assistanceIDs: assistanceIDs
             )
             return HistoryOverviewSessionSnapshot(
                 session: session,
@@ -1139,14 +1142,17 @@ nonisolated enum HistorySessionSummaryBuilder {
         return rows(
             for: exercises,
             cardioBlocks: cardioBlocks,
-            setsBySessionExerciseID: setsBySessionExerciseID
+            setsBySessionExerciseID: setsBySessionExerciseID,
+            addedWeightIDs: try repository.addedWeightExerciseIDs(Set(exercises.map(\.catalogExerciseUUID))),
+            assistanceIDs: try repository.assistanceExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
         )
     }
 
     nonisolated static func rows(
         for exercises: [WorkoutSessionExercise],
         cardioBlocks: [WorkoutSessionCardioBlock],
-        setsBySessionExerciseID: [UUID: [WorkoutSessionSet]]
+        setsBySessionExerciseID: [UUID: [WorkoutSessionSet]],
+        addedWeightIDs: Set<String> = [], assistanceIDs: Set<String> = []
     ) -> [HistorySessionSummaryRow] {
         let strengthRows = exercises.enumerated().map { index, exercise in
             let sets = setsBySessionExerciseID[exercise.id, default: []]
@@ -1155,7 +1161,7 @@ nonisolated enum HistorySessionSummaryBuilder {
                 id: index,
                 exercise: "\(setCounts.working) x \(exercise.exerciseNameSnapshot)",
                 supportingText: warmupSummary(count: setCounts.warmup),
-                bestSet: WorkoutMetricsService.bestSetText(for: sets)
+                bestSet: WorkoutMetricsService.bestSetText(for: sets, usesAddedWeight: addedWeightIDs.contains(exercise.catalogExerciseUUID), usesAssistance: assistanceIDs.contains(exercise.catalogExerciseUUID))
             )
         }
         let mainCardioRows = cardioRows(

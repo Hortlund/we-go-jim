@@ -53,6 +53,8 @@ nonisolated struct WorkoutProgressExerciseInput: Equatable, Sendable {
     let exerciseName: String
     let sortOrder: Int
     let sets: [WorkoutProgressSetInput]
+    var usesAddedWeight: Bool = false
+    var usesAssistance: Bool = false
 }
 
 nonisolated struct WorkoutProgressSessionInput: Identifiable, Equatable, Sendable {
@@ -542,6 +544,26 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         current: WorkoutExerciseProgressMetric
     ) -> ExerciseProgressDelta {
         switch (previous, current) {
+        case let (.assistance(previousSet), .assistance(currentSet)):
+            if previousSet.hasSameLoad(as: currentSet) {
+                let delta = currentSet.reps - previousSet.reps
+                return .init(direction: .compare(Double(delta), 0), text: "\(signedInteger(delta)) reps at the same assistance", relativeMagnitude: 0)
+            }
+            let improved = currentSet.kilograms < previousSet.kilograms && currentSet.reps >= previousSet.reps
+            return .init(direction: improved ? .up : .flat,
+                text: improved ? "Less assistance with the same or more reps" : "Assistance changed · compare reps at the same assistance",
+                relativeMagnitude: 0)
+        case (.unknownAssistance, _), (_, .unknownAssistance):
+            return .init(direction: .flat, text: "Record assistance to compare these sets", relativeMagnitude: 0)
+
+        case let (.addedWeight(previousSet), .addedWeight(currentSet)):
+            guard previousSet.hasSameLoad(as: currentSet) else {
+                return ExerciseProgressDelta(direction: .flat, text: "Added weight changed · compare reps at the same load", relativeMagnitude: 0)
+            }
+            let delta = currentSet.reps - previousSet.reps
+            return ExerciseProgressDelta(direction: .compare(Double(delta), 0),
+                text: "\(signedInteger(delta)) reps at the same added weight",
+                relativeMagnitude: relativeMagnitude(current: Double(currentSet.reps), previous: Double(previousSet.reps)))
         case let (.estimatedOneRepMaxKg(previousValue), .estimatedOneRepMaxKg(currentValue)):
             let roundedDelta = roundedToOneDecimal(currentValue - previousValue)
             return ExerciseProgressDelta(
@@ -654,6 +676,9 @@ nonisolated private struct RankedExerciseComparison: Equatable, Sendable {
 nonisolated private enum WorkoutExerciseProgressMetric: Equatable, Sendable {
     case estimatedOneRepMaxKg(Double)
     case repetitions(Int)
+    case addedWeight(ExerciseSetPerformance)
+    case assistance(ExerciseSetPerformance)
+    case unknownAssistance
 }
 
 nonisolated private struct ExerciseProgressDelta: Equatable, Sendable {
@@ -684,7 +709,15 @@ nonisolated private struct SessionMetrics: Equatable, Sendable {
         exercisesByCatalogUUID = Dictionary(
             exerciseMetrics.map { ($0.catalogExerciseUUID, $0) },
             uniquingKeysWith: { existing, candidate in
-                candidate.comparisonScore > existing.comparisonScore ? candidate : existing
+                if existing.usesAssistance || candidate.usesAssistance {
+                    guard let left = existing.assistanceSet else { return candidate }
+                    guard let right = candidate.assistanceSet else { return existing }
+                    return right.kilograms < left.kilograms || (right.hasSameLoad(as: left) && right.reps > left.reps) ? candidate : existing
+                }
+                if let left = existing.addedWeightSet, let right = candidate.addedWeightSet {
+                    return right.kilograms > left.kilograms || (right.kilograms == left.kilograms && right.reps > left.reps) ? candidate : existing
+                }
+                return candidate.comparisonScore > existing.comparisonScore ? candidate : existing
             }
         )
     }
@@ -698,8 +731,13 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
     let bestSetText: String
     let bestWeightedOneRepMaxKg: Double?
     let maxReps: Int
+    let addedWeightSet: ExerciseSetPerformance?
+    var assistanceSet: ExerciseSetPerformance? = nil
+    var usesAssistance = false
 
     var progressMetric: WorkoutExerciseProgressMetric {
+        if usesAssistance { return assistanceSet.map(WorkoutExerciseProgressMetric.assistance) ?? .unknownAssistance }
+        if let addedWeightSet { return .addedWeight(addedWeightSet) }
         if let bestWeightedOneRepMaxKg {
             return .estimatedOneRepMaxKg(bestWeightedOneRepMaxKg)
         }
@@ -727,7 +765,7 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
             }
 
         completedSetCount = workingSets.count
-        totalVolumeKg = workingSets.reduce(0) { total, set in
+        totalVolumeKg = exercise.usesAssistance ? 0 : workingSets.reduce(0) { total, set in
             guard let reps = set.reps,
                   let weight = set.weight,
                   weight > 0,
@@ -743,11 +781,38 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
         }
         maxReps = workingSets.compactMap(\.reps).max() ?? 0
 
+        if exercise.usesAssistance {
+            usesAssistance = true
+            let set = workingSets.filter { $0.weight != nil || $0.loadUnit == .bodyweight }.min {
+                let a = $0.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms($0.weight ?? 0, unit: $0.loadUnit)
+                let b = $1.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms($1.weight ?? 0, unit: $1.loadUnit)
+                return a == b ? ($0.reps ?? 0) > ($1.reps ?? 0) : a < b
+            }
+            assistanceSet = set.map { .init(reps: $0.reps ?? 0, kilograms: $0.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms($0.weight ?? 0, unit: $0.loadUnit)) }
+            addedWeightSet = nil
+            bestWeightedOneRepMaxKg = nil
+            bestSetText = assistanceSet?.label(unit: set?.loadUnit ?? .kg, addedWeight: false, assistance: true) ?? "Assistance not recorded"
+            return
+        }
         let bestWeightedSet = workingSets
             .filter { ($0.weight ?? 0) > 0 && $0.loadUnit != .bodyweight }
             .max { lhs, rhs in
                 weightedScore(lhs) < weightedScore(rhs)
             }
+        let addedSet = workingSets.max { lhs, rhs in
+            let left = lhs.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(lhs.weight ?? 0, unit: lhs.loadUnit)
+            let right = rhs.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(rhs.weight ?? 0, unit: rhs.loadUnit)
+            return left == right ? (lhs.reps ?? 0) < (rhs.reps ?? 0) : left < right
+        }
+        if exercise.usesAddedWeight, let set = addedSet {
+            let kg = set.loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(set.weight ?? 0, unit: set.loadUnit)
+            let performance = ExerciseSetPerformance(reps: set.reps ?? 0, kilograms: kg)
+            addedWeightSet = performance
+            bestWeightedOneRepMaxKg = nil
+            bestSetText = performance.label(unit: set.loadUnit, addedWeight: true)
+            return
+        }
+        addedWeightSet = nil
         if let bestWeightedSet,
            let reps = bestWeightedSet.reps,
            let weight = bestWeightedSet.weight
@@ -813,7 +878,20 @@ nonisolated enum WorkoutProgressSnapshotLoader {
                 repository: repository
             )
         }
-        let sessions = metadataSessions.map { hydratedSessions[$0.id] ?? $0 }
+        let ids = Set(hydratedSessions.values.flatMap { $0.exercises.map(\.catalogExerciseUUID) })
+        let addedWeightIDs = try ExerciseLoadContextRepository.addedWeightIDs(for: ids, in: modelContext)
+        let assistanceIDs = try ExerciseLoadContextRepository.assistanceIDs(for: ids, in: modelContext)
+        let sessions = metadataSessions.map { metadata in
+            guard let source = hydratedSessions[metadata.id] else { return metadata }
+            return WorkoutProgressSessionInput(id: source.id, templateID: source.templateID, name: source.name,
+                startedAt: source.startedAt, endedAt: source.endedAt, durationSeconds: source.durationSeconds,
+                prHitsCount: source.prHitsCount, archivedAt: source.archivedAt, exercises: source.exercises.map { exercise in
+                    var exercise = exercise
+                    exercise.usesAddedWeight = addedWeightIDs.contains(exercise.catalogExerciseUUID)
+                    exercise.usesAssistance = assistanceIDs.contains(exercise.catalogExerciseUUID)
+                    return exercise
+                })
+        }
         return WorkoutProgressSnapshotBuilder.build(
             sessions: sessions,
             selectedPreviousSessionID: selectedPreviousSessionID,

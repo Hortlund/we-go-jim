@@ -98,6 +98,21 @@ final class AdaptiveLayoutUITests: XCTestCase {
         for _ in 0..<12 where !title.isHittable { app.swipeUp() }
         XCTAssertTrue(title.isHittable)
         XCTAssertTrue(app.staticTexts["10 reps"].exists)
+        let graph = app.otherElements["profile-exercise-trend-chart-fixture-pull-up-maxReps"].firstMatch
+        XCTAssertGreaterThan(graph.frame.width, 100)
+        for _ in 0..<12 {
+            if graph.frame.minY > 150 && graph.frame.maxY < app.frame.maxY - 120 { break }
+            let down = graph.frame.minY <= 150
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.45 : 0.65))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: down ? 0.65 : 0.45)))
+        }
+        XCTAssertGreaterThan(graph.frame.minY, 100)
+        XCTAssertLessThan(graph.frame.maxY, app.frame.maxY - 100)
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+        let selectedContext = app.staticTexts["profile-trend-context-fixture-pull-up-maxReps"]
+        let selectedFirst = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "8 reps · Bodyweight"), object: selectedContext)
+        XCTAssertEqual(XCTWaiter.wait(for: [selectedFirst], timeout: 3), .completed, selectedContext.label)
+
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Profile bodyweight trend and exercise heading"
         screenshot.lifetime = .keepAlways
@@ -315,6 +330,130 @@ final class AdaptiveLayoutUITests: XCTestCase {
 
         strip.tap()
         XCTAssertTrue(minimize.waitForExistence(timeout: 4))
+    }
+
+    @MainActor
+    func testAssistanceContextAcrossExerciseProgressAndHistory() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_ASSISTED_PROGRESS"])
+        openExercisesTab(in: app)
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("assisted pull")
+        let exercise = app.staticTexts["Assisted Pull Up"].firstMatch
+        XCTAssertTrue(exercise.waitForExistence(timeout: 4))
+        exercise.tap()
+        let selector = app.buttons["exercise-progress-metric-selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 4))
+        XCTAssertEqual(selector.value as? String, "Best-Set Reps")
+        app.buttons["exercise-progress-range-allTime"].tap()
+        let context = app.staticTexts["exercise-progress-set-context"]
+        XCTAssertTrue(context.waitForExistence(timeout: 4))
+        XCTAssertEqual(context.label, "6 reps · 20 kg assistance")
+        let scroll = app.scrollViews.firstMatch
+        let chart = app.otherElements["exercise-progress-chart"]
+        for _ in 0..<6 {
+            if chart.frame.minY > 100 && chart.frame.maxY < app.frame.maxY - 80 { break }
+            scroll.swipeUp()
+        }
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Assisted pull-up progress"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["History"].firstMatch.tap()
+        let card = app.buttons["history-session-card"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 8))
+        XCTAssertTrue(card.label.contains("6 reps · 20 kg assistance"))
+        card.tap()
+        let guidance = app.staticTexts["Weight is machine assistance. Less assistance is harder."]
+        for _ in 0..<8 where !guidance.isHittable { app.swipeUp() }
+        XCTAssertTrue(guidance.exists)
+    }
+
+    @MainActor
+    func testCustomExerciseCanChooseAssistanceMeaning() {
+        let app = launchLocalApp()
+        openExercisesTab(in: app)
+        let create = app.buttons["exercises-create-button"]
+        for _ in 0..<6 where !create.isHittable { app.swipeDown() }
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        let picker = app.buttons["custom-exercise-load-kind"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        app.buttons["Assistance"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Log the machine assistance. Less assistance is harder; compare on the same machine."].exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Custom exercise weight meaning"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testMixedLoadProgressShowsActualSetsAndNeutralComparison() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_MIXED_LOAD_PROGRESS"])
+        openExercisesTab(in: app)
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("pull-up")
+        let exercise = app.staticTexts["Pull Up"].firstMatch
+        XCTAssertTrue(exercise.waitForExistence(timeout: 4))
+        exercise.tap()
+        let selector = app.buttons["exercise-progress-metric-selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 4))
+        XCTAssertEqual(selector.value as? String, "Best-Set Reps")
+        app.buttons["exercise-progress-range-allTime"].tap()
+        let context = app.staticTexts["exercise-progress-set-context"]
+        XCTAssertTrue(context.waitForExistence(timeout: 4))
+        XCTAssertEqual(context.label, "6 reps · +10 kg")
+        let note = app.otherElements["exercise-progress-load-note"]
+        XCTAssertTrue(note.exists || app.staticTexts["exercise-progress-load-note"].exists)
+        let scroll = app.scrollViews.firstMatch
+        let chart = app.otherElements["exercise-progress-chart"]
+        for _ in 0..<6 {
+            if chart.frame.minY > 100 && chart.frame.maxY < app.frame.maxY - 80 { break }
+            scroll.swipeUp()
+        }
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Pull-up progress with added weight"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        chart.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+        let earlierSet = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "10 reps · Bodyweight"), object: context)
+        XCTAssertEqual(XCTWaiter.wait(for: [earlierSet], timeout: 3), .completed)
+
+        for _ in 0..<6 {
+            if selector.isHittable { break }
+            scroll.swipeDown()
+        }
+        selector.tap()
+        let weight = app.buttons["Heaviest Added Weight"].firstMatch
+        XCTAssertTrue(weight.waitForExistence(timeout: 3))
+        weight.tap()
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Heaviest Added Weight"), object: selector)
+        XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 3), .completed)
+    }
+
+    @MainActor
+    func testAddedWeightContextInWorkoutComparisonAndHistory() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_MIXED_LOAD_PROGRESS"])
+        app.buttons["Progress"].firstMatch.tap()
+        let comparisonNote = app.staticTexts["Added weight changed · compare reps at the same load"].firstMatch
+        for _ in 0..<10 where !comparisonNote.isHittable { app.swipeUp() }
+        XCTAssertTrue(comparisonNote.waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Added weight workout comparison"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["History"].firstMatch.tap()
+        let card = app.buttons["history-session-card"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 8))
+        XCTAssertTrue(card.label.contains("6 reps · +10 kg"))
+        card.tap()
+        let guidance = app.staticTexts["Weight is added weight. Bodyweight is not included."]
+        for _ in 0..<8 where !guidance.isHittable { app.swipeUp() }
+        XCTAssertTrue(guidance.exists)
     }
 
     @MainActor

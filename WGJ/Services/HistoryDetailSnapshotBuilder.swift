@@ -129,8 +129,12 @@ enum HistoryDetailSnapshotBuilder {
         let supersetGroupID: UUID?
         let supersetPosition: SupersetExercisePosition?
         let updatedAt: Date
+        let usesAddedWeight: Bool
+        let usesAssistance: Bool
 
-        nonisolated init(model: WorkoutSessionExercise) {
+        nonisolated init(model: WorkoutSessionExercise, usesAddedWeight: Bool = false, usesAssistance: Bool = false) {
+            self.usesAddedWeight = usesAddedWeight
+            self.usesAssistance = usesAssistance
             id = model.id
             catalogExerciseUUID = model.catalogExerciseUUID
             exerciseNameSnapshot = model.exerciseNameSnapshot
@@ -188,6 +192,8 @@ enum HistoryDetailSnapshotBuilder {
         }
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
+        let addedWeightIDs = try repository.addedWeightExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
+        let assistanceIDs = try repository.assistanceExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
         let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
         let preferredLoadUnit = (try? ProfileRepository(modelContext: modelContext)
             .currentProfile()?.preferredLoadUnit) ?? .kg
@@ -225,7 +231,7 @@ enum HistoryDetailSnapshotBuilder {
         return Snapshot(
             session: SessionSnapshot(model: session),
             cardioBlocks: cardioBlocks.map(CardioBlockSnapshot.init(model:)),
-            exercises: exercises.map(ExerciseSnapshot.init(model:)),
+            exercises: exercises.map { ExerciseSnapshot(model: $0, usesAddedWeight: addedWeightIDs.contains($0.catalogExerciseUUID), usesAssistance: assistanceIDs.contains($0.catalogExerciseUUID)) },
             preferredLoadUnit: preferredLoadUnit,
             localState: localState,
             hydrationPayloadByExerciseID: hydrationPayloadByExerciseID,
@@ -373,25 +379,11 @@ enum HistoryDetailSnapshotBuilder {
     }
 
     nonisolated private static func performanceText(for achievement: SessionSetPRAchievement) -> String {
-        if let weight = achievement.weight, achievement.loadUnit != .bodyweight {
-            return "\(WGJFormatters.decimalString(weight)) \(achievement.loadUnit.shortLabel) x \(achievement.reps)"
-        }
-
-        return "\(achievement.reps) reps"
+        achievement.performanceText
     }
 
     nonisolated private static func detailText(for achievement: SessionSetPRAchievement) -> String {
-        let kindsText = achievement.kinds.map(\.title).joined(separator: " + ") + " PR"
-
-        if achievement.kinds.contains(.strength), let estimatedOneRepMax = achievement.estimatedOneRepMax {
-            return "\(kindsText) · \(WGJFormatters.oneDecimalString(estimatedOneRepMax)) \(achievement.loadUnit.shortLabel) e1RM"
-        }
-
-        if achievement.kinds.contains(.volume), let volume = achievement.volume {
-            return "\(kindsText) · \(WGJFormatters.integerString(volume)) kg volume"
-        }
-
-        return kindsText
+        achievement.detailText
     }
 
     nonisolated private static func muscleHeatmap(

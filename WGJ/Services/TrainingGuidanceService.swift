@@ -114,6 +114,7 @@ nonisolated struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
     let categoryName: String
     let equipmentSummary: String
     let primaryMuscleNames: String
+    var loadTrackingRaw: String? = nil
 
     init(exerciseName: String, categoryName: String, equipmentSummary: String, primaryMuscleNames: String) {
         self.exerciseName = exerciseName
@@ -129,6 +130,7 @@ nonisolated struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
             equipmentSummary: exercise.equipmentSummary,
             primaryMuscleNames: exercise.primaryMuscleNames
         )
+        loadTrackingRaw = exercise.loadTrackingRaw
     }
 }
 
@@ -332,7 +334,7 @@ nonisolated struct TrainingGuidanceService {
         targetRepMax: Int?,
         setDrafts: [WorkoutSessionSetDraft]
     ) -> ProgressiveOverloadCue? {
-        guard let targetRepMin, let targetRepMax, targetRepMin <= targetRepMax else {
+        guard !exercise.usesAssistance, let targetRepMin, let targetRepMax, targetRepMin <= targetRepMax else {
             return nil
         }
 
@@ -427,6 +429,11 @@ nonisolated struct TrainingGuidanceService {
         targetRepMax: Int?,
         setDrafts: [WorkoutSessionSetDraft]
     ) -> ActiveWorkoutExerciseGuidancePresentation {
+        if exercise.usesAssistance {
+            return guidancePresentation(title: "Track reps and assistance together",
+                summary: "Compare on the same machine at the same assistance. Once your working sets comfortably reach the top of your rep range, try a small reduction in assistance.",
+                tone: .accent, badgeTitle: "Assistance", badgeSubtitle: "Less is harder", badgeSystemImage: "arrow.down.circle")
+        }
         let completedWorkingSets = setDrafts.filter { $0.isCompleted && !$0.isWarmup }
         let hasWorkingSets = setDrafts.contains { !$0.isWarmup }
         let isExerciseComplete = hasWorkingSets && setDrafts.allSatisfy(\.isCompleted)

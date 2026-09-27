@@ -171,6 +171,7 @@ nonisolated struct WorkoutSetInlineHintPresentation: Equatable, Sendable {
     }
 
     static func make(
+        usesAssistance: Bool = false,
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?,
         targetRepMin: Int?,
@@ -182,6 +183,7 @@ nonisolated struct WorkoutSetInlineHintPresentation: Equatable, Sendable {
         }
 
         guard let reference = WorkoutSetProgressReference.make(
+            usesAssistance: usesAssistance,
             draft: draft,
             previous: previous,
             targetRepMin: targetRepMin,

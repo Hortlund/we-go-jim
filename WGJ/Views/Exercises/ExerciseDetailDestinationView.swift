@@ -485,6 +485,20 @@ struct CustomExerciseEditorView: View {
                     .wgjPillField()
             }
 
+            if creationMode == .standard && !isCardioCategory {
+                Text("Weight means").font(.subheadline.weight(.semibold))
+                Picker("Weight means", selection: $draft.loadTrackingRaw) {
+                    Text("Automatic").tag(String?.none)
+                    ForEach(ExerciseLoadKind.allCases, id: \.self) { kind in
+                        Text(kind.title).tag(Optional(kind.rawValue))
+                    }
+                }
+                .accessibilityIdentifier("custom-exercise-load-kind")
+                Text(ExerciseLoadSemantics.kind(equipment: draft.equipmentSummary, exerciseName: draft.name,
+                    override: draft.loadTrackingRaw).explanation)
+                    .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+            }
+
             TextField("Equipment (optional)", text: $draft.equipmentSummary)
                 .textInputAutocapitalization(.words)
                 .wgjPillField()

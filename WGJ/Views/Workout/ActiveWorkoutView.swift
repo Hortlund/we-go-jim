@@ -731,6 +731,8 @@ struct ActiveWorkoutView: View {
                     targetRepMax: exercise.targetRepMax,
                     previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
                     guidance: nil,
+                    usesAddedWeight: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAddedWeight ?? false,
+                    usesAssistance: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAssistance ?? false,
                     preferredLoadUnit: preferredLoadUnit,
                     componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
                     componentSummaryAccessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary",
@@ -2732,7 +2734,7 @@ struct ActiveWorkoutView: View {
         catalogExercise: TrainingGuidanceCatalogSnapshot?
     ) -> [WorkoutSessionSetDraft] {
         guard TemplateLoadUnit.inferredDefault(
-            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? "", loadTrackingRaw: catalogExercise?.loadTrackingRaw
         ) == .bodyweight else {
             return drafts
         }

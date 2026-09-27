@@ -597,7 +597,7 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
         preferredLoadUnit: TemplateLoadUnit,
         date: Date = .now
     ) -> ActiveWorkoutRuntimeExercise {
-        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary, loadTrackingRaw: selection.loadTrackingRaw)
             ?? preferredLoadUnit
 
         return ActiveWorkoutRuntimeExercise(
@@ -638,7 +638,7 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
         preferredLoadUnit: TemplateLoadUnit,
         date: Date = .now
     ) -> ActiveWorkoutRuntimeExercise {
-        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary, loadTrackingRaw: selection.loadTrackingRaw)
             ?? preferredLoadUnit
         return ActiveWorkoutRuntimeExercise(
             catalogExerciseUUID: selection.remoteUUID,
@@ -1143,7 +1143,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
 
     func createExercise(from catalogItem: ExerciseCatalogItem, sortOrder: Int, restSeconds: Int = 120) -> ActiveWorkoutRuntimeExercise {
         let now = Date()
-        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary, loadTrackingRaw: catalogItem.loadTrackingRaw)
             ?? preferredLoadUnit()
         return ActiveWorkoutRuntimeExercise(
             catalogExerciseUUID: catalogItem.remoteUUID,
@@ -1325,7 +1325,7 @@ nonisolated enum ActiveWorkoutRuntimeFirstRenderSnapshotBuilder {
         catalogExercise: TrainingGuidanceCatalogSnapshot?
     ) -> [WorkoutSessionSetDraft] {
         guard TemplateLoadUnit.inferredDefault(
-            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? "", loadTrackingRaw: catalogExercise?.loadTrackingRaw
         ) == .bodyweight else {
             return drafts
         }

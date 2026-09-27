@@ -166,7 +166,7 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 setIndex: set.sortOrder,
                 isWarmup: set.isWarmup,
                 reps: reps,
-                weight: nil,
+                weight: set.actualLoadUnit == .bodyweight ? 0 : set.actualWeight,
                 loadUnit: .bodyweight,
                 normalizedWeightKg: nil,
                 estimatedOneRepMaxKg: nil,

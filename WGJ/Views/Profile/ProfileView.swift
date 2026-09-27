@@ -455,9 +455,13 @@ struct ProfileView: View {
 
                         Spacer()
 
-                        Text("\(formatWeight(record.estimatedOneRepMax)) \(record.loadUnit.shortLabel)")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.accentCyan)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("\(record.usesAddedWeight ? "+" : "")\(formatWeight(record.weight)) \(record.loadUnit.shortLabel) × \(record.reps)")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.accentCyan)
+                            Text(record.estimatedOneRepMax.map { "Est. 1RM \(formatWeight($0)) \(record.loadUnit.shortLabel)" } ?? (record.usesAssistance ? "Least assistance × reps" : "Added weight × reps"))
+                                .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                        }
                     }
                 }
                 ForEach(dashboardContent.bodyweightPersonalRecords, id: \.catalogExerciseUUID) { record in
@@ -713,87 +717,33 @@ struct ProfileView: View {
         emptyMessage: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader(title, subtitle: subtitle)
+            WGJSectionHeader(title, subtitle: series?.usesAssistance == true ? "Reps at a recorded assistance. Less assistance is harder." : series?.usesAddedWeight == true && metric == .maxWeight
+                ? "Added weight, excluding bodyweight."
+                : series?.usesAddedWeight == true && metric == .volume
+                    ? "Added weight × reps, excluding bodyweight."
+                    : metric == .volume ? "Weight × reps across working sets; a measure of training volume."
+                    : metric == .oneRepMax ? "Estimated from weight and reps, not a tested maximum." : subtitle)
 
             if let series {
                 if series.points.count >= 2 {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Latest")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(WGJTheme.textSecondary)
-
-                            Spacer()
-
-                            Text(metric.formattedTrendValue(series.points.last?.value ?? 0, loadUnit: series.loadUnit))
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(accent)
-                        }
-
-                        if let deltaText = trendDeltaText(for: series, metric: metric) {
-                            Text(deltaText)
-                                .font(.caption)
-                                .foregroundStyle(WGJTheme.textSecondary)
-                        }
-
-                        Chart(series.points) { point in
-                            AreaMark(
-                                x: .value("Workout", point.completedAt),
-                                y: .value(title, point.value)
-                            )
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [accent.opacity(0.22), accent.opacity(0.02)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-
-                            LineMark(
-                                x: .value("Workout", point.completedAt),
-                                y: .value(title, point.value)
-                            )
-                            .interpolationMethod(.catmullRom)
-                            .foregroundStyle(accent)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-
-                            PointMark(
-                                x: .value("Workout", point.completedAt),
-                                y: .value(title, point.value)
-                            )
-                            .foregroundStyle(accent)
-                        }
-                        .chartXAxis {
-                            AxisMarks(values: .automatic(desiredCount: min(max(series.points.count, 2), 4))) { _ in
-                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                                    .foregroundStyle(WGJTheme.outlineStrong.opacity(0.35))
-                                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                                    .foregroundStyle(WGJTheme.textSecondary)
-                            }
-                        }
-                        .chartYAxis {
-                            AxisMarks(position: .leading) { _ in
-                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                                    .foregroundStyle(WGJTheme.outlineStrong.opacity(0.35))
-                                AxisValueLabel()
-                                    .foregroundStyle(WGJTheme.textSecondary)
-                            }
-                        }
-                        .frame(height: 170)
-                        .allowsHitTesting(false)
-                    }
+                    ProfileExerciseTrendChart(series: series, metric: metric, title: title, accent: accent)
                 } else if let latest = series.points.last {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(metric.formattedTrendValue(latest.value, loadUnit: series.loadUnit))
                             .font(.title3.weight(.bold))
                             .foregroundStyle(accent)
 
+                        if let context = latest.context {
+                            Text(context).font(.subheadline).foregroundStyle(WGJTheme.textSecondary)
+                        }
                         Text("Log one more workout with this metric to unlock the chart.")
                             .font(.subheadline)
                             .foregroundStyle(WGJTheme.textSecondary)
                     }
                 } else {
-                    Text(emptyMessage)
+                    Text(series.usesAssistance ? "Track reps for this exercise. Assistance is not lifted weight." : series.usesAddedWeight && metric == .oneRepMax
+                        ? "Track reps or added weight for this exercise. A total-load 1RM needs bodyweight recorded with each workout."
+                        : emptyMessage)
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
@@ -1638,20 +1588,6 @@ struct ProfileView: View {
         }
 
         return "\(totalMinutes)m"
-    }
-
-    private func trendDeltaText(for series: ExerciseMetricSeries, metric: ProfileExerciseTrendMetric) -> String? {
-        guard let first = series.points.first, let last = series.points.last, series.points.count >= 2 else {
-            return nil
-        }
-
-        let delta = last.value - first.value
-        guard abs(delta) >= 0.1 else {
-            return "Holding steady across the last \(series.points.count) logged workouts."
-        }
-
-        let direction = delta > 0 ? "up" : "down"
-        return "\(metric.formattedTrendValue(abs(delta), loadUnit: series.loadUnit)) \(direction) across your last \(series.points.count) logged workouts."
     }
 
     private func trendAccent(for metric: ProfileExerciseTrendMetric) -> Color {

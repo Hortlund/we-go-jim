@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 nonisolated final class HistoryProjectionRepository {
-    static let currentVersion = 5
+    static let currentVersion = 7
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
 

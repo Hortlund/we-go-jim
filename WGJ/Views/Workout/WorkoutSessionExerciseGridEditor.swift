@@ -23,6 +23,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
+    let usesAddedWeight: Bool
+    let usesAssistance: Bool
     let preferredLoadUnit: TemplateLoadUnit
     let componentSummaryResolution: ExerciseComponentRotationResolution?
     let componentSummaryAccessibilityIdentifierPrefix: String?
@@ -91,6 +93,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
         componentSummaryAccessibilityIdentifierPrefix: String? = nil,
@@ -134,6 +137,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
+        self.usesAddedWeight = usesAddedWeight
+        self.usesAssistance = usesAssistance
         self.preferredLoadUnit = preferredLoadUnit
         self.componentSummaryResolution = componentSummaryResolution
         self.componentSummaryAccessibilityIdentifierPrefix = componentSummaryAccessibilityIdentifierPrefix
@@ -168,6 +173,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
         let initialProjection = startsExpanded
             ? Self.makeProjection(
+                usesAssistance: usesAssistance,
                 setDrafts: setDrafts.wrappedValue,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -335,6 +341,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 exerciseNameText
+                if usesAssistance {
+                    Text("Log machine assistance. Less assistance is harder.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                }
+                if usesAddedWeight {
+                    Text("Log added weight only. Bodyweight is not included.")
+                        .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                        .accessibilityIdentifier("workout-added-weight-guidance")
+                }
 
                 Text(summaryLine)
                     .font(.subheadline)
@@ -646,6 +660,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         let workingSetNumber = projection.workingSetNumberBySetID[currentSet.id] ?? 0
         let row = Self.makeDisplayRow(
+                usesAssistance: usesAssistance,
             draft: currentSet,
             index: currentIndex,
             workingSetNumber: workingSetNumber,
@@ -1287,6 +1302,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func personalRecordTint(for kind: WorkoutPersonalRecordKind) -> Color {
         switch kind {
+        case .assistance, .assistedReps: return WGJTheme.accentCyan
         case .strength:
             return WGJTheme.accentGold
         case .weight:
@@ -1472,6 +1488,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentIDs = setDrafts.map(\.id)
         guard projection.rows.map(\.id) == currentIDs else {
             return Self.makeProjection(
+                usesAssistance: usesAssistance,
                 setDrafts: setDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -1502,6 +1519,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func inlineHintPresentation(at index: Int) -> WorkoutSetInlineHintPresentation? {
         guard setDrafts.indices.contains(index) else { return nil }
         return WorkoutSetInlineHintPresentation.make(
+            usesAssistance: usesAssistance,
             draft: setDrafts[index],
             previous: previousBySetIndex[index],
             targetRepMin: targetRepMin,
@@ -1786,6 +1804,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
             Self.makeProjection(
+                usesAssistance: usesAssistance,
                 setDrafts: currentDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -1865,6 +1884,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private static func makeProjection(
+        usesAssistance: Bool = false,
         setDrafts: [WorkoutSessionSetDraft],
         previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         targetRepMin: Int?,
@@ -1876,6 +1896,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             setDrafts: setDrafts
         ) { draft, index, workingSetNumber in
             makeDisplayRow(
+                usesAssistance: usesAssistance,
                 draft: draft,
                 index: index,
                 workingSetNumber: workingSetNumber,
@@ -1889,6 +1910,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private static func makeDisplayRow(
+        usesAssistance: Bool = false,
         draft: WorkoutSessionSetDraft,
         index: Int,
         workingSetNumber: Int,
@@ -1922,6 +1944,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             ),
             metadataLine: metadataLine(for: draft),
             inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
+            usesAssistance: usesAssistance,
                 draft: draft,
                 previous: previousPerformanceResolution.previous(at: index),
                 targetRepMin: targetRepMin,

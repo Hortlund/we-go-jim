@@ -62,11 +62,17 @@ struct ExerciseDetailStatsSection: View {
         let projection = presentation.projection
         let availabilityByMetric = presentation.availability
         return VStack(alignment: .leading, spacing: 14) {
-            controls(availabilityByMetric: availabilityByMetric)
+            controls(dataset: presentation.request.dataset, availabilityByMetric: availabilityByMetric)
             if let summary = projection.summary {
                 summaryGrid(summary, projection: projection)
             }
             ExerciseProgressChartCard(projection: projection)
+            if let note = projection.comparisonNote {
+                Label(note, systemImage: "info.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .accessibilityIdentifier("exercise-progress-load-note")
+            }
             if projection.milestones.isEmpty {
                 Text(projection.availability.reason ?? "No compatible history in this range.")
                     .font(.subheadline)
@@ -81,17 +87,18 @@ struct ExerciseDetailStatsSection: View {
     }
 
     private func controls(
+        dataset: ExerciseProgressDataset,
         availabilityByMetric: [ExerciseProgressMetric: ExerciseProgressAvailability]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJActionMenuButton("Metric", message: selectedMetric.title) {
+            WGJActionMenuButton("Metric", message: dataset.title(for: selectedMetric)) {
                 ForEach(ExerciseProgressMetric.allCases) { metric in
                     Button {
                         selectedMetric = metric
                     } label: {
                         metric == selectedMetric
-                            ? Label(metric.title, systemImage: "checkmark")
-                            : Label(metric.title, systemImage: "chart.xyaxis.line")
+                            ? Label(dataset.title(for: metric), systemImage: "checkmark")
+                            : Label(dataset.title(for: metric), systemImage: "chart.xyaxis.line")
                     }
                     .disabled(availabilityByMetric[metric]?.isAvailable != true)
                     .accessibilityHint(availabilityByMetric[metric]?.reason ?? "")
@@ -100,7 +107,7 @@ struct ExerciseDetailStatsSection: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Metric").font(.caption.weight(.semibold)).foregroundStyle(WGJTheme.textSecondary)
-                        Text(selectedMetric.title).font(.headline).foregroundStyle(WGJTheme.textPrimary)
+                        Text(dataset.title(for: selectedMetric)).font(.headline).foregroundStyle(WGJTheme.textPrimary)
                     }
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down").foregroundStyle(WGJTheme.accentBlue)
@@ -109,7 +116,7 @@ struct ExerciseDetailStatsSection: View {
                 .wgjCardContainer(strong: true)
             }
             .accessibilityIdentifier("exercise-progress-metric-selector")
-            .accessibilityValue(selectedMetric.title)
+            .accessibilityValue(dataset.title(for: selectedMetric))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -133,8 +140,8 @@ struct ExerciseDetailStatsSection: View {
 
     private func summaryGrid(_ summary: ExerciseProgressSummary, projection: ExerciseProgressProjection) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
-            summaryCard("Change", value: changeText(summary, projection: projection), accent: changeColor(summary))
-            summaryCard("Best", value: projection.formattedValue(summary.best), accent: WGJTheme.accentGold)
+            summaryCard(projection.metric == .bestSetReps ? "Rep Change" : "Change", value: changeText(summary, projection: projection), accent: projection.comparisonNote == nil ? changeColor(summary) : WGJTheme.textPrimary)
+            summaryCard(projection.metric == .bestSetReps ? "Most Reps" : "Highest", value: projection.formattedValue(summary.best), accent: WGJTheme.accentGold)
             summaryCard("Sessions", value: "\(summary.sessionCount)")
             summaryCard("Working Sets", value: "\(summary.totalSets)")
             summaryCard("Total Reps", value: "\(summary.totalReps)")
@@ -165,10 +172,15 @@ struct ExerciseDetailStatsSection: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(milestoneTitle(milestone.kind)).font(.subheadline.weight(.bold)).foregroundStyle(WGJTheme.textPrimary)
-                        Text(projection.formattedValue(milestone.value))
+                        Text(milestoneTitle(milestone.kind, metric: projection.metric)).font(.subheadline.weight(.bold)).foregroundStyle(WGJTheme.textPrimary)
+                        Text(projection.metric == .bestSetReps || projection.metric == .heaviestWeight
+                            ? milestone.context ?? projection.formattedValue(milestone.value)
+                            : projection.formattedValue(milestone.value))
                             .font(.headline)
                             .foregroundStyle(milestone.kind == .personalRecord ? WGJTheme.accentGold : WGJTheme.accentBlue)
+                        if projection.metric != .bestSetReps && projection.metric != .heaviestWeight, let context = milestone.context {
+                            Text(context).font(.subheadline).foregroundStyle(WGJTheme.textSecondary)
+                        }
                         Text(milestone.date.formatted(date: .abbreviated, time: .omitted))
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -216,6 +228,7 @@ struct ExerciseDetailStatsSection: View {
     private func configureMetricIfNeeded(for dataset: ExerciseProgressDataset) {
         guard configuredDatasetID != dataset.exerciseUUID else { return }
         configuredDatasetID = dataset.exerciseUUID
+        selectedMetric = dataset.preferredMetric
         let availabilityByMetric = availabilityByMetric(for: dataset)
         if availabilityByMetric[selectedMetric]?.isAvailable != true,
            let first = ExerciseProgressMetric.allCases.first(where: {
@@ -233,10 +246,10 @@ struct ExerciseDetailStatsSection: View {
         summary.absoluteChange > 0 ? WGJTheme.success : summary.absoluteChange < 0 ? WGJTheme.danger : WGJTheme.textPrimary
     }
 
-    private func milestoneTitle(_ kind: ExerciseProgressMilestoneKind) -> String {
+    private func milestoneTitle(_ kind: ExerciseProgressMilestoneKind, metric: ExerciseProgressMetric) -> String {
         switch kind {
         case .firstPerformance: "First Performance"
-        case .personalRecord: "Personal Record"
+        case .personalRecord: metric == .bestSetReps ? "Most Reps Logged" : metric == .totalReps || metric == .sessionVolume ? "Highest Volume Logged" : "Personal Record"
         case .materialChange: "Notable Change"
         case .latestPerformance: "Latest Performance"
         }
@@ -258,24 +271,32 @@ private struct ExerciseProgressChartCard: View {
                     Text(selectedDate == nil ? "Latest" : point.date.formatted(date: .abbreviated, time: .omitted))
                         .foregroundStyle(WGJTheme.textSecondary)
                     Spacer()
-                    Text(projection.formattedValue(point.value)).fontWeight(.bold).foregroundStyle(WGJTheme.accentBlue)
+                    if projection.metric != .bestSetReps || point.context == nil {
+                        Text(projection.formattedValue(point.value)).fontWeight(.bold).foregroundStyle(WGJTheme.accentBlue)
+                    }
                 }
                 .font(.subheadline)
+                if let context = point.context {
+                    Text(context)
+                        .font(projection.metric == .bestSetReps ? .headline : .subheadline.weight(.medium))
+                        .foregroundStyle(projection.metric == .bestSetReps ? WGJTheme.accentBlue : WGJTheme.textPrimary)
+                        .accessibilityIdentifier("exercise-progress-set-context")
+                }
             }
 
             Chart {
                 ForEach(projection.chartPoints) { point in
-                    AreaMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                    AreaMark(x: .value("Date", point.date), y: .value(projection.metricTitle, point.value))
                         .foregroundStyle(LinearGradient(
                             colors: [WGJTheme.accentBlue.opacity(0.20), WGJTheme.accentBlue.opacity(0.02)],
                             startPoint: .top,
                             endPoint: .bottom
                         ))
-                    LineMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                    LineMark(x: .value("Date", point.date), y: .value(projection.metricTitle, point.value))
                         .interpolationMethod(.linear)
                         .foregroundStyle(WGJTheme.accentBlue)
                         .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    PointMark(x: .value("Date", point.date), y: .value(projection.metric.title, point.value))
+                    PointMark(x: .value("Date", point.date), y: .value(projection.metricTitle, point.value))
                         .foregroundStyle(WGJTheme.accentBlue)
                 }
                 if let point = selectedPoint {
@@ -285,7 +306,18 @@ private struct ExerciseProgressChartCard: View {
                 }
             }
             .frame(height: 190)
-            .chartXSelection(value: $selectedDate)
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let x = location.x - geometry[plotFrame].minX
+                            selectedDate = proxy.value(atX: x, as: Date.self)
+                        }
+                        .accessibilityHidden(true)
+                }
+            }
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                     AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
@@ -306,6 +338,10 @@ private struct ExerciseProgressChartCard: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("exercise-progress-chart")
             .accessibilityLabel(projection.accessibilitySummary)
+            .accessibilityValue((selectedPoint ?? projection.points.last)?.context ?? "")
+            if let explanation = projection.metricExplanation {
+                Text(explanation).font(.caption).foregroundStyle(WGJTheme.textSecondary)
+            }
         }
         .padding(14)
         .wgjCardContainer(strong: true)

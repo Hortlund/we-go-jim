@@ -152,6 +152,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let equipmentTokens: Set<String>
     let primaryMuscleNames: String
     let cardioTrackingProfileRaw: String?
+    let loadTrackingRaw: String?
     let secondaryMuscleNames: String
     let primaryMuscleIDs: Set<Int>
     let secondaryMuscleIDs: Set<Int>
@@ -169,7 +170,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
             categoryName: categoryName,
             equipmentSummary: equipmentSummary,
             primaryMuscleNames: primaryMuscleNames,
-            cardioTrackingProfileRaw: cardioTrackingProfileRaw
+            cardioTrackingProfileRaw: cardioTrackingProfileRaw, loadTrackingRaw: loadTrackingRaw
         )
     }
 
@@ -182,6 +183,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         equipmentTokens = Set(exercise.equipmentTokens.map { $0.lowercased() })
         primaryMuscleNames = exercise.primaryMuscleNames
         cardioTrackingProfileRaw = exercise.cardioTrackingProfile?.rawValue
+        loadTrackingRaw = exercise.loadTrackingRaw
         secondaryMuscleNames = exercise.secondaryMuscleNames
         primaryMuscleIDs = Set(exercise.primaryMuscles.map(\.remoteID))
         secondaryMuscleIDs = Set(exercise.secondaryMuscles.map(\.remoteID))
