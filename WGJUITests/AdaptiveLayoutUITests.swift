@@ -20,7 +20,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let toggle = app.switches["gym-bro-mode-toggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 3))
         XCTAssertEqual(toggle.value as? String, "0")
-        XCTAssertTrue(app.staticTexts["Brain empty. We go jim."].exists)
+        XCTAssertTrue(app.staticTexts["Gym-bro mode unlocked."].exists)
         toggle.tap()
         XCTAssertEqual(toggle.value as? String, "1")
         let attachment = XCTAttachment(screenshot: app.screenshot())
