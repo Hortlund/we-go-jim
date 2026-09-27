@@ -1266,6 +1266,7 @@ final class RestTimerState {
     var restTimerSetLabel: String?
     var restTimerSourceSetID: UUID?
     var restTimerPopup: RestTimerPopup?
+    private(set) var lastCompletedRest: RestTimerSnapshot?
 
     @ObservationIgnored private var restTimerExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var restTimerPopupDismissTask: Task<Void, Never>?
@@ -1284,6 +1285,7 @@ final class RestTimerState {
         }
 
         dismissRestTimerPopup()
+        lastCompletedRest = nil
         restTimerEndsAt = Date().addingTimeInterval(TimeInterval(normalized))
         restTimerExerciseName = exerciseName
         restTimerSetLabel = setLabel
@@ -1301,6 +1303,7 @@ final class RestTimerState {
             return false
         }
 
+        lastCompletedRest = nil
         let didHaveRestTimer = restTimerEndsAt != nil
             || restTimerExerciseName != nil
             || restTimerSetLabel != nil
@@ -1355,6 +1358,7 @@ final class RestTimerState {
         restTimerExpirationTask?.cancel()
         restTimerExpirationTask = nil
         restTimerEndsAt = snapshot.endsAt
+        lastCompletedRest = nil
         restTimerExerciseName = snapshot.exerciseName
         restTimerSetLabel = snapshot.setLabel
         restTimerSourceSetID = snapshot.sourceSetID
@@ -1377,7 +1381,10 @@ final class RestTimerState {
 
         let exerciseName = restTimerExerciseName
         let setLabel = restTimerSetLabel
+        let completedRest = RestTimerSnapshot(endsAt: restTimerEndsAt, exerciseName: exerciseName,
+            setLabel: setLabel, sourceSetID: restTimerSourceSetID)
         clearRestTimer(cancelNotification: false)
+        lastCompletedRest = completedRest
         WorkoutFeedbackCenter.shared.restTimerCompleted(style: AppRuntimeState.shared.workoutNotificationStyle)
         showRestTimerPopup(exerciseName: exerciseName, setLabel: setLabel)
     }
