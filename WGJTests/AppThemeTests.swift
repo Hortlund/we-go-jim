@@ -21,7 +21,7 @@ final class AppThemeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let preferences = WGJThemePreferences(defaults: defaults)
-        for theme in WGJAppTheme.allCases {
+        for theme in WGJAppTheme.allCases where theme != .christmas {
             preferences.select(theme)
             XCTAssertEqual(WGJThemePreferences(defaults: defaults).selected, theme)
         }
@@ -63,6 +63,99 @@ final class AppThemeTests: XCTestCase {
                 }
             }
         }
+    }
+
+    @MainActor
+    func testChristmasRibbonAndExclusiveCardKeepReadableContrast() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            for background in [WGJChristmasStyle.cranberry, WGJChristmasStyle.deepRed] {
+                XCTAssertGreaterThanOrEqual(contrast(WGJChristmasStyle.cream, background, style), 4.5)
+                XCTAssertGreaterThanOrEqual(contrast(WGJChristmasStyle.gold, background, style), 4.5)
+            }
+        }
+    }
+
+    private func date(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    func testChristmasReturnsEveryDecemberWithoutYearLimit() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        for year in [2026, 2027, 2032, 2099, 2400] {
+            XCTAssertFalse(ChristmasThemeSeason.isAvailable(on: date("\(year)-11-30T23:59:59Z"), calendar: calendar))
+            XCTAssertTrue(ChristmasThemeSeason.isAvailable(on: date("\(year)-12-01T00:00:00Z"), calendar: calendar))
+            XCTAssertTrue(ChristmasThemeSeason.isAvailable(on: date("\(year)-12-31T23:59:59Z"), calendar: calendar))
+            XCTAssertFalse(ChristmasThemeSeason.isAvailable(on: date("\(year + 1)-01-01T00:00:00Z"), calendar: calendar))
+        }
+    }
+
+    func testChristmasFollowsLocalTimeZone() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 3600)!
+        XCTAssertTrue(ChristmasThemeSeason.isAvailable(on: date("2026-11-30T23:00:00Z"), calendar: calendar))
+        XCTAssertFalse(ChristmasThemeSeason.isAvailable(on: date("2026-12-31T23:00:00Z"), calendar: calendar))
+        calendar.timeZone = TimeZone(secondsFromGMT: -28800)!
+        XCTAssertFalse(ChristmasThemeSeason.isAvailable(on: date("2026-12-01T07:59:59Z"), calendar: calendar))
+        XCTAssertTrue(ChristmasThemeSeason.isAvailable(on: date("2027-01-01T07:59:59Z"), calendar: calendar))
+    }
+
+    @MainActor
+    func testChristmasExpiresAndRequiresChoosingAgainNextYear() throws {
+        let name = "AppThemeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var clock = date("2026-11-15T12:00:00Z")
+        let preferences = WGJThemePreferences(defaults: defaults, now: { clock })
+        preferences.select(.mintCondition)
+        preferences.select(.christmas)
+        XCTAssertEqual(preferences.selected, .mintCondition)
+        XCTAssertFalse(preferences.availableThemes.contains(.christmas))
+
+        clock = date("2026-12-15T12:00:00Z")
+        preferences.refreshSeason()
+        XCTAssertTrue(preferences.availableThemes.contains(.christmas))
+        XCTAssertEqual(preferences.selected, .mintCondition, "December never opts you in")
+        preferences.select(.christmas)
+        XCTAssertEqual(preferences.selected, .christmas)
+        XCTAssertEqual(WGJThemePreferences(defaults: defaults, now: { clock }).selected, .christmas)
+
+        clock = date("2027-01-15T12:00:00Z")
+        preferences.refreshSeason()
+        XCTAssertEqual(preferences.selected, .mintCondition)
+        XCTAssertFalse(preferences.availableThemes.contains(.christmas))
+        XCTAssertEqual(WGJThemePreferences(defaults: defaults, now: { clock }).selected, .mintCondition)
+
+        clock = date("2027-12-15T12:00:00Z")
+        preferences.refreshSeason()
+        XCTAssertTrue(preferences.availableThemes.contains(.christmas))
+        XCTAssertEqual(preferences.selected, .mintCondition)
+        preferences.select(.christmas)
+        XCTAssertEqual(preferences.selected, .christmas)
+
+        // Even if the app was closed all year, the next December is a fresh opt-in.
+        clock = date("2028-12-15T12:00:00Z")
+        XCTAssertEqual(WGJThemePreferences(defaults: defaults, now: { clock }).selected, .mintCondition)
+    }
+
+    @MainActor
+    func testColdLaunchOutsideDecemberRestoresRegularThemeAndManualChoiceWins() throws {
+        let name = "AppThemeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var clock = date("2026-12-15T12:00:00Z")
+        let preferences = WGJThemePreferences(defaults: defaults, now: { clock })
+        preferences.select(.electricStrength)
+        preferences.select(.christmas)
+        clock = date("2027-01-15T12:00:00Z")
+        XCTAssertEqual(WGJThemePreferences(defaults: defaults, now: { clock }).selected, .electricStrength)
+
+        clock = date("2027-12-15T12:00:00Z")
+        preferences.select(.christmas)
+        preferences.select(.wheyTooPurple)
+        clock = date("2028-01-15T12:00:00Z")
+        preferences.refreshSeason()
+        XCTAssertEqual(preferences.selected, .wheyTooPurple)
     }
 
     @MainActor

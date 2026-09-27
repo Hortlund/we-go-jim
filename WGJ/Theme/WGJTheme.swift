@@ -29,6 +29,8 @@ struct WGJPalette {
 }
 
 enum WGJTheme {
+    static var isChristmas: Bool { WGJThemePreferences.shared.selected == .christmas }
+    static var primaryButtonText: Color { isChristmas ? WGJChristmasStyle.cream : textInverse }
     static var usesMatteSurfaces: Bool { WGJThemePreferences.shared.selected.usesMatteSurfaces }
 
     static func headingFont(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
@@ -67,7 +69,7 @@ enum WGJTheme {
     static var appHeroGradient: LinearGradient {
         LinearGradient(
             colors: [
-                usesMatteSurfaces ? card : Color.white.opacity(0.34),
+                isChristmas ? fieldStrong : (usesMatteSurfaces ? card : Color.white.opacity(0.34)),
                 usesMatteSurfaces ? card : accentBlue.opacity(0.12),
                 usesMatteSurfaces ? card : accentPurple.opacity(0.07),
             ],
@@ -79,7 +81,7 @@ enum WGJTheme {
     static var headerOverlayGradient: LinearGradient {
         LinearGradient(
             colors: [
-                usesMatteSurfaces ? card : Color.white.opacity(0.24),
+                isChristmas ? fieldStrong : (usesMatteSurfaces ? card : Color.white.opacity(0.24)),
                 usesMatteSurfaces ? card : accentBlue.opacity(0.10),
                 usesMatteSurfaces ? card : accentCyan.opacity(0.08),
             ],
@@ -180,7 +182,8 @@ private struct WGJCardModifier: ViewModifier {
     }
 
     private var strokeColor: Color {
-        strong ? WGJTheme.outline.opacity(0.52) : WGJTheme.outline.opacity(0.34)
+        if WGJTheme.isChristmas { return WGJTheme.accentGold.opacity(strong ? 0.38 : 0.22) }
+        return strong ? WGJTheme.outline.opacity(0.52) : WGJTheme.outline.opacity(0.34)
     }
 
     func body(content: Content) -> some View {
@@ -203,6 +206,9 @@ private struct WGJGlassButtonBackground: View {
     private var fill: AnyShapeStyle {
         switch tone {
         case .primary:
+            if WGJTheme.isChristmas {
+                return AnyShapeStyle(WGJChristmasStyle.ribbonGradient.opacity(isPressed ? 0.85 : 1))
+            }
             if WGJTheme.usesMatteSurfaces {
                 return AnyShapeStyle(WGJTheme.accent.opacity(isPressed ? 0.85 : 1))
             }
@@ -233,7 +239,7 @@ private struct WGJGlassButtonBackground: View {
     }
 
     private var overlayFill: Color {
-        if WGJTheme.usesMatteSurfaces { return .clear }
+        if WGJTheme.usesMatteSurfaces || WGJTheme.isChristmas { return .clear }
         switch tone {
         case .primary:
             return Color.white.opacity(0.04)
@@ -247,7 +253,7 @@ private struct WGJGlassButtonBackground: View {
     private var stroke: Color {
         switch tone {
         case .primary:
-            return Color.white.opacity(0.18)
+            return WGJTheme.isChristmas ? WGJChristmasStyle.gold.opacity(0.6) : Color.white.opacity(0.18)
         case .secondary:
             return WGJTheme.outline.opacity(0.86)
         case .destructive:
@@ -262,6 +268,12 @@ private struct WGJGlassButtonBackground: View {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .fill(overlayFill)
             }
+            .overlay(alignment: .bottom) {
+                if WGJTheme.isChristmas, case .primary = tone {
+                    WGJChristmasCandyStripe().frame(height: 4)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
@@ -314,7 +326,7 @@ struct WGJPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(WGJTheme.textInverse)
+            .foregroundStyle(WGJTheme.primaryButtonText)
             .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 16)
@@ -330,7 +342,7 @@ struct WGJCompactPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(WGJTheme.textInverse)
+            .foregroundStyle(WGJTheme.primaryButtonText)
             .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 14)
@@ -380,7 +392,7 @@ struct WGJSelectableButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
+            .foregroundStyle(isSelected ? WGJTheme.primaryButtonText : WGJTheme.textPrimary)
             .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 14)
@@ -568,6 +580,13 @@ struct WGJRootHeader<Trailing: View>: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if WGJTheme.isChristmas { WGJChristmasGarland() }
+            headerContent
+        }
+    }
+
+    private var headerContent: some View {
         HStack(alignment: .bottom, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 rootTitle
@@ -876,7 +895,11 @@ extension View {
 
     func wgjScreenBackground() -> some View {
         background {
-            WGJTheme.bgBase.ignoresSafeArea()
+            ZStack {
+                WGJTheme.bgBase
+                if WGJTheme.isChristmas { WGJChristmasBackground() }
+            }
+            .ignoresSafeArea()
         }
     }
 

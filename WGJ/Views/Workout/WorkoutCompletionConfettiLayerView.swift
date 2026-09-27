@@ -57,13 +57,35 @@ final class WorkoutCompletionConfettiUIView: UIView {
             let particle = CALayer()
             particle.bounds = CGRect(x: 0, y: 0, width: piece.width, height: piece.height)
             particle.cornerRadius = piece.cornerRadius
-            particle.backgroundColor = UIColor(piece.color).resolvedColor(with: traitCollection).cgColor
+            let color = UIColor(piece.color).resolvedColor(with: traitCollection)
+            if let symbol = piece.symbolName {
+                particle.contents = Self.symbolImage(symbol, color: color).cgImage
+                particle.contentsGravity = .resizeAspect
+                particle.contentsScale = traitCollection.displayScale
+            } else {
+                particle.backgroundColor = color.cgColor
+            }
             particle.opacity = 0
             layer.addSublayer(particle)
             particle.add(
                 Self.animation(for: piece, origin: origin, size: bounds.size, beginTime: burstStart + piece.delay),
                 forKey: "confetti"
             )
+        }
+    }
+
+    static func symbolImage(_ symbol: String, color: UIColor) -> UIImage {
+        // Rasterize the tinted UIImage: its raw cgImage alone can still contain
+        // the untinted SF Symbol mask and would display black in a CALayer.
+        UIGraphicsImageRenderer(size: CGSize(width: 22, height: 22)).image { _ in
+            if symbol == "🎄" {
+                (symbol as NSString).draw(at: .zero, withAttributes: [.font: UIFont.systemFont(ofSize: 18)])
+            } else {
+                UIImage(systemName: symbol,
+                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))?
+                    .withTintColor(color, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(x: 0, y: 0, width: 22, height: 22))
+            }
         }
     }
 

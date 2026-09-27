@@ -363,6 +363,7 @@ struct WorkoutCompletionSummaryView: View {
     private func heroCard(_ snapshot: WorkoutCompletionSnapshot) -> some View {
         Button { } label: {
             VStack(alignment: .leading, spacing: 16) {
+                if WGJTheme.isChristmas { WGJChristmasGarland() }
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(snapshot.celebrationTitle.uppercased())
@@ -374,6 +375,12 @@ struct WorkoutCompletionSummaryView: View {
                             .foregroundStyle(WGJTheme.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
 
+                        if WGJTheme.isChristmas {
+                            Text("Sleigh all day. You earned this.")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                        }
+
                         Text(snapshot.celebrationSubtitle)
                             .font(.subheadline)
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -383,22 +390,29 @@ struct WorkoutCompletionSummaryView: View {
                     Spacer(minLength: 12)
 
                     ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        WGJTheme.accentBlue.opacity(0.92),
-                                        snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan.opacity(0.80) : WGJTheme.accentGold.opacity(0.86),
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                        if WGJTheme.isChristmas {
+                            Circle()
+                                .fill(WGJChristmasStyle.ribbonGradient)
+                                .overlay(Circle().strokeBorder(WGJChristmasStyle.gold, lineWidth: 2))
+                                .frame(width: 74, height: 74)
+                        } else {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            WGJTheme.accentBlue.opacity(0.92),
+                                            snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan.opacity(0.80) : WGJTheme.accentGold.opacity(0.86),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .frame(width: 74, height: 74)
+                                .frame(width: 74, height: 74)
+                        }
 
-                        Image(systemName: snapshot.personalRecords.isEmpty ? "checkmark.seal.fill" : "trophy.fill")
+                        Image(systemName: snapshot.personalRecords.isEmpty ? (WGJTheme.isChristmas ? "gift.fill" : "checkmark.seal.fill") : "trophy.fill")
                             .font(.title.weight(.bold))
-                            .foregroundStyle(WGJTheme.textInverse)
+                            .foregroundStyle(WGJTheme.isChristmas ? WGJChristmasStyle.cream : WGJTheme.textInverse)
                     }
                     .scaleEffect(celebrationPhase.iconScale(using: celebrationPresentation))
                 }
@@ -1251,7 +1265,8 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
             seed: UInt64.random(in: 1...UInt64.max),
             role: descriptor.role,
             count: descriptor.pieceCount,
-            variant: descriptor.variant
+            variant: descriptor.variant,
+            christmas: WGJTheme.isChristmas
         )
     }
 }
@@ -1295,12 +1310,14 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
     let delay: Double
     let duration: Double
     let color: Color
+    var symbolName: String? = nil
 
     static func random(
         seed: UInt64,
         role: WorkoutCompletionConfettiBurstRole,
         count: Int,
-        variant: WorkoutCompletionCelebrationVariant
+        variant: WorkoutCompletionCelebrationVariant,
+        christmas: Bool = false
     ) -> [WorkoutCompletionConfettiPiece] {
         var generator = WorkoutCompletionConfettiRandom(seed: seed)
         let colorRoles = WorkoutCompletionConfettiPolicy.colorRoles(for: variant)
@@ -1322,8 +1339,8 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
                 : generator.value(in: 0.02...0.14)
             return WorkoutCompletionConfettiPiece(
                 id: index,
-                width: width,
-                height: height,
+                width: christmas ? 18 : width,
+                height: christmas ? 18 : height,
                 cornerRadius: min(width, height) * generator.value(in: 0.18...0.5),
                 originX: originX,
                 originY: generator.value(in: CGFloat(-0.75)...CGFloat(0.65)),
@@ -1334,8 +1351,17 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
                 rotationDelta: generator.value(in: 210...520) * (generator.nextBool() ? 1 : -1),
                 delay: delay,
                 duration: generator.value(in: 4.2...5.4),
-                color: color(for: colorRoles[index % colorRoles.count])
+                color: christmas ? christmasColor(index: index) : color(for: colorRoles[index % colorRoles.count]),
+                symbolName: christmas ? ["snowflake", "bell.fill", "🎄", "snowflake", "star.fill"][index % 5] : nil
             )
+        }
+    }
+
+    private static func christmasColor(index: Int) -> Color {
+        switch index % 5 {
+        case 0, 3: WGJTheme.textPrimary
+        case 2: WGJTheme.accentPurple
+        default: WGJTheme.accentGold
         }
     }
 
