@@ -221,6 +221,7 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
 }
 
 struct WorkoutCompletionSummaryView: View {
+    @AppStorage(GymEasterEggPolicy.enabledKey) private var gymBroMode = false
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -257,6 +258,11 @@ struct WorkoutCompletionSummaryView: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot {
                         heroCard(snapshot)
+                        if let egg = GymEasterEggPolicy.completion(sessionID: snapshot.sessionID,
+                            workingSets: snapshot.completedSetCount, hasWeightPR: snapshot.hasWeightPR,
+                            isLegDay: snapshot.isLegDay, gymBroMode: gymBroMode) {
+                            GymCompletionEasterEgg(egg: egg)
+                        }
                         statGrid(snapshot)
                         muscleHeatmapSection(snapshot)
                         personalRecordsSection(snapshot)
@@ -770,6 +776,8 @@ struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let cardioRecap: [WorkoutCompletionCardioRecap]
     let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
+    var hasWeightPR = false
+    var isLegDay = false
 }
 
 nonisolated struct WorkoutCalorieMetricPresentation: Equatable, Sendable {
@@ -890,9 +898,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
                 scores[region, default: 0] += score
             }
         }
-        let personalRecords = try WorkoutMetricsService(modelContext: modelContext)
+        let achievements = try WorkoutMetricsService(modelContext: modelContext)
             .sessionSetPRAchievements(sessionID: sessionID)
-            .map(makePersonalRecord)
+        let personalRecords = achievements.map(makePersonalRecord)
 
         let prHeadline: String
         let prSupportText: String
@@ -932,7 +940,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             personalRecords: personalRecords,
             cardioRecap: cardioBlocks.map(makeCardioRecap),
             muscleHeatmap: WorkoutMuscleHeatmapBuilder.snapshot(scores: muscleHeatmapScores),
-            exerciseRecap: exerciseData.map(\.recap)
+            exerciseRecap: exerciseData.map(\.recap),
+            hasWeightPR: achievements.contains { $0.kinds.contains(.weight) && !$0.usesAssistance },
+            isLegDay: GymEasterEggPolicy.isLegDay(scores: muscleHeatmapScores)
         )
     }
 

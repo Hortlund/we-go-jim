@@ -1,6 +1,116 @@
 import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
+    @MainActor
+    func testGymLogoSecretUnlocksOptionalModeAndPersists() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_RESET_GYM_EASTER_EGGS"])
+        func openSettings() {
+            app.buttons["Profile"].firstMatch.tap()
+            let settings = app.buttons["profile-settings-tile"]
+            for _ in 0..<12 where !settings.isHittable { app.swipeUp() }
+            XCTAssertTrue(settings.isHittable)
+            settings.tap()
+            XCTAssertTrue(app.buttons["gym-secret-logo"].waitForExistence(timeout: 5))
+        }
+        openSettings()
+        XCTAssertFalse(app.switches["gym-bro-mode-toggle"].exists)
+        for _ in 0..<6 { app.buttons["gym-secret-logo"].tap() }
+        XCTAssertFalse(app.switches["gym-bro-mode-toggle"].exists)
+        app.buttons["gym-secret-logo"].tap()
+        let toggle = app.switches["gym-bro-mode-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertTrue(app.staticTexts["Brain empty. We go jim."].exists)
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Gym-bro mode unlocked"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "UITEST_RESET_GYM_EASTER_EGGS" }
+        app.launch()
+        let local = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(local.waitForExistence(timeout: 8))
+        local.tap()
+        openSettings()
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+    }
+
+    @MainActor
+    func testGymSearchSecretKeepsNormalSearchWorking() {
+        let app = launchLocalApp()
+        openExercisesTab(in: app)
+        let search = app.textFields["exercises-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
+        search.tap()
+        search.typeText("motivation")
+        let message = app.staticTexts["gym-search-easter-egg"]
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        XCTAssertEqual(message.label, "No results. We go jim.")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Gym search secret"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 10) + "excuses")
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7) + "bench")
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: message)
+        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["Barbell Bench Press"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testGymWarmupSaluteLeavesSetEditingAvailable() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        let start = app.buttons["start-workout-template-start-button-review-fixture"]
+        for _ in 0..<5 where !start.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        app.buttons["template-preview-start-button"].tap()
+        let expand = app.buttons["active-workout-exercise-ui-test-bench-expand-button"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        expand.tap()
+        let actions = app.buttons["workout-set-actions-button-0"].firstMatch
+        for _ in 0..<5 {
+            if actions.isHittable && actions.frame.maxY < app.frame.maxY - 160 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        actions.tap()
+        app.buttons["Mark as warmup"].firstMatch.tap()
+        let salute = app.buttons["gym-warmup-salute"]
+        XCTAssertTrue(salute.waitForExistence(timeout: 5))
+        salute.tap()
+        XCTAssertTrue(app.staticTexts["Respect the empty bar. It was here before you."].exists)
+        XCTAssertTrue(app.textFields["workout-set-0-weight-field"].isEnabled)
+        XCTAssertTrue(app.buttons["workout-set-0-completion-button"].isEnabled)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Empty-bar salute"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testGymBroRecapStillOffersHistoryAndShare() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "-wgj.gymBro.enabled", "YES"])
+        finishTemplateReviewFixture(in: app)
+        let keep = app.buttons["active-workout-template-review-keep-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 8))
+        keep.tap()
+        let egg = app.descendants(matching: .any)["gym-completion-easter-egg"].firstMatch
+        XCTAssertTrue(egg.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["View History"].isHittable)
+        XCTAssertTrue(app.buttons["Share"].firstMatch.isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Gym-bro workout recap"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["View History"].tap()
+        XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8))
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -743,7 +853,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         expand.tap()
         let setActions = app.buttons["workout-set-actions-button-0"].firstMatch
         for _ in 0..<5 {
-            if setActions.exists && setActions.isHittable { break }
+            if setActions.exists && setActions.isHittable && setActions.frame.maxY < app.frame.maxY - 160 { break }
             app.scrollViews.firstMatch.swipeUp()
         }
         XCTAssertTrue(setActions.waitForExistence(timeout: 8))

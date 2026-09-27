@@ -157,6 +157,10 @@ struct WGJApp: App {
 
 #if DEBUG
     nonisolated private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
+        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_GYM_EASTER_EGGS") {
+            UserDefaults.standard.removeObject(forKey: GymEasterEggPolicy.unlockedKey)
+            UserDefaults.standard.removeObject(forKey: GymEasterEggPolicy.enabledKey)
+        }
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
             ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
         }
@@ -305,7 +309,8 @@ struct WGJApp: App {
             categoryName: "Strength",
             equipmentSummary: "Barbell",
             isCurated: true,
-            sourceName: "ui-test"
+            // Keep the fixture when the bundled catalog replaces seed exercises.
+            sourceName: "custom"
         )
         context.insert(bench)
         try context.saveWithRecoveryProtection()

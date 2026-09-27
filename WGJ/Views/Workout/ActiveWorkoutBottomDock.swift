@@ -37,6 +37,5 @@ struct ActiveWorkoutBottomDock: View {
                 .fill(WGJTheme.accentBlue.opacity(0.18))
                 .frame(height: 1)
         }
-        .allowsHitTesting(restTimerState.restTimerEndsAt != nil)
     }
 }

@@ -25,6 +25,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let usesAddedWeight: Bool
     let usesAssistance: Bool
+    let usesBarbell: Bool
     let preferredLoadUnit: TemplateLoadUnit
     let componentSummaryResolution: ExerciseComponentRotationResolution?
     let componentSummaryAccessibilityIdentifierPrefix: String?
@@ -93,7 +94,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
-        usesAddedWeight: Bool = false, usesAssistance: Bool = false,
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false, usesBarbell: Bool = false,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
         componentSummaryAccessibilityIdentifierPrefix: String? = nil,
@@ -139,6 +140,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.guidance = guidance
         self.usesAddedWeight = usesAddedWeight
         self.usesAssistance = usesAssistance
+        self.usesBarbell = usesBarbell
         self.preferredLoadUnit = preferredLoadUnit
         self.componentSummaryResolution = componentSummaryResolution
         self.componentSummaryAccessibilityIdentifierPrefix = componentSummaryAccessibilityIdentifierPrefix
@@ -690,10 +692,15 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Text(row.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(WGJTheme.textPrimary)
-                                .wgjSingleLineText(scale: 0.84)
+                            if set.isWarmup && usesBarbell && !usesAssistance {
+                                GymWarmupSalute(title: row.title)
+                                    .id(row.id)
+                            } else {
+                                Text(row.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textPrimary)
+                                    .wgjSingleLineText(scale: 0.84)
+                            }
 
                             if set.isLocked {
                                 Image(systemName: "lock.fill")

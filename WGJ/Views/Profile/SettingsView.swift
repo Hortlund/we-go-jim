@@ -100,6 +100,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Settings", subtitle: "Manage training preferences, legal details, privacy, and support.")
 
+                GymBroSettingsCard()
+
                 WGJNavigationTile(
                     title: String(localized: "App Theme"),
                     systemImage: "paintpalette.fill",

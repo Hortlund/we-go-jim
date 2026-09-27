@@ -4,6 +4,8 @@ import SwiftData
 struct ActiveWorkoutActivityTimerDock: View {
     @Environment(RestTimerState.self) private var restTimerState
 
+    @State private var revealedRestID: UUID?
+
     let session: ActiveWorkoutRuntimeSession
     let onDismissRestTimer: () -> Void
 
@@ -24,73 +26,98 @@ struct ActiveWorkoutActivityTimerDock: View {
                 ? formattedRest(remaining ?? 0)
                 : WGJDurationFormatter.elapsedString(since: session.startedAt, now: timeline.date)
 
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isResting ? "Rest Timer" : "Elapsed Time")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accent)
+            let canReveal = GymEasterEggPolicy.canRevealRest(completedRest: restTimerState.lastCompletedRest,
+                sessionStartedAt: session.startedAt, now: timeline.date)
 
-                    Text(secondaryText)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
-                }
-                Spacer(minLength: 12)
-                Text(primaryValue)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-                    .monospacedDigit()
-                    .wgjSingleLineText(scale: 0.84)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
-                    .accessibilityLabel(Text(primaryValue))
-                    .accessibilityValue(Text(primaryValue))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(isResting ? "Rest Timer" : "Elapsed Time")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(accent)
 
-                if isResting {
-                    Button {
-                        onDismissRestTimer()
-                    } label: {
-                        Image(systemName: "xmark")
+                        Text(secondaryText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
                     }
-                    .buttonStyle(
-                        WGJIconButtonStyle(
-                            tint: WGJTheme.textSecondary,
-                            background: WGJTheme.cardStrong,
-                            outline: WGJTheme.outline
-                        )
-                    )
-                    .accessibilityLabel("Dismiss rest timer")
-                }
-            }
-            .frame(minHeight: 44)
-            .accessibilityLabel(accessibilityLabel(isResting: isResting, primaryValue: primaryValue, secondaryText: secondaryText))
-            .allowsHitTesting(isResting)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(WGJTheme.cardStrong.opacity(0.97))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    dockAccent.opacity(fillOpacity),
-                                    WGJTheme.cardStrong.opacity(0.80),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    Spacer(minLength: 12)
+                    if canReveal {
+                        Button {
+                            revealedRestID = restTimerState.lastCompletedRest?.sourceSetID
+                        } label: {
+                            timerValue(primaryValue, isResting: isResting, accent: accent)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        timerValue(primaryValue, isResting: isResting, accent: accent)
+                    }
+
+                    if isResting {
+                        Button {
+                            onDismissRestTimer()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(
+                            WGJIconButtonStyle(
+                                tint: WGJTheme.textSecondary,
+                                background: WGJTheme.cardStrong,
+                                outline: WGJTheme.outline
                             )
                         )
+                        .accessibilityLabel("Dismiss rest timer")
+                    }
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(dockAccent.opacity(strokeOpacity), lineWidth: 1)
+                .frame(minHeight: 44)
+                .accessibilityLabel(accessibilityLabel(isResting: isResting, primaryValue: primaryValue, secondaryText: secondaryText))
+                if canReveal, let revealedRestID, revealedRestID == restTimerState.lastCompletedRest?.sourceSetID {
+                    Text(GymEasterEggPolicy.restMessage)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(WGJTheme.accentGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gym-rest-easter-egg")
                 }
-                .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(WGJTheme.cardStrong.opacity(0.97))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        dockAccent.opacity(fillOpacity),
+                                        WGJTheme.cardStrong.opacity(0.80),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(dockAccent.opacity(strokeOpacity), lineWidth: 1)
+                    }
+                    .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
+            }
+            .accessibilityElement(children: .contain)
+            .allowsHitTesting(isResting || canReveal)
         }
-        .accessibilityElement(children: .contain)
+    }
+
+    private func timerValue(_ value: String, isResting: Bool, accent: Color) -> some View {
+        Text(value)
+            .font(.system(size: 28, weight: .bold, design: .rounded))
+            .foregroundStyle(accent)
+            .monospacedDigit()
+            .wgjSingleLineText(scale: 0.84)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
+            .accessibilityLabel(Text(value))
+            .accessibilityValue(Text(value))
     }
 
     private func accessibilityLabel(isResting: Bool, primaryValue: String, secondaryText: String) -> String {

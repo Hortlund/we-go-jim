@@ -733,6 +733,7 @@ struct ActiveWorkoutView: View {
                     guidance: nil,
                     usesAddedWeight: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAddedWeight ?? false,
                     usesAssistance: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAssistance ?? false,
+                    usesBarbell: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.equipmentSummary.localizedCaseInsensitiveContains("barbell") ?? false,
                     preferredLoadUnit: preferredLoadUnit,
                     componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
                     componentSummaryAccessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary",

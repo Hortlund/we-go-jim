@@ -410,6 +410,15 @@ struct ExercisesCatalogView: View {
 
                 searchField
 
+                if GymEasterEggPolicy.searchMatches(searchState.debouncedQuery), controller.projection.sections.isEmpty,
+                   !controller.isProjecting, loadState == .ready {
+                    Text(GymEasterEggPolicy.searchMessage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentGold)
+                        .padding(.top, 10)
+                        .accessibilityIdentifier("gym-search-easter-egg")
+                }
+
                 if isPickerMode {
                     expandedFilterControls
                 } else {
