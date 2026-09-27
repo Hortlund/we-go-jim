@@ -12,6 +12,8 @@ struct StartWorkoutHomeView: View {
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
+    @Environment(WorkoutCompletionPresentationState.self) private var completionPresentationState
+    @State private var birthdayBursts: [WorkoutCompletionConfettiBurst] = []
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
     @State private var selectedTemplatePreview: StartWorkoutTemplatePreview?
@@ -53,7 +55,14 @@ struct StartWorkoutHomeView: View {
     private var baseScreen: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
+                VStack(alignment: .leading, spacing: 0) {
+                    WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
+                    BirthdayHomeSection(bursts: $birthdayBursts, canCelebrate:
+                        activeWorkoutCoordinator.storedSnapshot == nil
+                        && !completionPresentationState.hasPendingOrPresentedWorkout
+                        && selectedTemplatePreview == nil && templateEditorContext == nil
+                        && !showingFolderEditor && !showingTemplateImporter && shareSheetItem == nil)
+                }
 
                 if WGJTheme.isChristmas { WGJChristmasWelcome() }
 
@@ -78,6 +87,15 @@ struct StartWorkoutHomeView: View {
             .padding(16)
         }
         .wgjScreenBackground()
+        .overlay {
+            if !reduceMotion {
+                ForEach(birthdayBursts) { burst in
+                    WorkoutCompletionConfettiOverlay(origin: burst.origin, pieces: burst.pieces, startDate: burst.startDate)
+                        .id(burst.id)
+                        .ignoresSafeArea()
+                }
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
     }
 
