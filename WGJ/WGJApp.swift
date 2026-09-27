@@ -138,6 +138,30 @@ struct WGJApp: App {
             )]
             template.exercises = [exercise]
             context.insert(template)
+            if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_PREVIOUS") {
+                let alternateOnly = ProcessInfo.processInfo.arguments.contains("UITEST_TEMPLATE_PREVIOUS_ALTERNATE_ONLY")
+                for index in 0..<3 {
+                    if index == 0 && alternateOnly { continue }
+                    let startedAt = Date().addingTimeInterval(Double(index - 4) * 3600)
+                    let previous = WorkoutSession(templateID: index == 1 ? UUID() : template.id,
+                        name: index == 1 ? "Other Workout" : "Review Fixture", status: .completed,
+                        startedAt: startedAt, endedAt: startedAt.addingTimeInterval(600))
+                    let previousExercise = WorkoutSessionExercise(sessionID: previous.id,
+                        templateExerciseID: index == 1 ? nil : exercise.id, catalogExerciseUUID: "ui-test-bench",
+                        exerciseNameSnapshot: "Bench Press", categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Chest", session: previous)
+                    context.insert(previous)
+                    context.insert(previousExercise)
+                    if index != 2 && ProcessInfo.processInfo.arguments.contains("UITEST_TEMPLATE_PREVIOUS_WARMUP") {
+                        context.insert(WorkoutSessionSet(sessionExerciseID: previousExercise.id,
+                            sortOrder: -1, isWarmup: true, actualReps: 10, actualWeight: index == 0 ? 20 : 30,
+                            isCompleted: true, sessionExercise: previousExercise))
+                    }
+                    context.insert(WorkoutSessionSet(sessionExerciseID: previousExercise.id,
+                        actualReps: index == 2 ? nil : 8, actualWeight: index == 2 ? nil : (index == 0 ? 50 : 80),
+                        isCompleted: index != 2, sessionExercise: previousExercise))
+                }
+            }
             try context.saveWithRecoveryProtection()
         }
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_LIBRARY") {

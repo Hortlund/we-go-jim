@@ -111,6 +111,102 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["400 kg"].firstMatch.waitForExistence(timeout: 8))
     }
 
+    @MainActor
+    func testTemplateLastSkipsEmptyWorkoutAndOtherTemplate() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_TEMPLATE_PREVIOUS"])
+        openPreviousTemplateFixture(in: app)
+        XCTAssertFalse(app.staticTexts["no-template-history"].exists)
+        XCTAssertFalse(app.buttons["preview-other-workout"].exists)
+        let fill = app.buttons["workout-set-0-use-last-button"]
+        for _ in 0..<5 {
+            if fill.isHittable && fill.frame.maxY < app.frame.maxY - 160 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(fill.waitForExistence(timeout: 5))
+        fill.tap()
+        XCTAssertEqual(app.textFields["workout-set-0-weight-field"].value as? String, "50 kilograms")
+        XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "8 reps")
+    }
+
+    @MainActor
+    func testOtherWorkoutRequiresPreviewAndExplicitCopy() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_TEMPLATE_PREVIOUS", "UITEST_TEMPLATE_PREVIOUS_ALTERNATE_ONLY"])
+        openPreviousTemplateFixture(in: app)
+        let preview = app.buttons["preview-other-workout"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["no-template-history"].exists)
+        XCTAssertFalse(app.buttons["workout-set-0-use-last-button"].exists)
+        XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "No reps entered")
+        preview.tap()
+        XCTAssertTrue(app.staticTexts["Other Workout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["80 kg × 8 reps"].exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Preview values from another workout"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["Cancel"].tap()
+        XCTAssertFalse(app.buttons["workout-set-0-use-last-button"].exists)
+        preview.tap()
+        app.buttons["use-other-workout-values"].tap()
+        let weight = app.textFields["workout-set-0-weight-field"]
+        for _ in 0..<5 where !weight.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertEqual(weight.value as? String, "80 kilograms")
+        XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "8 reps")
+        XCTAssertFalse(app.buttons["workout-set-0-use-last-button"].exists)
+    }
+
+    @MainActor
+    func testTemplateLastRemapsAfterMarkingSetAsWarmup() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_TEMPLATE_PREVIOUS", "UITEST_TEMPLATE_PREVIOUS_WARMUP"])
+        openPreviousTemplateFixture(in: app)
+        markFirstSetAsWarmup(in: app)
+        let fill = app.buttons["workout-set-0-use-last-button"]
+        XCTAssertTrue(fill.waitForExistence(timeout: 5))
+        fill.tap()
+        XCTAssertEqual(app.textFields["workout-set-0-weight-field"].value as? String, "20 kilograms")
+        XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "10 reps")
+    }
+
+    @MainActor
+    func testOtherWorkoutPreviewRemapsAfterMarkingSetAsWarmup() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_TEMPLATE_PREVIOUS", "UITEST_TEMPLATE_PREVIOUS_WARMUP", "UITEST_TEMPLATE_PREVIOUS_ALTERNATE_ONLY"])
+        openPreviousTemplateFixture(in: app)
+        markFirstSetAsWarmup(in: app)
+        let preview = app.buttons["preview-other-workout"]
+        for _ in 0..<5 where !preview.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        preview.tap()
+        XCTAssertTrue(app.staticTexts["30 kg × 10 reps"].waitForExistence(timeout: 5))
+        app.buttons["use-other-workout-values"].tap()
+        let weight = app.textFields["workout-set-0-weight-field"]
+        for _ in 0..<5 where !weight.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertEqual(weight.value as? String, "30 kilograms")
+        XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "10 reps")
+    }
+
+    @MainActor
+    private func markFirstSetAsWarmup(in app: XCUIApplication) {
+        let actions = app.buttons["workout-set-actions-button-0"].firstMatch
+        for _ in 0..<5 {
+            if actions.isHittable && actions.frame.maxY < app.frame.maxY - 160 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(actions.waitForExistence(timeout: 5))
+        actions.tap()
+        app.buttons["Mark as warmup"].firstMatch.tap()
+    }
+
+    @MainActor
+    private func openPreviousTemplateFixture(in app: XCUIApplication) {
+        let start = app.buttons["start-workout-template-start-button-review-fixture"]
+        for _ in 0..<5 where !start.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        app.buttons["template-preview-start-button"].tap()
+        let expand = app.buttons["active-workout-exercise-ui-test-bench-expand-button"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        expand.tap()
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }

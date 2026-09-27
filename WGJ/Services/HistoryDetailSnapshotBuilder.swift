@@ -316,24 +316,18 @@ enum HistoryDetailSnapshotBuilder {
             from: personalRecordAchievements,
             exerciseIDs: exerciseIDs
         )
-        let previousMaps = try WorkoutSessionRepository(modelContext: modelContext).previousSetMaps(
-            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
-            before: session.startedAt,
-            excludingSessionID: session.id
+        let previousResolutions = try WorkoutPreviousPerformanceLookup(modelContext: modelContext).load(
+            requests: exercises.map { .init(id: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID,
+                templateExerciseID: $0.templateExerciseID, drafts: draftsByExerciseID[$0.id] ?? makeDrafts(from: $0)) },
+            templateID: session.templateID, before: session.startedAt, excludingSessionID: session.id
         )
 
         var payloadByExerciseID: [UUID: ExerciseHydrationPayload] = [:]
         payloadByExerciseID.reserveCapacity(exercises.count)
 
         for exercise in exercises {
-            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
             payloadByExerciseID[exercise.id] = ExerciseHydrationPayload(
-                previousPerformanceResolution: .resolved(
-                    resolvedPreviousMap(
-                        baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
-                        maxSetCount: drafts.count
-                    )
-                ),
+                previousPerformanceResolution: previousResolutions[exercise.id] ?? .resolved([:]),
                 personalRecords: personalRecords[exercise.id]
                     ?? HistoryExercisePersonalRecordPresentation(summaryKinds: [], setKindsBySetID: [:])
             )
@@ -408,26 +402,6 @@ enum HistoryDetailSnapshotBuilder {
         return WorkoutMuscleHeatmapBuilder.snapshot(scores: scores)
     }
 
-    nonisolated private static func resolvedPreviousMap(
-        baseMap: [Int: WorkoutPreviousSetSnapshot],
-        maxSetCount: Int
-    ) -> [Int: WorkoutPreviousSetSnapshot] {
-        guard maxSetCount > 0, !baseMap.isEmpty else { return [:] }
-
-        let fallback = baseMap[(baseMap.keys.max() ?? 0)]
-        var resolved: [Int: WorkoutPreviousSetSnapshot] = [:]
-        resolved.reserveCapacity(maxSetCount)
-
-        for index in 0..<maxSetCount {
-            if let exact = baseMap[index] {
-                resolved[index] = exact
-            } else if let fallback {
-                resolved[index] = fallback
-            }
-        }
-
-        return resolved
-    }
 }
 
 nonisolated struct HistoryDetailPreservedExerciseEditState: Equatable, Sendable {

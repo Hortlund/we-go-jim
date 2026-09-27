@@ -1220,15 +1220,9 @@ final class ActiveWorkoutPresentationState {
         guard shouldApplyRestoredSession() else { return }
 
         if let snapshot = coordinator.storedSnapshot {
-            let cachedPreviousPerformance = snapshot.previousSetSnapshotsByExerciseID.mapValues {
-                WorkoutPreviousPerformanceResolution.resolved($0)
-            }
-            if !cachedPreviousPerformance.isEmpty {
-                stagePreparedPreviousPerformanceResolution(
-                    cachedPreviousPerformance,
-                    for: snapshot.session.id
-                )
-            }
+            // Persisted maps have no template scope or alternate-workout provenance.
+            // Let local hydration resolve them before offering Fill Last after a restore.
+            clearPreparedPreviousPerformanceResolution(for: snapshot.session.id)
             activeSessionID = snapshot.session.id
             stageScrollTarget(snapshot.scrollTarget, for: snapshot.session.id)
             stageScrollOffsetY(snapshot.scrollOffsetY, for: snapshot.session.id)

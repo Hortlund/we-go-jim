@@ -142,7 +142,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNil(retainedSnapshot)
     }
 
-    func testPresentationRestoreStagesCachedPreviousPerformanceWithoutHistoryQuery() async throws {
+    func testPresentationRestoreWaitsForScopedPreviousPerformance() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("WGJPresentationRestoreTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -181,7 +181,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             for: sessionID,
             exerciseID: exerciseID
         )
-        XCTAssertEqual(restored?.previous(at: 0), previousSet)
+        XCTAssertNil(restored)
         XCTAssertEqual(presentationState.preparedScrollOffsetY(for: sessionID), 428.5)
     }
 

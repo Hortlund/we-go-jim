@@ -1411,26 +1411,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    nonisolated private static func resolvedPreviousMap(
-        baseMap: [Int: WorkoutPreviousSetSnapshot],
-        maxSetCount: Int
-    ) -> [Int: WorkoutPreviousSetSnapshot] {
-        guard maxSetCount > 0, !baseMap.isEmpty else { return [:] }
-
-        let fallback = baseMap[(baseMap.keys.max() ?? 0)]
-        var resolved: [Int: WorkoutPreviousSetSnapshot] = [:]
-        resolved.reserveCapacity(maxSetCount)
-
-        for index in 0..<maxSetCount {
-            if let exact = baseMap[index] {
-                resolved[index] = exact
-            } else if let fallback {
-                resolved[index] = fallback
-            }
-        }
-
-        return resolved
-    }
 
     @MainActor
     private func scheduleExpandedExerciseHydrationIfNeeded() {
@@ -2663,10 +2643,10 @@ struct ActiveWorkoutView: View {
         }
 
         let targetExercises = session.exercises.filter { exerciseIDs.contains($0.id) }
-        let previousMaps = try WorkoutSessionRepository(modelContext: modelContext).previousSetMaps(
-            forExercises: Array(Set(targetExercises.map(\.catalogExerciseUUID))),
-            before: session.startedAt,
-            excludingSessionID: session.id
+        let previousResolutions = try WorkoutPreviousPerformanceLookup(modelContext: modelContext).load(
+            requests: targetExercises.map { .init(id: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID,
+                templateExerciseID: $0.templateExerciseID, drafts: draftsByExerciseID[$0.id] ?? $0.setDrafts) },
+            templateID: session.templateID, before: session.startedAt, excludingSessionID: session.id
         )
 
         var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
@@ -2674,13 +2654,7 @@ struct ActiveWorkoutView: View {
         let componentResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
 
         for exercise in targetExercises {
-            let drafts = draftsByExerciseID[exercise.id] ?? orderedSessionSetDrafts(for: exercise)
-            previousResolutionByExerciseID[exercise.id] = .resolved(
-                Self.resolvedPreviousMap(
-                    baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
-                    maxSetCount: drafts.count
-                )
-            )
+            previousResolutionByExerciseID[exercise.id] = previousResolutions[exercise.id] ?? .resolved([:])
 
             if let templateID = session.templateID,
                let templateExerciseID = exercise.templateExerciseID,

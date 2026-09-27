@@ -998,7 +998,7 @@ nonisolated final class WorkoutSessionRepository {
             return nil
         }
 
-        let orderedSets = try sessionSets(sessionExerciseID: exercise.id)
+        let orderedSets = try sessionSets(sessionExerciseID: exercise.id).filter { $0.isCompleted && ($0.actualReps ?? 0) > 0 }
         guard !orderedSets.isEmpty else { return nil }
         if let exact = orderedSets.first(where: { $0.sortOrder == setIndex }) {
             return exact
@@ -1065,7 +1065,7 @@ nonisolated final class WorkoutSessionRepository {
             by: \.sessionExerciseID
         )
         for (catalogExerciseUUID, exercise) in exercisesByCatalogUUID {
-            let orderedSets = setsByExerciseID[exercise.id, default: []]
+            let orderedSets = setsByExerciseID[exercise.id, default: []].filter { $0.isCompleted && ($0.actualReps ?? 0) > 0 }
             maps[catalogExerciseUUID] = Dictionary(orderedSets.map { set in
                 (
                     set.sortOrder,
@@ -1533,20 +1533,9 @@ nonisolated final class WorkoutSessionRepository {
         )
         guard !requested.isEmpty else { return [:] }
 
-        var latestSessionIDByExercise = try latestProjectedSessionIDs(
-            forExercises: requested,
-            before: date,
-            excludingSessionID: excludingSessionID
+        let latestSessionIDByExercise = try latestCanonicalSessionIDs(
+            forExercises: requested, before: date, excludingSessionID: excludingSessionID
         )
-
-        let canonicalSessionIDs = try latestCanonicalSessionIDs(
-            forExercises: requested,
-            before: date,
-            excludingSessionID: excludingSessionID
-        )
-        for (catalogExerciseUUID, sessionID) in canonicalSessionIDs {
-            latestSessionIDByExercise[catalogExerciseUUID] = sessionID
-        }
 
         guard !latestSessionIDByExercise.isEmpty else { return [:] }
 
@@ -1572,35 +1561,6 @@ nonisolated final class WorkoutSessionRepository {
         return resolved
     }
 
-    private func latestProjectedSessionIDs(
-        forExercises requested: Set<String>,
-        before date: Date,
-        excludingSessionID: UUID?
-    ) throws -> [String: UUID] {
-        let facts = try historyProjectionRepository.facts(forExercises: requested)
-        let visibleSessionIDs = Set(
-            try completedSessions(
-                before: date,
-                excludingSessionID: excludingSessionID,
-                includeArchived: false
-            ).map(\.id)
-        )
-        guard !visibleSessionIDs.isEmpty else { return [:] }
-        var chosenSessionByExercise: [String: UUID] = [:]
-
-        for fact in facts {
-            guard requested.contains(fact.catalogExerciseUUID) else { continue }
-            guard visibleSessionIDs.contains(fact.sessionID) else { continue }
-            if let excludingSessionID, fact.sessionID == excludingSessionID {
-                continue
-            }
-            guard fact.completedAt < date else { continue }
-            guard chosenSessionByExercise[fact.catalogExerciseUUID] == nil else { continue }
-            chosenSessionByExercise[fact.catalogExerciseUUID] = fact.sessionID
-        }
-
-        return chosenSessionByExercise
-    }
 
     private func latestCanonicalSessionIDs(
         forExercises requested: Set<String>,
@@ -1621,10 +1581,13 @@ nonisolated final class WorkoutSessionRepository {
             grouping: try modelContext.fetch(descriptor),
             by: \.sessionID
         )
+        let performedExerciseIDs = Set(try sessionSets(sessionExerciseIDs: Set(exercisesBySessionID.values.flatMap { $0 }.map(\.id)))
+            .filter { $0.isCompleted && ($0.actualReps ?? 0) > 0 }.map(\.sessionExerciseID))
         var chosenSessionByExercise: [String: UUID] = [:]
 
         for session in sessions {
             for exercise in exercisesBySessionID[session.id, default: []] {
+                guard performedExerciseIDs.contains(exercise.id) else { continue }
                 guard requested.contains(exercise.catalogExerciseUUID) else { continue }
                 guard chosenSessionByExercise[exercise.catalogExerciseUUID] == nil else { continue }
                 chosenSessionByExercise[exercise.catalogExerciseUUID] = session.id
