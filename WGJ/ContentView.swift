@@ -65,6 +65,7 @@ struct ContentView: View {
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)
         .environment(appWarmupState)
+        .modifier(WGJSeasonalAppearanceModifier())
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {

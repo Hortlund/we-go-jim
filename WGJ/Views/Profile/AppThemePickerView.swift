@@ -8,7 +8,7 @@ struct AppThemePickerView: View {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Find your lifting vibe", subtitle: "Same workout. A fresh coat of gains.")
 
-                ForEach(WGJAppTheme.allCases) { theme in
+                ForEach(preferences.availableThemes) { theme in
                     Button {
                         preferences.select(theme)
                     } label: {
@@ -23,9 +23,6 @@ struct AppThemePickerView: View {
                     .accessibilityIdentifier("app-theme-\(theme.rawValue)")
                 }
 
-                Text("Applies instantly and is remembered on this device. WGJ Original is the default.")
-                    .font(.footnote)
-                    .foregroundStyle(WGJTheme.textSecondary)
             }
             .padding(WGJSpacing.page)
         }
@@ -42,7 +39,40 @@ private struct AppThemePreviewCard: View {
 
     private var palette: WGJPalette { theme.palette }
 
+    @ViewBuilder
     var body: some View {
+        if theme == .christmas {
+            christmasPreview
+        } else {
+            regularPreview
+        }
+    }
+
+    private var christmasPreview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Text(theme.title)
+                    .font(.title2.bold())
+                    .foregroundStyle(palette.textPrimary)
+                Spacer(minLength: 0)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(palette.accentGold)
+            }
+            WGJChristmasWelcome()
+            Text(theme.subtitle)
+                .font(.subheadline)
+                .foregroundStyle(palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(palette.bgBase, in: RoundedRectangle(cornerRadius: WGJRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: WGJRadius.card)
+            .strokeBorder(palette.accentGold.opacity(isSelected ? 1 : 0.4), lineWidth: isSelected ? 2 : 1))
+        .contentShape(RoundedRectangle(cornerRadius: WGJRadius.card))
+    }
+
+    private var regularPreview: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: theme.symbol)

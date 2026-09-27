@@ -8,11 +8,13 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
     case wheyTooPurple
     case sunsOutGunsOut
     case electricStrength
+    case christmas
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .christmas: String(localized: "Sleigh Day")
         case .original: String(localized: "WGJ Original")
         case .mintCondition: String(localized: "Mint Condition")
         case .wheyTooPurple: String(localized: "Whey Too Purple")
@@ -23,6 +25,7 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .christmas: String(localized: "Deck the halls. Lift the weights. Only in December.")
         case .original: String(localized: "The classic. Cool blues, strong foundations.")
         case .mintCondition: String(localized: "Fresh mint. Fresh set. Same heavy weights.")
         case .wheyTooPurple: String(localized: "A little extra on the lavender gains.")
@@ -33,6 +36,7 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .christmas: "snowflake"
         case .original: "dumbbell.fill"
         case .mintCondition: "leaf.fill"
         case .wheyTooPurple: "sparkles"
@@ -43,6 +47,7 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
 
     var palette: WGJPalette {
         switch self {
+        case .christmas: Self.christmasPalette
         case .original: Self.originalPalette
         case .mintCondition: Self.mintPalette
         case .wheyTooPurple: Self.purplePalette
@@ -55,10 +60,25 @@ enum WGJAppTheme: String, CaseIterable, Identifiable {
 
     func headingFont(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
         // System condensed type preserves Dynamic Type and language coverage.
-        self == .electricStrength
+        if self == .christmas { return Font.system(style, design: .rounded, weight: weight) }
+        return self == .electricStrength
             ? Font.system(style, weight: .heavy).width(.condensed)
             : Font.system(style, weight: weight)
     }
+
+    private static let christmasPalette: WGJPalette = {
+        var palette = makePalette(
+            lightBase: 0xFBF6E9, darkBase: 0x06180F,
+            lightSurface: 0xE9EDDE, darkSurface: 0x102C1C,
+            lightRaised: 0xDCE5CF, darkRaised: 0x1D3D28,
+            primary: (0x825719, 0xF3CA6C), secondary: (0x825719, 0xFFE5A3),
+            tertiary: (0xA31D32, 0xFF6675)
+        )
+        palette.textPrimary = Color(UIColor.dynamic(light: 0x162C23, dark: 0xFFF8E7))
+        palette.textSecondary = Color(UIColor.dynamic(light: 0x4D6055, dark: 0xB7CDBE))
+        palette.accentGold = Color(UIColor.dynamic(light: 0x826019, dark: 0xF5D58C))
+        return palette
+    }()
 
     private static let originalPalette = WGJPalette()
     private static let mintPalette = makePalette(
@@ -128,21 +148,80 @@ final class WGJThemePreferences {
     // Avoid the iOS <=26.2 isolated-deinit crash: swiftlang/swift#88036.
     nonisolated deinit { }
 
-    static let shared = WGJThemePreferences()
+    static let shared = WGJThemePreferences(now: {
+        #if DEBUG
+        // Test-only clock; production always follows the device's local date.
+        if ProcessInfo.processInfo.arguments.contains("UITEST_IN_MEMORY_STORE"),
+           let value = ProcessInfo.processInfo.environment["UITEST_THEME_DATE"],
+           let date = ISO8601DateFormatter().date(from: value) { return date }
+        #endif
+        return .now
+    })
     static let storageKey = "appearance.theme"
+    static let regularThemeStorageKey = "appearance.regularTheme"
+    static let christmasYearStorageKey = "appearance.christmasYear"
 
     private(set) var selected: WGJAppTheme
+    private(set) var isChristmasAvailable: Bool
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let calendar: () -> Calendar
 
-    init(defaults: UserDefaults = .standard) {
+    var availableThemes: [WGJAppTheme] {
+        WGJAppTheme.allCases.filter { $0 != .christmas || isChristmasAvailable }
+    }
+
+    init(
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = { .now },
+        calendar: @escaping () -> Calendar = { ChristmasThemeSeason.localCalendar }
+    ) {
         self.defaults = defaults
+        self.now = now
+        self.calendar = calendar
         selected = defaults.string(forKey: Self.storageKey)
             .flatMap(WGJAppTheme.init(rawValue:)) ?? .original
+        isChristmasAvailable = ChristmasThemeSeason.isAvailable(on: now(), calendar: calendar())
+        refreshSeason()
+    }
+
+    func refreshSeason() {
+        let available = ChristmasThemeSeason.isAvailable(on: now(), calendar: calendar())
+        if isChristmasAvailable != available { isChristmasAvailable = available }
+        let year = calendar().component(.year, from: now())
+        if selected == .christmas && (!available || defaults.integer(forKey: Self.christmasYearStorageKey) != year) {
+            let previous = defaults.string(forKey: Self.regularThemeStorageKey)
+                .flatMap(WGJAppTheme.init(rawValue:)) ?? .original
+            persist(previous == .christmas ? .original : previous)
+        }
     }
 
     func select(_ theme: WGJAppTheme) {
-        guard selected != theme else { return }
+        refreshSeason()
+        guard theme != .christmas || isChristmasAvailable, selected != theme else { return }
+        if theme == .christmas {
+            defaults.set(selected.rawValue, forKey: Self.regularThemeStorageKey)
+            defaults.set(calendar().component(.year, from: now()), forKey: Self.christmasYearStorageKey)
+        }
+        persist(theme)
+    }
+
+    private func persist(_ theme: WGJAppTheme) {
         defaults.set(theme.rawValue, forKey: Self.storageKey)
         selected = theme
+    }
+}
+
+/// December means the Gregorian month in the device's local time zone,
+/// regardless of the user's preferred display calendar. No year cutoff.
+enum ChristmasThemeSeason {
+    nonisolated static var localCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }
+
+    nonisolated static func isAvailable(on date: Date, calendar: Calendar = localCalendar) -> Bool {
+        calendar.component(.month, from: date) == 12
     }
 }

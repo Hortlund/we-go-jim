@@ -55,6 +55,8 @@ struct StartWorkoutHomeView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
 
+                if WGJTheme.isChristmas { WGJChristmasWelcome() }
+
                 quickStartSection
                 templateWorkspaceSection
 

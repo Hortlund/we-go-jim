@@ -57,6 +57,39 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertTrue(view.layer.sublayers?.isEmpty ?? true)
     }
 
+    func testChristmasUsesFestiveSymbolsInExistingBoundedBurst() throws {
+        let pieces = WorkoutCompletionConfettiPiece.random(
+            seed: 42, role: .centralThrow, count: 46, variant: .personalRecord, christmas: true
+        )
+        XCTAssertEqual(pieces.count, 46)
+        XCTAssertEqual(Set(pieces.compactMap(\.symbolName)), ["snowflake", "bell.fill", "🎄", "star.fill"])
+        let view = WorkoutCompletionConfettiUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        view.configure(origin: .zero, pieces: pieces, startDate: .now)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.layer.sublayers?.count, 46)
+        XCTAssertTrue(try XCTUnwrap(view.layer.sublayers).allSatisfy { $0.contents != nil })
+        let regular = WorkoutCompletionConfettiPiece.random(
+            seed: 42, role: .centralThrow, count: 46, variant: .standard
+        )
+        XCTAssertTrue(regular.allSatisfy { $0.symbolName == nil })
+    }
+
+    func testChristmasSymbolRasterPreservesTintInsteadOfBlackMask() throws {
+        let image = try XCTUnwrap(WorkoutCompletionConfettiUIView.symbolImage("snowflake", color: .red).cgImage)
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let width = image.width, height = image.height
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: width, height: height,
+                                    bitsPerComponent: 8, bytesPerRow: width * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        let visiblePixels = stride(from: 0, to: bytes.count, by: 4).filter { bytes[$0 + 3] > 128 }
+        XCTAssertFalse(visiblePixels.isEmpty)
+        XCTAssertTrue(visiblePixels.allSatisfy { bytes[$0] > 128 && bytes[$0 + 1] < 10 && bytes[$0 + 2] < 10 })
+    }
+
     func testStandardCompletionUsesOneCenteredBoundedBurst() {
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
             origin: .overlayCenter,

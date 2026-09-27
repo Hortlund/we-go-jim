@@ -412,6 +412,106 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testChristmasThemeSelectionCelebrationAndAnnualAvailability() {
+        let app = launchLocalApp(
+            additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"],
+            environment: ["UITEST_THEME_DATE": "2026-12-15T12:00:00Z"]
+        )
+        func openPicker() {
+            app.buttons["Profile"].firstMatch.tap()
+            let settings = app.buttons["profile-settings-tile"]
+            for _ in 0..<12 where !settings.isHittable { app.swipeUp() }
+            XCTAssertTrue(settings.isHittable)
+            settings.tap()
+            app.buttons["settings-app-theme-tile"].tap()
+            XCTAssertTrue(app.buttons["app-theme-original"].waitForExistence(timeout: 5))
+        }
+        func choose(_ name: String) {
+            let option = app.buttons["app-theme-\(name)"]
+            for _ in 0..<8 where !option.isHittable { app.swipeUp() }
+            XCTAssertTrue(option.isHittable)
+            option.tap()
+            XCTAssertEqual(option.value as? String, "Selected")
+        }
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        func relaunch(_ date: String) {
+            app.terminate()
+            app.launchEnvironment["UITEST_THEME_DATE"] = date
+            app.launch()
+            let local = app.buttons["Continue Locally"].firstMatch
+            XCTAssertTrue(local.waitForExistence(timeout: 8))
+            local.tap()
+        }
+
+        openPicker()
+        choose("mintCondition")
+        choose("christmas")
+        app.swipeUp()
+        capture("Christmas theme picker")
+        app.buttons["Start Workout"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Merry Liftmas!"].waitForExistence(timeout: 5))
+        capture("Christmas workout home")
+        openPreviousTemplateFixture(in: app)
+        let weight = app.textFields["workout-set-0-weight-field"]
+        for _ in 0..<5 where !weight.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        weight.tap()
+        weight.typeText("50")
+        let reps = app.textFields["workout-set-0-reps-field"]
+        reps.tap()
+        reps.typeText("8")
+        app.buttons["workout-set-0-completion-button"].tap()
+        capture("Christmas active workout")
+        app.buttons["active-workout-finish-button"].tap()
+        let save = app.buttons["Finish and Save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Sleigh all day. You earned this."].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["View History"].isHittable)
+        capture("Christmas workout celebration")
+
+        relaunch("2027-01-15T12:00:00Z")
+        XCTAssertFalse(app.staticTexts["Merry Liftmas!"].exists)
+        openPicker()
+        XCTAssertEqual(app.buttons["app-theme-mintCondition"].value as? String, "Selected")
+        for _ in 0..<5 { app.swipeUp() }
+        XCTAssertFalse(app.buttons["app-theme-christmas"].exists)
+
+        relaunch("2027-12-15T12:00:00Z")
+        XCTAssertFalse(app.staticTexts["Merry Liftmas!"].exists)
+        openPicker()
+        XCTAssertEqual(app.buttons["app-theme-mintCondition"].value as? String, "Selected")
+        choose("christmas")
+        // Restore a regular theme so subsequent tests don't inherit seasonal styling.
+        for _ in 0..<6 { app.swipeDown() }
+        choose("original")
+    }
+
+    @MainActor
+    func testChristmasWelcomeAtAccessibilityTextSize() {
+        let app = launchLocalApp(
+            additionalArguments: ["-appearance.theme", "christmas", "-appearance.christmasYear", "2026",
+                                  "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+            environment: ["UITEST_THEME_DATE": "2026-12-15T12:00:00Z"]
+        )
+        let greeting = app.staticTexts["Merry Liftmas!"]
+        XCTAssertTrue(greeting.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !greeting.isHittable { app.swipeUp() }
+        XCTAssertTrue(greeting.isHittable)
+        let subtitle = app.staticTexts["It’s the bulkiest season!"]
+        for _ in 0..<5 where !subtitle.isHittable { app.swipeUp() }
+        XCTAssertTrue(subtitle.isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Christmas accessibility greeting"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testFolderEditorCanRetryValidationFailureAndSaveOnce() {
         let app = launchLocalApp()
         let newFolder = app.buttons["start-workout-new-folder-button"]
@@ -1006,13 +1106,14 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchLocalApp(additionalArguments: [String] = []) -> XCUIApplication {
+    private func launchLocalApp(additionalArguments: [String] = [], environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_SKIP_SPLASH",
             "UITEST_IN_MEMORY_STORE",
             "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
         ] + additionalArguments
+        app.launchEnvironment = environment
         app.launch()
 
         let continueLocally = app.buttons["Continue Locally"].firstMatch
