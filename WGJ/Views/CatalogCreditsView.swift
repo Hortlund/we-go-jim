@@ -5,13 +5,14 @@ struct CatalogCreditsView: View {
     @Query(sort: [SortDescriptor(\ExerciseAttribution.sourceName, order: .forward)]) private var attributions: [ExerciseAttribution]
     private static let muscleMapSourceURL = URL(string: "https://github.com/melihcolpan/MuscleMap")
     private static let muscleMapAuthorURL = URL(string: "https://github.com/melihcolpan")
+    private static let catalogAuthorURL = URL(string: "https://github.com/Hortlund")
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 WGJEmptyStateCard(
                     title: "Exercise Library",
-                    message: "The bundled WGJ exercise library ships on-device. Custom exercises stay private to your app data and are not listed here.",
+                    message: "The bundled We Go Jim exercise library ships on-device. Custom exercises stay private to your app data and are not listed here.",
                     icon: "text.book.closed"
                 )
 
@@ -57,6 +58,11 @@ struct CatalogCreditsView: View {
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
 
+                        if entry.catalogSourceName == "seed", entry.authorName == "Andreas Hortlund",
+                           let authorURL = Self.catalogAuthorURL {
+                            Link("Author GitHub", destination: authorURL)
+                        }
+
                         if let sourceURL = URL(string: entry.sourceURL), !entry.sourceURL.isEmpty {
                             Link("Source URL", destination: sourceURL)
                         }
@@ -81,12 +87,16 @@ struct CatalogCreditsView: View {
     private var deduplicatedAttributions: [CreditsAttributionRow] {
         var seen = Set<CreditsAttributionRow>()
         return attributions.reduce(into: []) { result, attribution in
+            let isBundledLibrary = attribution.exercise?.sourceName == "seed"
+                && attribution.sourceName == "WGJ Library"
             let row = CreditsAttributionRow(
-                sourceName: attribution.sourceName,
+                sourceName: isBundledLibrary ? String(localized: "We Go Jim Library") : attribution.sourceName,
                 sourceURL: attribution.sourceURL,
-                licenseName: attribution.licenseName,
+                licenseName: isBundledLibrary && attribution.licenseName == "Bundled with WGJ"
+                    ? String(localized: "Bundled with We Go Jim") : attribution.licenseName,
                 licenseURL: attribution.licenseURL,
-                authorName: attribution.authorName,
+                authorName: isBundledLibrary && attribution.authorName == "WGJ"
+                    ? "Andreas Hortlund" : attribution.authorName,
                 catalogSourceName: attribution.exercise?.sourceName ?? ""
             )
 
