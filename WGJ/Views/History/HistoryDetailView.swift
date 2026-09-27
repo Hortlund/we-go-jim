@@ -509,6 +509,13 @@ struct HistoryDetailView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             exerciseStructureBadgeRow(for: exercise)
+            if exercise.usesAssistance {
+                Text("Weight is machine assistance. Less assistance is harder.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
+            }
+            if exercise.usesAddedWeight {
+                Text("Weight is added weight. Bodyweight is not included.")
+                    .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+            }
 
             if isExpanded, hasLoadedLocalState {
                 HistoryExerciseDetailEditorCard(
@@ -2039,6 +2046,7 @@ private struct HistoryExerciseDetailEditorCard: View {
 
     private func personalRecordTint(for kind: WorkoutPersonalRecordKind) -> Color {
         switch kind {
+        case .assistance, .assistedReps: return WGJTheme.accentCyan
         case .strength:
             return WGJTheme.accentGold
         case .weight:

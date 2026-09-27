@@ -10,6 +10,7 @@ final class ExerciseCatalogItem {
     var equipmentSummary: String
     var instructionText: String?
     var cardioTrackingProfileRaw: String?
+    var loadTrackingRaw: String? = nil
     var isCurated: Bool
     var isHidden: Bool
     var sourceName: String
@@ -30,6 +31,7 @@ final class ExerciseCatalogItem {
         equipmentSummary: String = "",
         instructionText: String? = nil,
         cardioTrackingProfileRaw: String? = nil,
+        loadTrackingRaw: String? = nil,
         isCurated: Bool = false,
         isHidden: Bool = false,
         sourceName: String = "seed",
@@ -43,6 +45,7 @@ final class ExerciseCatalogItem {
         self.equipmentSummary = equipmentSummary
         self.instructionText = instructionText
         self.cardioTrackingProfileRaw = cardioTrackingProfileRaw
+        self.loadTrackingRaw = loadTrackingRaw
         self.isCurated = isCurated
         self.isHidden = isHidden
         self.sourceName = sourceName
@@ -63,6 +66,7 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
     let equipmentSummary: String
     let primaryMuscleNames: String
     let cardioTrackingProfileRaw: String?
+    var loadTrackingRaw: String? = nil
 
     var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
         cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:))
@@ -74,7 +78,7 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
         categoryName: String,
         equipmentSummary: String,
         primaryMuscleNames: String,
-        cardioTrackingProfileRaw: String? = nil
+        cardioTrackingProfileRaw: String? = nil, loadTrackingRaw: String? = nil
     ) {
         self.remoteUUID = remoteUUID
         self.displayName = displayName
@@ -82,6 +86,7 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
         self.equipmentSummary = equipmentSummary
         self.primaryMuscleNames = primaryMuscleNames
         self.cardioTrackingProfileRaw = cardioTrackingProfileRaw
+        self.loadTrackingRaw = loadTrackingRaw
     }
 
     init(catalogItem: ExerciseCatalogItem) {
@@ -91,7 +96,7 @@ nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
             categoryName: catalogItem.categoryName,
             equipmentSummary: catalogItem.equipmentSummary,
             primaryMuscleNames: catalogItem.primaryMuscleNames,
-            cardioTrackingProfileRaw: catalogItem.cardioTrackingProfile?.rawValue
+            cardioTrackingProfileRaw: catalogItem.cardioTrackingProfile?.rawValue, loadTrackingRaw: catalogItem.loadTrackingRaw
         )
     }
 }
@@ -257,6 +262,7 @@ nonisolated struct CustomExerciseDraft: Equatable {
     var secondaryMuscleIDs: [Int]
     var instructionText: String
     var cardioTrackingProfileRaw: String?
+    var loadTrackingRaw: String? = nil
 
     var cardioTrackingProfile: WorkoutCardioTrackingProfile? {
         get { cardioTrackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
@@ -318,6 +324,7 @@ nonisolated struct CustomExerciseDraft: Equatable {
             instructionText: exercise.instructionTextValue,
             cardioTrackingProfile: exercise.cardioTrackingProfile
         )
+        loadTrackingRaw = exercise.loadTrackingRaw
     }
 }
 

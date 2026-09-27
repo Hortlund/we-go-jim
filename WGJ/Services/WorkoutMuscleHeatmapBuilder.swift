@@ -133,7 +133,10 @@ nonisolated enum WorkoutMuscleHeatmapBuilder {
         catalogMappings: [String: WorkoutMuscleHeatmapCatalogMapping],
         fallbackMuscleSummary: String?
     ) -> [ExerciseBodyMapRegion: Double] {
-        if let mapping = catalogMappings[catalogExerciseUUID] {
+        // Imported load metadata can exist without a complete catalog muscle map.
+        // Keep using the saved exercise summary until real mappings are available.
+        if let mapping = catalogMappings[catalogExerciseUUID],
+           !mapping.primaryMuscleIDs.isEmpty || !mapping.secondaryMuscleIDs.isEmpty {
             return ExerciseBodyMapRegionMapper.regionScores(
                 primaryMuscleIDs: mapping.primaryMuscleIDs,
                 secondaryMuscleIDs: mapping.secondaryMuscleIDs

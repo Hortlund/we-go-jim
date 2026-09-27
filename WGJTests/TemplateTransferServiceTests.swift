@@ -4,6 +4,172 @@ import XCTest
 
 @MainActor
 final class TemplateTransferServiceTests: XCTestCase {
+    func testCustomLoadMeaningSurvivesTransferAndWorkoutLogging() throws {
+        for kind in ExerciseLoadKind.allCases {
+            let source = ModelContext(try makeInMemoryContainer())
+            source.autosaveEnabled = false
+            let exercise = ExerciseCatalogItem(remoteUUID: "shared-custom", displayName: "Custom Pull",
+                categoryName: "Back", loadTrackingRaw: kind.rawValue, sourceName: "custom")
+            source.insert(exercise)
+            let muscle = MuscleGroup(remoteID: 4, name: "Back", nameEn: "Back")
+            source.insert(muscle)
+            exercise.primaryMuscles = [muscle]
+            let templates = TemplateRepository(modelContext: source)
+            let template = try templates.createTemplate(name: "Shared Plan", notes: "")
+            var draft = TemplateExerciseDraft(selection: ExerciseCatalogSelection(catalogItem: exercise), preferredLoadUnit: .kg)
+            draft.setDrafts = [.init(targetReps: 8, targetWeight: 30, loadUnit: .kg)]
+            try templates.importExercises(templateID: template.id, drafts: [draft])
+            let exporter = TemplateTransferService(modelContext: source)
+            let data = try exporter.exportData(templateID: template.id)
+            let text = String(decoding: try exporter.exportData(templateID: template.id, format: .text), as: UTF8.self)
+            XCTAssertTrue(text.contains("Weight means: \(kind.title)"))
+
+            let destination = ModelContext(try makeInMemoryContainer())
+            destination.autosaveEnabled = false
+            let imported = try TemplateTransferService(modelContext: destination).importTemplate(from: data)
+            let importedExercises = try TemplateRepository(modelContext: destination).exercises(in: imported.id)
+            let id = try XCTUnwrap(importedExercises.first?.catalogExerciseUUID)
+            let catalog = try XCTUnwrap(ExerciseCatalogRepository(modelContext: destination).exerciseMap(for: [id])[id])
+            XCTAssertEqual(catalog.loadKind, kind)
+            XCTAssertEqual(TrainingGuidanceCatalogSnapshot(exercise: catalog).loadKind, kind)
+
+            let sessions = WorkoutSessionRepository(modelContext: destination)
+            let session = try sessions.createSessionFromTemplate(templateID: imported.id)
+            let sessionExercise = try XCTUnwrap(sessions.sessionExercises(sessionID: session.id).first)
+            let set = try XCTUnwrap(sessions.sessionSets(sessionExerciseID: sessionExercise.id).first)
+            set.actualWeight = 30
+            set.actualLoadUnit = .kg
+            set.actualReps = 8
+            set.isCompleted = true
+            session.status = .completed
+            session.endedAt = .now
+            try destination.saveWithRecoveryProtection()
+            let metrics = WorkoutMetricsService(modelContext: destination)
+            XCTAssertEqual(try metrics.totalVolume(sessionID: session.id), kind == .assistance ? 0 : 240)
+            let progress = try XCTUnwrap(metrics.exerciseProgressDataset(for: id))
+            XCTAssertEqual(progress.usesAssistance, kind == .assistance)
+            XCTAssertEqual(progress.usesAddedWeight, kind == .addedWeight)
+            XCTAssertEqual(try metrics.bestEstimatedOneRepMax(for: id) == nil, kind != .resistance)
+            let expectedMuscles = WorkoutMuscleHeatmapBuilder.scores(forCatalogExerciseUUID: id,
+                catalogMappings: [:], fallbackMuscleSummary: "Back")
+            XCTAssertFalse(expectedMuscles.isEmpty)
+            let completion = try XCTUnwrap(WorkoutCompletionSnapshotBuilder.build(sessionID: session.id, modelContext: destination))
+            let history = try HistoryDetailSnapshotBuilder.load(modelContext: destination, sessionID: session.id)
+            let profile = try metrics.profileDashboardSnapshot()
+            for entries in [completion.muscleHeatmap.entries, history.muscleHeatmap.entries, profile.weeklyMuscleHeatmap.entries] {
+                XCTAssertEqual(Dictionary(uniqueKeysWithValues: entries.map { ($0.region, $0.score) }), expectedMuscles)
+            }
+            XCTAssertEqual(try UserDataCloudBackupPayload(context: destination).customExercises
+                .first { $0.remoteUUID == id }?.loadTrackingRaw, kind.rawValue)
+        }
+    }
+
+    func testImportingLoadMetadataRebuildsLegacyHistoryForTemplatesAndFolders() throws {
+        for importFolder in [false, true] {
+            let source = ModelContext(try makeInMemoryContainer())
+            source.autosaveEnabled = false
+            let templates = TemplateRepository(modelContext: source)
+            let folder = try templates.createFolder(name: "Shared Folder")
+            let template = try templates.createTemplate(folderID: folder.id, name: "Shared Plan", notes: "")
+            let id = "custom-legacy-pull"
+            let draft = TemplateExerciseDraft(catalogExerciseUUID: id, exerciseNameSnapshot: "Custom Pull",
+                categorySnapshot: "Back", muscleSummarySnapshot: "Back", notes: "", targetRepMin: nil,
+                targetRepMax: nil, restSeconds: 120, setDrafts: [.init(targetReps: 8, targetWeight: 40, loadUnit: .kg)])
+            try templates.importExercises(templateID: template.id, drafts: [draft])
+            let exporter = TemplateTransferService(modelContext: source)
+            let oldEnvelope = try makeDecoder().decode(TemplateTransferEnvelope.self, from: exporter.exportData(templateID: template.id))
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let legacyData = try encoder.encode(TemplateTransferEnvelope(formatVersion: 7, artifact: oldEnvelope.artifact))
+
+            let destination = ModelContext(try makeInMemoryContainer())
+            destination.autosaveEnabled = false
+            let importer = TemplateTransferService(modelContext: destination)
+            let imported = try importer.importTemplate(from: legacyData)
+            let sessions = WorkoutSessionRepository(modelContext: destination)
+            var completed: [WorkoutSession] = []
+            for index in 0..<2 {
+                let session = try sessions.createSessionFromTemplate(templateID: imported.id)
+                let exercise = try XCTUnwrap(sessions.sessionExercises(sessionID: session.id).first)
+                let set = try XCTUnwrap(sessions.sessionSets(sessionExerciseID: exercise.id).first)
+                set.actualWeight = index == 0 ? 40 : 50
+                set.actualLoadUnit = .kg
+                set.actualReps = index == 0 ? 8 : 12
+                set.isCompleted = true
+                session.startedAt = Date().addingTimeInterval(Double(index - 2) * 86_400)
+                session.endedAt = session.startedAt.addingTimeInterval(3600)
+                session.status = .completed
+                completed.append(session)
+            }
+            try destination.saveWithRecoveryProtection()
+            _ = try sessions.backfillCompletedSessionSummariesIfNeeded()
+            let metrics = WorkoutMetricsService(modelContext: destination)
+            XCTAssertEqual(completed.map(\.totalVolume), [320, 600])
+            XCTAssertEqual(completed.map(\.prHitsCount), [1, 1])
+            XCTAssertNotNil(try metrics.personalRecords().first?.estimatedOneRepMax)
+
+            source.insert(ExerciseCatalogItem(remoteUUID: id, displayName: "Custom Pull", categoryName: "Back",
+                loadTrackingRaw: "assistance", sourceName: "custom"))
+            try source.saveWithRecoveryProtection()
+            let data = try importFolder ? exporter.exportData(folderID: folder.id, format: .bundle)
+                : exporter.exportData(templateID: template.id)
+            _ = try importer.importTransfer(from: data)
+            XCTAssertEqual(completed.map(\.totalVolume), [0, 0])
+            XCTAssertEqual(completed.map(\.prHitsCount), [1, 0])
+            let record = try XCTUnwrap(metrics.personalRecords().first)
+            XCTAssertTrue(record.usesAssistance)
+            XCTAssertNil(record.estimatedOneRepMax)
+            XCTAssertEqual(record.weight, 40)
+            XCTAssertEqual(try metrics.profileDashboardSnapshot().overviewStats.totalPRHits, 1)
+            XCTAssertFalse(destination.hasChanges)
+            let dates = completed.map(\.updatedAt)
+            _ = try importer.importTransfer(from: data)
+            XCTAssertEqual(completed.map(\.updatedAt), dates)
+        }
+    }
+
+    func testTransferredLoadMeaningDoesNotOverwriteConflictingLocalExerciseAndSurvivesRotation() throws {
+        let source = ModelContext(try makeInMemoryContainer())
+        source.autosaveEnabled = false
+        let assisted = ExerciseCatalogItem(remoteUUID: "same-id", displayName: "Custom Pull", categoryName: "Back",
+            loadTrackingRaw: "assistance", sourceName: "custom")
+        let added = ExerciseCatalogItem(remoteUUID: "alternative-id", displayName: "Custom Dip", categoryName: "Arms",
+            loadTrackingRaw: "addedWeight", sourceName: "custom")
+        source.insert(assisted)
+        source.insert(added)
+        let templates = TemplateRepository(modelContext: source)
+        let template = try templates.createTemplate(name: "Rotation", notes: "")
+        var draft = TemplateExerciseDraft(selection: ExerciseCatalogSelection(catalogItem: assisted), preferredLoadUnit: .kg)
+        draft.components = [TemplateExerciseComponentDraft(catalogItem: assisted), TemplateExerciseComponentDraft(catalogItem: added)]
+        try templates.importExercises(templateID: template.id, drafts: [draft])
+        let data = try TemplateTransferService(modelContext: source).exportData(templateID: template.id)
+
+        let destination = ModelContext(try makeInMemoryContainer())
+        destination.autosaveEnabled = false
+        let local = ExerciseCatalogItem(remoteUUID: "same-id", displayName: "Custom Pull", categoryName: "Back",
+            loadTrackingRaw: "resistance", sourceName: "custom")
+        destination.insert(local)
+        try destination.saveWithRecoveryProtection()
+        let importer = TemplateTransferService(modelContext: destination)
+        let first = try importer.importTemplate(from: data)
+        let second = try importer.importTemplate(from: data)
+        let importedTemplates = TemplateRepository(modelContext: destination)
+        let firstRow = try XCTUnwrap(importedTemplates.exercises(in: first.id).first)
+        let secondRow = try XCTUnwrap(importedTemplates.exercises(in: second.id).first)
+        XCTAssertNotEqual(firstRow.catalogExerciseUUID, local.remoteUUID)
+        XCTAssertEqual(firstRow.catalogExerciseUUID, secondRow.catalogExerciseUUID)
+        XCTAssertEqual(local.loadKind, .resistance)
+        let components = try importedTemplates.components(for: firstRow.id)
+        XCTAssertEqual(components.count, 2)
+        let catalog = try ExerciseCatalogRepository(modelContext: destination).exerciseMap(for: components.map(\.catalogExerciseUUID))
+        XCTAssertEqual(components.compactMap { catalog[$0.catalogExerciseUUID]?.loadKind }, [.assistance, .addedWeight])
+        let reexported = try TemplateTransferService(modelContext: destination).exportData(templateID: first.id)
+        let envelope = try makeDecoder().decode(TemplateTransferEnvelope.self, from: reexported)
+        guard case let .template(transferred) = envelope.artifact else { return XCTFail("Expected template") }
+        XCTAssertEqual(transferred.exercises.first?.loadKind, .assistance)
+        XCTAssertEqual(transferred.exercises.first?.components?.compactMap(\.loadKind), [.assistance, .addedWeight])
+    }
+
     func testRepeatedExportsKeepEarlierSharedFileIntact() throws {
         let context = ModelContext(try makeInMemoryContainer())
         context.autosaveEnabled = false
@@ -86,7 +252,7 @@ final class TemplateTransferServiceTests: XCTestCase {
         let exported = try TemplateTransferService(modelContext: sourceContext)
             .exportData(templateID: template.id)
         let decoded = try makeDecoder().decode(TemplateTransferEnvelope.self, from: exported)
-        XCTAssertEqual(decoded.formatVersion, 7)
+        XCTAssertEqual(decoded.formatVersion, 8)
         guard case .template(let transferred) = decoded.artifact else {
             return XCTFail("Expected a template transfer")
         }

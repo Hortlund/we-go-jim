@@ -97,7 +97,7 @@ nonisolated enum TemplateTransferArtifact: Codable, Equatable, Sendable {
 
 nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
     static let artifactFormatVersion = 6
-    static let currentFormatVersion = 7
+    static let currentFormatVersion = 8
 
     let formatVersion: Int
     let exportedAt: Date
@@ -246,6 +246,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    var loadKind: ExerciseLoadKind? = nil
     let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
@@ -265,7 +266,8 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         restSeconds: Int,
         sets: [TemplateTransferSet],
         components: [TemplateTransferExerciseComponent]? = nil,
-        superset: ExerciseSupersetMembershipDraft? = nil
+        superset: ExerciseSupersetMembershipDraft? = nil,
+        loadKind: ExerciseLoadKind? = nil
     ) {
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
@@ -278,6 +280,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         self.sets = sets
         self.components = components
         self.superset = superset
+        self.loadKind = loadKind
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -285,6 +288,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         case exerciseNameSnapshot
         case categorySnapshot
         case muscleSummarySnapshot
+        case loadKind
         case notes
         case targetRepMin
         case targetRepMax
@@ -300,6 +304,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         exerciseNameSnapshot = try container.decode(String.self, forKey: .exerciseNameSnapshot)
         categorySnapshot = try container.decode(String.self, forKey: .categorySnapshot)
         muscleSummarySnapshot = try container.decode(String.self, forKey: .muscleSummarySnapshot)
+        loadKind = try container.decodeIfPresent(ExerciseLoadKind.self, forKey: .loadKind)
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         targetRepMin = try container.decodeIfPresent(Int.self, forKey: .targetRepMin)
         targetRepMax = try container.decodeIfPresent(Int.self, forKey: .targetRepMax)
@@ -315,6 +320,7 @@ nonisolated struct TemplateTransferExerciseComponent: Codable, Equatable, Sendab
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    var loadKind: ExerciseLoadKind? = nil
 }
 
 nonisolated struct TemplateTransferSet: Codable, Equatable, Sendable {
@@ -581,7 +587,7 @@ nonisolated final class TemplateTransferService {
                 templateID: template.id,
                 drafts: try cardioDrafts(from: transferTemplate, catalogRepository: catalogRepository)
             )
-            try repository.finalizeDeferredUserDataChangesIfNeeded()
+            try finalizeImport(using: repository)
             return template.id
         } catch {
             throw error
@@ -618,10 +624,37 @@ nonisolated final class TemplateTransferService {
                 )
             }
 
-            try repository.finalizeDeferredUserDataChangesIfNeeded()
+            try finalizeImport(using: repository)
             return folder.id
         } catch {
             throw error
+        }
+    }
+
+    private func finalizeImport(using repository: TemplateRepository) throws {
+        // Older transfers left catalog IDs in history without catalog metadata.
+        // Resolve their derived metrics in the same save as the new metadata.
+        let importedIDs = Set(modelContext.insertedModelsArray.compactMap { model -> String? in
+            guard let exercise = model as? ExerciseCatalogItem,
+                  exercise.loadTrackingRaw != nil else { return nil }
+            return exercise.remoteUUID
+        })
+        var affectsHistory = false
+        if !importedIDs.isEmpty {
+            let exerciseCount = try modelContext.fetchCount(FetchDescriptor<WorkoutSessionExercise>(
+                predicate: #Predicate { importedIDs.contains($0.catalogExerciseUUID) }))
+            let factCount = try modelContext.fetchCount(FetchDescriptor<CompletedSetFact>(
+                predicate: #Predicate { importedIDs.contains($0.catalogExerciseUUID) }))
+            affectsHistory = exerciseCount > 0 || factCount > 0
+        }
+        if affectsHistory {
+            _ = try HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(persistChanges: false)
+            _ = try HistoryRecordRebuilder.rebuild(in: modelContext)
+        }
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+        if affectsHistory {
+            HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
+            WorkoutHistoryChangeBroadcaster.post()
         }
     }
 
@@ -654,13 +687,21 @@ nonisolated final class TemplateTransferService {
 
         let cardioActivities = try repository.cardioActivities(templateID: templateID)
 
-        let exercises = try repository.exercises(in: templateID).map { exercise in
-            let components = try repository.components(for: exercise.id).map { component in
+        let exercises = try repository.exercises(in: templateID)
+        let componentsByID = try Dictionary(uniqueKeysWithValues: exercises.map {
+            ($0.id, try repository.components(for: $0.id))
+        })
+        let catalogIDs = Set(exercises.map(\.catalogExerciseUUID))
+            .union(componentsByID.values.flatMap { $0.map(\.catalogExerciseUUID) })
+        let catalogByID = try ExerciseCatalogRepository(modelContext: modelContext).exerciseMap(for: Array(catalogIDs))
+        let transferredExercises = try exercises.map { exercise in
+            let components = componentsByID[exercise.id, default: []].map { component in
                 TemplateTransferExerciseComponent(
                     catalogExerciseUUID: component.catalogExerciseUUID,
                     exerciseNameSnapshot: component.exerciseNameSnapshot,
                     categorySnapshot: component.categorySnapshot,
-                    muscleSummarySnapshot: component.muscleSummarySnapshot
+                    muscleSummarySnapshot: component.muscleSummarySnapshot,
+                    loadKind: catalogByID[component.catalogExerciseUUID]?.loadKind
                 )
             }
 
@@ -675,7 +716,8 @@ nonisolated final class TemplateTransferService {
                 restSeconds: exercise.restSeconds,
                 sets: try repository.setDrafts(for: exercise.id).map(transferSet(from:)),
                 components: components,
-                superset: exercise.supersetMembership
+                superset: exercise.supersetMembership,
+                loadKind: catalogByID[exercise.catalogExerciseUUID]?.loadKind
             )
         }
 
@@ -685,7 +727,7 @@ nonisolated final class TemplateTransferService {
             cardioActivities: cardioActivities.map {
                 transferCardio(from: TemplateCardioBlockDraft(model: $0))
             },
-            exercises: exercises
+            exercises: transferredExercises
         )
     }
 
@@ -751,6 +793,7 @@ nonisolated final class TemplateTransferService {
             exerciseNameSnapshot: exercise.exerciseNameSnapshot,
             categorySnapshot: exercise.categorySnapshot,
             muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            loadKind: exercise.loadKind,
             catalogRepository: catalogRepository
         )
 
@@ -801,6 +844,7 @@ nonisolated final class TemplateTransferService {
                 exerciseNameSnapshot: component.exerciseNameSnapshot,
                 categorySnapshot: component.categorySnapshot,
                 muscleSummarySnapshot: component.muscleSummarySnapshot,
+                loadKind: component.loadKind,
                 catalogRepository: catalogRepository
             )
 
@@ -863,18 +907,38 @@ nonisolated final class TemplateTransferService {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        loadKind: ExerciseLoadKind? = nil,
         catalogRepository: ExerciseCatalogRepository
     ) throws -> ImportedExerciseResolution {
         if let matchedExercise = try catalogRepository.exactImportMatch(
             remoteUUID: catalogExerciseUUID,
             exerciseName: exerciseNameSnapshot,
             categoryName: categorySnapshot
-        ) {
-            return ImportedExerciseResolution(catalogItem: matchedExercise)
+        ), loadKind == nil || matchedExercise.loadKind == loadKind {
+            return ImportedExerciseResolution(catalogItem: matchedExercise, fallbackMuscleSummary: muscleSummarySnapshot)
+        }
+
+        var resolvedUUID = catalogExerciseUUID
+        if let loadKind {
+            // Retain import metadata for logging, analytics and backup without
+            // overwriting a local exercise whose load has a different meaning.
+            if resolvedUUID.isEmpty { resolvedUUID = "imported-\(UUID().uuidString.lowercased())" }
+            if let existing = try catalogRepository.exerciseMap(for: [resolvedUUID])[resolvedUUID], existing.loadKind != loadKind {
+                resolvedUUID = "imported-\(resolvedUUID)-\(loadKind.rawValue)"
+            }
+            if let existing = try catalogRepository.exerciseMap(for: [resolvedUUID])[resolvedUUID] {
+                if existing.loadKind == loadKind {
+                    return ImportedExerciseResolution(catalogItem: existing, fallbackMuscleSummary: muscleSummarySnapshot)
+                }
+                resolvedUUID = "imported-\(UUID().uuidString.lowercased())"
+            }
+            modelContext.insert(ExerciseCatalogItem(remoteUUID: resolvedUUID,
+                displayName: exerciseNameSnapshot, categoryName: categorySnapshot,
+                loadTrackingRaw: loadKind.rawValue, isHidden: true, sourceName: "custom"))
         }
 
         return ImportedExerciseResolution(
-            catalogExerciseUUID: catalogExerciseUUID,
+            catalogExerciseUUID: resolvedUUID,
             exerciseNameSnapshot: exerciseNameSnapshot,
             categorySnapshot: categorySnapshot,
             muscleSummarySnapshot: muscleSummarySnapshot,
@@ -1102,6 +1166,9 @@ nonisolated final class TemplateTransferService {
             "Notes: \(exercise.notes.isEmpty ? "-" : exercise.notes)",
         ]
 
+        if let loadKind = exercise.loadKind {
+            lines.append("Weight means: \(loadKind.title). \(loadKind.explanation)")
+        }
         if let targetRepMin = exercise.targetRepMin, let targetRepMax = exercise.targetRepMax {
             lines.append("Rep range: \(targetRepMin)-\(targetRepMax)")
         } else if let targetRepMin = exercise.targetRepMin {
@@ -1116,6 +1183,11 @@ nonisolated final class TemplateTransferService {
             lines.append(
                 "Components: \(components.map(\.exerciseNameSnapshot).joined(separator: ", "))"
             )
+            for component in components {
+                if let loadKind = component.loadKind {
+                    lines.append("  \(component.exerciseNameSnapshot): \(loadKind.explanation)")
+                }
+            }
         }
 
         if let superset = exercise.superset {
@@ -1204,12 +1276,12 @@ nonisolated private struct ImportedExerciseResolution: Equatable {
         self.wasCanonicalized = wasCanonicalized
     }
 
-    init(catalogItem: ExerciseCatalogItem) {
+    init(catalogItem: ExerciseCatalogItem, fallbackMuscleSummary: String = "") {
         self.init(
             catalogExerciseUUID: catalogItem.remoteUUID,
             exerciseNameSnapshot: catalogItem.displayName,
             categorySnapshot: catalogItem.categoryName,
-            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames.isEmpty ? fallbackMuscleSummary : catalogItem.primaryMuscleNames,
             wasCanonicalized: true
         )
     }

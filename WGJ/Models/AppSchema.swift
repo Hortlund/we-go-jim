@@ -1,7 +1,7 @@
 import SwiftData
 
 nonisolated enum AppSchema {
-    static func makeFull() -> Schema { Schema(versionedSchema: AppSchemaV2.self) }
+    static func makeFull() -> Schema { Schema(versionedSchema: AppSchemaV3.self) }
 
     static var models: [any PersistentModel.Type] {
         [
@@ -56,12 +56,57 @@ nonisolated enum AppSchema {
     }
 }
 
+// V2 uses the frozen pre-load-type catalog graph. Other model shapes are unchanged.
 nonisolated enum AppSchemaV2: VersionedSchema {
     static var versionIdentifier: Schema.Version { .init(2, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        [
+            AppSchemaV1.ExerciseCatalogItem.self,
+            AppSchemaV1.MuscleGroup.self,
+            AppSchemaV1.ExerciseImageAsset.self,
+            AppSchemaV1.ExerciseAlias.self,
+            AppSchemaV1.ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+            UserProfile.self,
+            UserDataDeletionTombstone.self,
+            ProfileWidgetConfig.self,
+            CachedCoachNarrative.self,
+            CachedCoachFollowUpNarrative.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateCardioBlock.self,
+            TemplateExercise.self,
+            TemplateExerciseComponent.self,
+            TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
+            ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
+            WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
+            CompletedSetFact.self,
+            ExerciseSessionSummary.self,
+            CompletedCardioFact.self,
+            HistoryProjectionCheckpoint.self,
+        ]
+    }
+}
+
+nonisolated enum AppSchemaV3: VersionedSchema {
+    static var versionIdentifier: Schema.Version { .init(3, 0, 0) }
     static var models: [any PersistentModel.Type] { AppSchema.models }
 }
 
 nonisolated enum AppSchemaMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [AppSchemaV1.self, AppSchemaV2.self] }
-    static var stages: [MigrationStage] { [.lightweight(fromVersion: AppSchemaV1.self, toVersion: AppSchemaV2.self)] }
+    static var schemas: [any VersionedSchema.Type] { [AppSchemaV1.self, AppSchemaV2.self, AppSchemaV3.self] }
+    static var stages: [MigrationStage] { [.lightweight(fromVersion: AppSchemaV1.self, toVersion: AppSchemaV2.self), .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self)] }
 }

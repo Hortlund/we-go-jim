@@ -10,11 +10,16 @@ nonisolated enum HistoryRecordRebuilder {
         var weight = 0.0
         var volume = 0.0
         var reps = 0
+        var assistance = AssistanceRecordTracker()
 
-        mutating func consume(_ fact: CompletedSetFact) -> Bool {
+        mutating func consume(_ fact: CompletedSetFact, usesAddedWeight: Bool, usesAssistance: Bool) -> Bool {
+            if usesAssistance {
+                guard fact.weight != nil else { return false }
+                return !assistance.consume(kilograms: fact.normalizedWeightKg ?? 0, reps: fact.reps).isEmpty
+            }
             var record = false
             if fact.isWeightedMetric {
-                if let value = fact.estimatedOneRepMaxKg, value > strength { strength = value; record = true }
+                if !usesAddedWeight, let value = fact.estimatedOneRepMaxKg, value > strength { strength = value; record = true }
                 if let value = fact.normalizedWeightKg, value > weight { weight = value; record = true }
                 if let value = fact.volumeKg, value > volume { volume = value; record = true }
             }
@@ -30,6 +35,8 @@ nonisolated enum HistoryRecordRebuilder {
             let sessions = try repository.completedSessions(includeArchived: true)
             let visible = Set(sessions.filter { $0.archivedAt == nil }.map(\.id))
             let facts = try HistoryProjectionRepository(modelContext: context).allFacts()
+            let addedWeightIDs = try ExerciseLoadContextRepository.addedWeightIDs(for: Set(facts.map(\.catalogExerciseUUID)), in: context)
+            let assistanceIDs = try ExerciseLoadContextRepository.assistanceIDs(for: Set(facts.map(\.catalogExerciseUUID)), in: context)
             let bySession = Dictionary(grouping: facts, by: \.sessionID)
             let orderedHistory = facts.filter { !$0.isWarmup && $0.parentSetID == nil && visible.contains($0.sessionID) }.sorted {
                 $0.completedAt < $1.completedAt
@@ -44,7 +51,7 @@ nonisolated enum HistoryRecordRebuilder {
             for session in sessions.sorted(by: { $0.startedAt < $1.startedAt }) {
                 while historyIndex < orderedHistory.count && orderedHistory[historyIndex].completedAt < session.startedAt {
                     let fact = orderedHistory[historyIndex]
-                    _ = prior[fact.catalogExerciseUUID, default: Peaks()].consume(fact)
+                    _ = prior[fact.catalogExerciseUUID, default: Peaks()].consume(fact, usesAddedWeight: addedWeightIDs.contains(fact.catalogExerciseUUID), usesAssistance: assistanceIDs.contains(fact.catalogExerciseUUID))
                     historyIndex += 1
                 }
                 var local = prior
@@ -57,9 +64,9 @@ nonisolated enum HistoryRecordRebuilder {
                     return $0.sessionSetID.uuidString < $1.sessionSetID.uuidString
                 }
                 for fact in sessionFacts where fact.parentSetID == nil {
-                    if local[fact.catalogExerciseUUID, default: Peaks()].consume(fact) { hits += 1 }
+                    if local[fact.catalogExerciseUUID, default: Peaks()].consume(fact, usesAddedWeight: addedWeightIDs.contains(fact.catalogExerciseUUID), usesAssistance: assistanceIDs.contains(fact.catalogExerciseUUID)) { hits += 1 }
                 }
-                let volume = sessionFacts.reduce(0) { $0 + ($1.volumeKg ?? 0) }
+                let volume = sessionFacts.reduce(0) { $0 + (assistanceIDs.contains($1.catalogExerciseUUID) ? 0 : ($1.volumeKg ?? 0)) }
                 let version = WorkoutMetricsService.currentSummaryMetricsVersion
                 if session.prHitsCount != hits || session.totalVolume != volume || session.summaryMetricsVersion != version {
                     session.prHitsCount = hits

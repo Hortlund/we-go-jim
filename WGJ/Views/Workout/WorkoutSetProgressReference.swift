@@ -14,6 +14,7 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
     let canReusePrevious: Bool
 
     static func make(
+        usesAssistance: Bool = false,
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?,
         targetRepMin: Int?,
@@ -28,14 +29,14 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
             unit: previous.unit,
             formatWeight: formatWeight
         )
-        let aimValue = aimText(
+        let aimValue = usesAssistance ? "Compare reps at the same assistance" : aimText(
             draft: draft,
             previous: previous,
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
             formatWeight: formatWeight
         )
-        let status = statusPresentation(
+        let status = usesAssistance ? assistanceStatus(draft: draft, previous: previous) : statusPresentation(
             draft: draft,
             previous: previous,
             formatWeight: formatWeight
@@ -48,6 +49,18 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
             statusTone: status?.tone ?? .accent,
             canReusePrevious: hasReusableValues(in: previous) && !matchesPrevious(draft: draft, previous: previous)
         )
+    }
+
+    private static func assistanceStatus(draft: WorkoutSessionSetDraft, previous: WorkoutPreviousSetSnapshot) -> (text: String, tone: WorkoutSetProgressTone)? {
+        guard let weight = draft.actualWeight, let prior = previous.weight, let reps = draft.actualReps, let oldReps = previous.reps else { return nil }
+        let currentKg = WorkoutPerformanceMath.normalizedLoadInKilograms(weight, unit: draft.actualLoadUnit)
+        let previousKg = WorkoutPerformanceMath.normalizedLoadInKilograms(prior, unit: previous.unit)
+        if currentKg < previousKg - 0.01 {
+            return reps >= oldReps ? ("Less assistance with the same or more reps", .success) : ("Less assistance · compare reps at the same assistance", .accent)
+        }
+        if currentKg > previousKg + 0.01 { return ("More assistance · compare reps at the same assistance", .accent) }
+        if reps > oldReps { return ("+\(reps - oldReps) reps at the same assistance", .success) }
+        return (reps == oldReps ? "Matched reps and assistance" : "Fewer reps at the same assistance", .accent)
     }
 
     private static func performanceText(
@@ -185,7 +198,7 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
 
                 if let repDelta, repDelta < 0 {
                     let repGap = abs(repDelta)
-                    return ("Heavier, but \(repGap) rep\(repGap == 1 ? "" : "s") under last", .accent)
+                    return ("Heavier load · \(repGap) fewer rep\(repGap == 1 ? "" : "s")", .accent)
                 }
 
                 return ("\(positiveWeightDeltaText(delta, unit: previous.unit, formatWeight: formatWeight)) vs last", .success)
@@ -202,6 +215,14 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
                 }
 
                 return ("Below last load", .caution)
+            }
+        }
+
+        if !unitsMatch || weightDelta == nil {
+            let currentKg = draft.actualLoadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(draft.actualWeight ?? 0, unit: draft.actualLoadUnit)
+            let previousKg = previous.unit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(previous.weight ?? 0, unit: previous.unit)
+            guard abs(currentKg - previousKg) < 0.01 else {
+                return ("Load changed · compare reps at the same load", .accent)
             }
         }
 

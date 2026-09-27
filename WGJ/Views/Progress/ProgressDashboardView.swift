@@ -257,7 +257,7 @@ struct ProgressDashboardView: View {
         LazyVStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader(
                 "Template Exercise Progress",
-                subtitle: "Best sets and volume from completed working sets."
+                subtitle: "Compare similar technique and effort. Lifted volume excludes bodyweight and assistance; e1RM is an estimate."
             )
 
             if comparisons.isEmpty {

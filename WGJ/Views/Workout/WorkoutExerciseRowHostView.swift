@@ -31,6 +31,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
+    let usesAddedWeight: Bool
+    let usesAssistance: Bool
     let preferredLoadUnit: TemplateLoadUnit
     let componentSummaryResolution: ExerciseComponentRotationResolution?
     let componentSummaryAccessibilityIdentifierPrefix: String?
@@ -82,6 +84,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false,
         preferredLoadUnit: TemplateLoadUnit,
         componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
         componentSummaryAccessibilityIdentifierPrefix: String? = nil,
@@ -130,6 +133,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
+        self.usesAddedWeight = usesAddedWeight
+        self.usesAssistance = usesAssistance
         self.preferredLoadUnit = preferredLoadUnit
         self.componentSummaryResolution = componentSummaryResolution
         self.componentSummaryAccessibilityIdentifierPrefix = componentSummaryAccessibilityIdentifierPrefix
@@ -190,6 +195,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             personalRecordSummaryKinds: personalRecordSummaryKinds,
             personalRecordKindsBySetID: personalRecordKindsBySetID,
             guidance: guidance,
+            usesAddedWeight: usesAddedWeight, usesAssistance: usesAssistance,
             preferredLoadUnit: preferredLoadUnit,
             componentSummaryResolution: componentSummaryResolution,
             componentSummaryAccessibilityIdentifierPrefix: componentSummaryAccessibilityIdentifierPrefix,
@@ -308,6 +314,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.personalRecordSummaryKinds == rhs.personalRecordSummaryKinds
             && lhs.personalRecordKindsBySetID == rhs.personalRecordKindsBySetID
             && lhs.guidance == rhs.guidance
+            && lhs.usesAddedWeight == rhs.usesAddedWeight
+            && lhs.usesAssistance == rhs.usesAssistance
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
             && lhs.componentSummaryResolution == rhs.componentSummaryResolution
             && lhs.componentSummaryAccessibilityIdentifierPrefix == rhs.componentSummaryAccessibilityIdentifierPrefix

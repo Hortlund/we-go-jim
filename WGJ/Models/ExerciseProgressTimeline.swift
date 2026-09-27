@@ -62,6 +62,7 @@ nonisolated struct ExerciseProgressSession: Hashable, Sendable {
     let displayUnit: TemplateLoadUnit
     var durationSeconds: Double? = nil
     var distanceMeters: Double? = nil
+    var loadContext: ExerciseLoadContext? = nil
 }
 
 nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
@@ -69,12 +70,15 @@ nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
     let exerciseName: String
     let sessions: [ExerciseProgressSession]
     let preferredLoadUnit: TemplateLoadUnit
+    let usesAddedWeight: Bool
+    let usesAssistance: Bool
 
     init(
         exerciseUUID: String,
         exerciseName: String,
         sessions: [ExerciseProgressSession],
-        preferredLoadUnit: TemplateLoadUnit
+        preferredLoadUnit: TemplateLoadUnit,
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false
     ) {
         self.exerciseUUID = exerciseUUID
         self.exerciseName = exerciseName
@@ -83,6 +87,8 @@ nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
             return $0.sessionID.uuidString < $1.sessionID.uuidString
         }
         self.preferredLoadUnit = preferredLoadUnit
+        self.usesAddedWeight = usesAddedWeight
+        self.usesAssistance = usesAssistance
     }
 }
 
@@ -90,6 +96,8 @@ nonisolated struct ExerciseProgressPoint: Identifiable, Equatable, Sendable {
     let id: String
     let date: Date
     let value: Double
+    var context: String? = nil
+    var performance: ExerciseSetPerformance? = nil
 }
 
 nonisolated struct ExerciseProgressAvailability: Equatable, Sendable {
@@ -121,6 +129,7 @@ nonisolated struct ExerciseProgressMilestone: Identifiable, Equatable, Sendable 
     let date: Date
     let value: Double
     let kind: ExerciseProgressMilestoneKind
+    var context: String? = nil
 }
 
 nonisolated struct ExerciseProgressProjection: Equatable, Sendable {
@@ -133,9 +142,54 @@ nonisolated struct ExerciseProgressProjection: Equatable, Sendable {
     let summary: ExerciseProgressSummary?
     let milestones: [ExerciseProgressMilestone]
     let accessibilitySummary: String
+    var usesAddedWeight: Bool = false
+    var usesAssistance: Bool = false
+}
+
+extension ExerciseProgressDataset {
+    func title(for metric: ExerciseProgressMetric) -> String {
+        usesAddedWeight && metric == .heaviestWeight ? "Heaviest Added Weight"
+            : usesAddedWeight && metric == .sessionVolume ? "Added-Weight Volume" : metric.title
+    }
+
+    var preferredMetric: ExerciseProgressMetric {
+        usesAddedWeight || usesAssistance ? .bestSetReps : .estimatedOneRepMax
+    }
 }
 
 extension ExerciseProgressProjection {
+    var metricTitle: String {
+        usesAddedWeight && metric == .heaviestWeight ? "Heaviest Added Weight"
+            : usesAddedWeight && metric == .sessionVolume ? "Added-Weight Volume" : metric.title
+    }
+
+    var comparisonNote: String? {
+        if metric == .bestSetReps, points.count > 1 {
+            guard let first = points.first?.performance, let last = points.last?.performance else {
+                return "Compare reps alongside the load used."
+            }
+            if !first.hasSameLoad(as: last) {
+                return usesAssistance ? "Assistance changed. Compare reps at the same assistance on the same machine." : "Load changed. Fewer reps at a heavier load can still be progress."
+            }
+        }
+        if metric == .totalReps { return "Total reps depend on both load and the number of working sets." }
+        return nil
+    }
+
+    var metricExplanation: String? {
+        if usesAssistance { return "Less assistance is harder. Compare reps at the same assistance on the same machine; bodyweight and effort also matter." }
+        return switch metric {
+        case .bestSetReps: "Your highest-rep working set in each workout, with its logged load. Compare similar technique, range of motion and effort."
+        case .totalReps: "Reps across all completed working sets."
+        case .sessionVolume: usesAddedWeight
+            ? "Added weight × reps across working sets. Bodyweight is not included."
+            : "Weight × reps across working sets. This measures training volume, not strength on its own."
+        case .estimatedOneRepMax: "An estimate from logged weight and reps, not a tested maximum. Technique, effort and rep range affect the estimate."
+        case .heaviestWeight: usesAddedWeight ? "External weight only. Your bodyweight is not included." : nil
+        default: nil
+        }
+    }
+
     func formattedValue(_ value: Double) -> String {
         switch metric {
         case .estimatedOneRepMax, .heaviestWeight:

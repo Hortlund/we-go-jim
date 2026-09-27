@@ -69,6 +69,9 @@ nonisolated struct DashboardMetricsRepository {
             }
         }
 
+        let recordExerciseIDs = request.records ? Set(rows.map(\.catalogExerciseUUID)).union(entries.map(\.0)) : []
+        let addedWeightIDs = try ExerciseLoadContextRepository.addedWeightIDs(for: recordExerciseIDs, in: context)
+        let assistanceIDs = try ExerciseLoadContextRepository.assistanceIDs(for: recordExerciseIDs, in: context)
         var best: [String: WorkoutPRRecord] = [:]
         var bodyweight: [String: BodyweightExerciseBestRecord] = [:]
         var frequency: [String: CollectedExerciseFrequency] = [:]
@@ -94,16 +97,36 @@ nonisolated struct DashboardMetricsRepository {
             guard let entry else { return }
             if request.history { history[exercise, default: []].append(entry) }
             if request.records {
-                if let weight = entry.bestWeight, let reps = entry.bestReps, let value = entry.weightedOneRepMaxInKilograms {
+                if assistanceIDs.contains(exercise), let set = entry.loadContext?.leastAssistanceSet {
                     let old = best[exercise]
-                    let oldValue = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.estimatedOneRepMax, unit: $0.loadUnit) } ?? -1
+                    let oldKg = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.weight, unit: $0.loadUnit) } ?? .infinity
+                    if set.kilograms < oldKg || (set.hasSameLoad(as: .init(reps: 0, kilograms: oldKg)) && set.reps > (old?.reps ?? 0)) {
+                        let unit = entry.maxWeightUnit
+                        best[exercise] = WorkoutPRRecord(id: exercise, catalogExerciseUUID: exercise,
+                            exerciseName: entry.exerciseName, estimatedOneRepMax: nil,
+                            weight: unit == .lb ? set.kilograms / 0.45359237 : set.kilograms,
+                            reps: set.reps, loadUnit: unit, achievedAt: date, usesAssistance: true)
+                    }
+                } else if addedWeightIDs.contains(exercise), let set = entry.loadContext?.heaviestSet, set.kilograms > 0 {
+                    let old = best[exercise]
+                    let oldWeight = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.weight, unit: $0.loadUnit) } ?? -1
+                    if set.kilograms > oldWeight || (set.kilograms == oldWeight && set.reps > (old?.reps ?? 0)) {
+                        let unit = entry.maxWeightUnit
+                        let weight = unit == .lb ? set.kilograms / 0.45359237 : set.kilograms
+                        best[exercise] = WorkoutPRRecord(id: exercise, catalogExerciseUUID: exercise,
+                            exerciseName: entry.exerciseName, estimatedOneRepMax: nil,
+                            weight: weight, reps: set.reps, loadUnit: unit, achievedAt: date, usesAddedWeight: true)
+                    }
+                } else if !addedWeightIDs.contains(exercise), !assistanceIDs.contains(exercise), let weight = entry.bestWeight, let reps = entry.bestReps, let value = entry.weightedOneRepMaxInKilograms {
+                    let old = best[exercise]
+                    let oldValue = old.map { WorkoutPerformanceMath.normalizedLoadInKilograms($0.estimatedOneRepMax ?? $0.weight, unit: $0.loadUnit) } ?? -1
                     if value > oldValue || (value == oldValue && date > (old?.achievedAt ?? .distantPast)) {
                         best[exercise] = WorkoutPRRecord(id: exercise, catalogExerciseUUID: exercise,
                             exerciseName: entry.exerciseName, estimatedOneRepMax: WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
                             weight: weight, reps: reps, loadUnit: entry.weightedOneRepMaxUnit, achievedAt: date)
                     }
                 }
-                if let reps = entry.bestBodyweightReps {
+                if !assistanceIDs.contains(exercise), let reps = entry.bestBodyweightReps {
                     let old = bodyweight[exercise]
                     if reps > (old?.reps ?? 0) || (reps == old?.reps && date > (old?.achievedAt ?? .distantPast)) {
                         bodyweight[exercise] = BodyweightExerciseBestRecord(catalogExerciseUUID: exercise,

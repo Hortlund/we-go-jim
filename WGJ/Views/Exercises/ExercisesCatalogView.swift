@@ -16,6 +16,7 @@ private struct ExerciseRuntimeAppendInput: Sendable {
     let displayName: String
     let categoryName: String
     let equipmentSummary: String
+    let loadTrackingRaw: String?
     let primaryMuscleNames: String
 
     @MainActor
@@ -24,6 +25,7 @@ private struct ExerciseRuntimeAppendInput: Sendable {
         self.displayName = exercise.displayName
         self.categoryName = exercise.categoryName
         self.equipmentSummary = exercise.equipmentSummary
+        self.loadTrackingRaw = exercise.loadTrackingRaw
         self.primaryMuscleNames = exercise.primaryMuscleNames
     }
 
@@ -32,6 +34,7 @@ private struct ExerciseRuntimeAppendInput: Sendable {
         self.displayName = exercise.displayName
         self.categoryName = exercise.categoryName
         self.equipmentSummary = exercise.equipmentSummary
+        self.loadTrackingRaw = exercise.loadTrackingRaw
         self.primaryMuscleNames = exercise.primaryMuscleNames
     }
 }
@@ -1011,7 +1014,7 @@ struct ExercisesCatalogView: View {
         preferredLoadUnit: TemplateLoadUnit
     ) -> ActiveWorkoutRuntimeExercise {
         let now = Date()
-        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: exercise.equipmentSummary)
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: exercise.equipmentSummary, loadTrackingRaw: exercise.loadTrackingRaw)
             ?? preferredLoadUnit
         return ActiveWorkoutRuntimeExercise(
             catalogExerciseUUID: exercise.remoteUUID,

@@ -315,6 +315,7 @@ struct WGJApp: App {
         guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_PROFILE_BODYWEIGHT") else { return }
         let context = ModelContext(container)
         context.autosaveEnabled = false
+        context.insert(ExerciseCatalogItem(remoteUUID: "fixture-pull-up", displayName: "Pull-Up", equipmentSummary: "Pull-up bar", sourceName: "custom"))
         for index in 0..<2 {
             let date = Date().addingTimeInterval(Double(index - 2) * 86_400)
             let session = WorkoutSession(name: "Pull-Up Fixture", status: .completed, endedAt: date)
@@ -333,6 +334,10 @@ struct WGJApp: App {
     nonisolated private static func seedUITestExerciseProgressIfRequested(container: ModelContainer) throws {
         guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_EXERCISE_PROGRESS") else { return }
 
+        let mixedLoad = ProcessInfo.processInfo.arguments.contains("UITEST_MIXED_LOAD_PROGRESS")
+        let assisted = ProcessInfo.processInfo.arguments.contains("UITEST_ASSISTED_PROGRESS")
+        let exerciseUUID = assisted ? "seed-assisted-pull-up" : mixedLoad ? "seed-pull-up" : "seed-bench-press"
+        let exerciseName = assisted ? "Assisted Pull Up" : mixedLoad ? "Pull-Up" : "Barbell Bench Press"
         let context = ModelContext(container)
         context.autosaveEnabled = false
         var calendar = Calendar(identifier: .gregorian)
@@ -368,8 +373,8 @@ struct WGJApp: App {
             let exercise = WorkoutSessionExercise(
                 id: exerciseID,
                 sessionID: sessionID,
-                catalogExerciseUUID: "seed-bench-press",
-                exerciseNameSnapshot: "Barbell Bench Press",
+                catalogExerciseUUID: exerciseUUID,
+                exerciseNameSnapshot: exerciseName,
                 categorySnapshot: "Chest",
                 muscleSummarySnapshot: "Chest",
                 totalSetCount: 2,
@@ -381,8 +386,8 @@ struct WGJApp: App {
             var sets: [WorkoutSessionSet] = []
 
             for setIndex in 0..<2 {
-                let weight = Double(70 + index * 10 + setIndex * 5)
-                let reps = 8 + index + setIndex
+                let weight = assisted ? Double(40 - index * 10) : mixedLoad ? Double(index * 5) : Double(70 + index * 10 + setIndex * 5)
+                let reps = assisted ? 10 - index * 2 - setIndex : mixedLoad ? 10 - index * 2 - setIndex : 8 + index + setIndex
                 let setID = UUID()
                 let set = WorkoutSessionSet(
                     id: setID,
@@ -401,8 +406,8 @@ struct WGJApp: App {
                     sessionSetID: setID,
                     sessionID: sessionID,
                     sessionExerciseID: exerciseID,
-                    catalogExerciseUUID: "seed-bench-press",
-                    exerciseNameSnapshot: "Barbell Bench Press",
+                    catalogExerciseUUID: exerciseUUID,
+                    exerciseNameSnapshot: exerciseName,
                     completedAt: completedAt,
                     setIndex: setIndex,
                     isWarmup: false,

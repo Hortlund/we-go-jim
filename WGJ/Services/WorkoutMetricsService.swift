@@ -5,11 +5,13 @@ nonisolated struct WorkoutPRRecord: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
     let exerciseName: String
-    let estimatedOneRepMax: Double
+    let estimatedOneRepMax: Double?
     let weight: Double
     let reps: Int
     let loadUnit: TemplateLoadUnit
     let achievedAt: Date
+    var usesAddedWeight: Bool = false
+    var usesAssistance: Bool = false
 }
 
 nonisolated struct SessionPRAchievement: Identifiable, Equatable, Sendable {
@@ -32,11 +34,15 @@ nonisolated enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, 
     case weight
     case reps
     case volume
+    case assistance
+    case assistedReps
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .assistance: return "Least Assistance"
+        case .assistedReps: return "Reps at Same Assistance"
         case .strength:
             return "Strength"
         case .weight:
@@ -54,6 +60,8 @@ nonisolated enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, 
 
     var systemImage: String {
         switch self {
+        case .assistance: return "arrow.down.circle.fill"
+        case .assistedReps: return "repeat"
         case .strength:
             return "bolt.fill"
         case .weight:
@@ -67,6 +75,8 @@ nonisolated enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, 
 
     private var sortOrder: Int {
         switch self {
+        case .assistance: return 4
+        case .assistedReps: return 5
         case .strength:
             return 0
         case .weight:
@@ -95,6 +105,8 @@ nonisolated struct SessionSetPRAchievement: Identifiable, Equatable, Sendable {
     let reps: Int
     let volume: Double?
     let loadUnit: TemplateLoadUnit
+    var usesAddedWeight: Bool = false
+    var usesAssistance: Bool = false
 }
 
 nonisolated struct WeeklyWorkoutProgressPoint: Identifiable, Equatable, Sendable {
@@ -125,6 +137,8 @@ nonisolated struct ExerciseMetricPoint: Identifiable, Equatable, Sendable {
     let id: String
     let completedAt: Date
     let value: Double
+    var context: String? = nil
+    var performance: ExerciseSetPerformance? = nil
 }
 
 nonisolated struct ExerciseMetricSeries: Equatable, Sendable {
@@ -132,6 +146,8 @@ nonisolated struct ExerciseMetricSeries: Equatable, Sendable {
     let exerciseName: String
     let loadUnit: TemplateLoadUnit
     let points: [ExerciseMetricPoint]
+    var usesAddedWeight: Bool = false
+    var usesAssistance: Bool = false
 }
 
 nonisolated struct ExerciseDetailBestPerformance: Equatable, Sendable {
@@ -280,7 +296,7 @@ nonisolated private struct BestSetPresentation: Equatable {
 
 nonisolated private enum WorkoutMetricsPolicy {
     // Bump when session summary math or projected history facts change semantics.
-    nonisolated static let summaryMetricsVersion = 5
+    nonisolated static let summaryMetricsVersion = 7
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
         WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps)
@@ -485,8 +501,20 @@ nonisolated final class WorkoutMetricsService {
         self.historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
     }
 
-    static func bestSetText(for sets: [WorkoutSessionSet], emptyText: String = "-") -> String {
-        WorkoutMetricsPolicy.bestSetText(from: sets, emptyText: emptyText)
+    static func bestSetText(for sets: [WorkoutSessionSet], emptyText: String = "-", usesAddedWeight: Bool = false, usesAssistance: Bool = false) -> String {
+        guard usesAddedWeight || usesAssistance else { return WorkoutMetricsPolicy.bestSetText(from: sets, emptyText: emptyText) }
+        let performances = sets.compactMap { set -> (ExerciseSetPerformance, TemplateLoadUnit)? in
+            guard set.isCompleted, !set.isWarmup, let reps = set.actualReps, reps > 0,
+                  !usesAssistance || set.actualWeight != nil || set.actualLoadUnit == .bodyweight else { return nil }
+            let load = WorkoutLoggedLoadNormalization.resolved(actualWeight: set.actualWeight,
+                actualLoadUnit: set.actualLoadUnit, targetLoadUnit: set.targetLoadUnit)
+            let kilograms = load.unit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(load.weight ?? 0, unit: load.unit)
+            return (.init(reps: reps, kilograms: kilograms), load.unit)
+        }
+        guard let best = performances.max(by: {
+            $0.0.kilograms == $1.0.kilograms ? $0.0.reps < $1.0.reps : (usesAssistance ? $0.0.kilograms > $1.0.kilograms : $0.0.kilograms < $1.0.kilograms)
+        }) else { return usesAssistance && sets.contains(where: { $0.isCompleted && !$0.isWarmup }) ? "Assistance not recorded" : emptyText }
+        return best.0.label(unit: best.1, addedWeight: usesAddedWeight, assistance: usesAssistance)
     }
 
     func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
@@ -498,6 +526,8 @@ nonisolated final class WorkoutMetricsService {
         before date: Date? = nil,
         excludingSessionID: UUID? = nil
     ) throws -> Double? {
+        guard try !addedWeightExerciseIDs([catalogExerciseUUID]).contains(catalogExerciseUUID),
+              try !assistanceExerciseIDs([catalogExerciseUUID]).contains(catalogExerciseUUID) else { return nil }
         let entries = try ExerciseHistoryRepository(context: modelContext).entries(for: catalogExerciseUUID)
         var best: Double?
 
@@ -543,7 +573,9 @@ nonisolated final class WorkoutMetricsService {
             by: \.catalogExerciseUUID
         )
 
-        for catalogExerciseUUID in exerciseFactsByCatalogUUID.keys.sorted() {
+        let addedWeightIDs = try addedWeightExerciseIDs(Set(exerciseFactsByCatalogUUID.keys))
+        let assistanceIDs = try assistanceExerciseIDs(Set(exerciseFactsByCatalogUUID.keys))
+        for catalogExerciseUUID in exerciseFactsByCatalogUUID.keys.sorted() where !addedWeightIDs.contains(catalogExerciseUUID) && !assistanceIDs.contains(catalogExerciseUUID) {
             var runningBest = try bestEstimatedOneRepMax(
                 for: catalogExerciseUUID,
                 before: session.startedAt,
@@ -599,6 +631,8 @@ nonisolated final class WorkoutMetricsService {
         sessionFacts: [CompletedSetFact]
     ) throws -> [SessionSetPRAchievement] {
         var achievements: [SessionSetPRAchievement] = []
+        let addedWeightIDs = try addedWeightExerciseIDs(Set(sessionFacts.map(\.catalogExerciseUUID)))
+        let assistanceIDs = try assistanceExerciseIDs(Set(sessionFacts.map(\.catalogExerciseUUID)))
         let exerciseIDs = Set(sessionFacts.map(\.sessionExerciseID))
         let exercises = try repository.sessionExercises(
             sessionID: session.id,
@@ -646,7 +680,11 @@ nonisolated final class WorkoutMetricsService {
                 var weight: Double?
                 var volume: Double?
 
-                if fact.isWeightedMetric,
+                if assistanceIDs.contains(catalogExerciseUUID) {
+                    guard let loggedWeight = fact.weight else { continue }
+                    kinds = runningBest.assistance.consume(kilograms: fact.normalizedWeightKg ?? 0, reps: fact.reps)
+                    weight = loggedWeight
+                } else if fact.isWeightedMetric,
                    let loggedWeight = fact.weight,
                    let comparisonOneRepMax = fact.estimatedOneRepMaxKg,
                    let normalizedWeight = fact.normalizedWeightKg,
@@ -654,7 +692,7 @@ nonisolated final class WorkoutMetricsService {
                 {
                     let oneRepMax = estimatedOneRepMax(weight: loggedWeight, reps: fact.reps)
 
-                    if comparisonOneRepMax > runningBest.strength {
+                    if !addedWeightIDs.contains(catalogExerciseUUID), comparisonOneRepMax > runningBest.strength {
                         runningBest.strength = comparisonOneRepMax
                         kinds.append(.strength)
                     }
@@ -669,12 +707,12 @@ nonisolated final class WorkoutMetricsService {
                         kinds.append(.volume)
                     }
 
-                    estimatedOneRepMaxValue = oneRepMax
+                    estimatedOneRepMaxValue = addedWeightIDs.contains(catalogExerciseUUID) ? nil : oneRepMax
                     weight = loggedWeight
                     volume = normalizedVolume
                 }
 
-                if fact.reps > runningBest.reps {
+                if !assistanceIDs.contains(catalogExerciseUUID), fact.reps > runningBest.reps {
                     runningBest.reps = fact.reps
                     kinds.append(.reps)
                 }
@@ -693,7 +731,9 @@ nonisolated final class WorkoutMetricsService {
                         weight: weight,
                         reps: fact.reps,
                         volume: volume,
-                        loadUnit: fact.loadUnit
+                        loadUnit: fact.loadUnit,
+                        usesAddedWeight: addedWeightIDs.contains(catalogExerciseUUID),
+                        usesAssistance: assistanceIDs.contains(catalogExerciseUUID)
                     )
                 )
             }
@@ -706,7 +746,7 @@ nonisolated final class WorkoutMetricsService {
 
     func totalVolume(sessionID: UUID) throws -> Double {
         guard let session = try session(id: sessionID) else { return 0 }
-        return totalWeightedVolume(from: resolvedFacts(for: session))
+        return try totalWeightedVolume(from: resolvedFacts(for: session))
     }
 
     func sessionSummary(sessionID: UUID) throws -> WorkoutSessionSummaryMetrics {
@@ -716,7 +756,7 @@ nonisolated final class WorkoutMetricsService {
         let sessionFacts = resolvedFacts(for: session)
 
         return WorkoutSessionSummaryMetrics(
-            totalVolume: totalWeightedVolume(from: sessionFacts),
+            totalVolume: try totalWeightedVolume(from: sessionFacts),
             prHitsCount: try sessionSetPRAchievements(
                 session: session,
                 sessionFacts: sessionFacts
@@ -730,7 +770,7 @@ nonisolated final class WorkoutMetricsService {
     ) throws -> WorkoutSessionSummaryMetrics {
         let sessionFacts = projectedFacts.map { $0.makeModel() }
         return WorkoutSessionSummaryMetrics(
-            totalVolume: totalWeightedVolume(from: sessionFacts),
+            totalVolume: try totalWeightedVolume(from: sessionFacts),
             prHitsCount: try sessionSetPRAchievements(
                 session: session,
                 sessionFacts: sessionFacts
@@ -748,6 +788,8 @@ nonisolated final class WorkoutMetricsService {
 
     func exerciseHistoryOptions(metric: ProfileExerciseTrendMetric? = nil) throws -> [ExerciseHistoryOption] {
         let exerciseHistoryByUUID = try metricsSnapshot().exerciseHistoryByUUID
+        let addedWeightIDs = try addedWeightExerciseIDs(Set(exerciseHistoryByUUID.keys))
+        let assistanceIDs = try assistanceExerciseIDs(Set(exerciseHistoryByUUID.keys))
         var latestByExercise: [String: ExerciseHistoryOption] = [:]
 
         for (catalogExerciseUUID, entries) in exerciseHistoryByUUID {
@@ -756,8 +798,12 @@ nonisolated final class WorkoutMetricsService {
             }
 
             let availableMetrics = Set(ProfileExerciseTrendMetric.allCases.filter { metric in
-                entries.contains { $0.supportsExerciseTrendMetric(metric) }
+                !(addedWeightIDs.contains(catalogExerciseUUID) && metric == .oneRepMax)
+                    && !(assistanceIDs.contains(catalogExerciseUUID) && metric != .maxReps)
+                    && entries.contains { assistanceIDs.contains(catalogExerciseUUID)
+                        ? $0.loadContext?.bestAssistedRepsSet != nil : $0.supportsExerciseTrendMetric(metric) }
             })
+            guard !availableMetrics.isEmpty else { continue }
             latestByExercise[catalogExerciseUUID] = ExerciseHistoryOption(
                 catalogExerciseUUID: catalogExerciseUUID,
                 exerciseName: latestEntry.exerciseName,
@@ -799,10 +845,15 @@ nonisolated final class WorkoutMetricsService {
     }
 
     func exerciseMetricTrends(requests: Set<ExerciseTrendRequest>, limit: Int = 8) throws -> [ExerciseTrendRequest: ExerciseMetricSeries] {
-        let histories = try ExerciseHistoryRepository(context: modelContext).trendEntries(requests: requests, limit: limit)
+        let addedWeightIDs = try addedWeightExerciseIDs(Set(requests.map(\.catalogExerciseUUID)))
+        let assistanceIDs = try assistanceExerciseIDs(Set(requests.map(\.catalogExerciseUUID)))
+        let histories = try ExerciseHistoryRepository(context: modelContext).trendEntries(requests: requests, limit: limit, assistanceIDs: assistanceIDs)
         return Dictionary(uniqueKeysWithValues: requests.map { request in
             let entries = histories[request, default: []]
+            let addedWeight = addedWeightIDs.contains(request.catalogExerciseUUID)
+            let assistance = assistanceIDs.contains(request.catalogExerciseUUID)
             let points = entries.compactMap { entry -> CollectedExerciseMetricPoint? in
+                guard !(addedWeight && request.metric == .oneRepMax), !(assistance && request.metric != .maxReps) else { return nil }
                 let value: Double?
                 let unit: TemplateLoadUnit
                 switch request.metric {
@@ -811,10 +862,21 @@ nonisolated final class WorkoutMetricsService {
                 case .maxWeight: value = entry.maxWeightInKilograms; unit = entry.maxWeightUnit
                 case .maxReps: value = entry.maxReps.map(Double.init); unit = .bodyweight
                 }
-                return value.map { CollectedExerciseMetricPoint(completedAt: entry.completedAt, normalizedValue: $0, sourceUnit: unit) }
+                let metric: ExerciseProgressMetric = switch request.metric {
+                case .oneRepMax: .estimatedOneRepMax
+                case .maxWeight: .heaviestWeight
+                case .maxReps: .bestSetReps
+                case .volume: .sessionVolume
+                }
+                let performance = assistance ? entry.loadContext?.bestAssistedRepsSet : entry.loadContext?.set(for: metric)
+                let contextUnit = request.metric == .maxReps ? entry.maxWeightUnit : unit
+                let context = performance?.label(unit: contextUnit, addedWeight: addedWeight, assistance: assistance)
+                    ?? (assistance ? "Assistance not recorded" : entry.loadContext?.rangeLabel(unit: contextUnit, addedWeight: addedWeight))
+                return (assistance ? performance.map { Double($0.reps) } : value).map { CollectedExerciseMetricPoint(completedAt: entry.completedAt, normalizedValue: $0,
+                    sourceUnit: unit, context: context, performance: performance) }
             }
             return (request, buildExerciseMetricSeries(catalogExerciseUUID: request.catalogExerciseUUID,
-                exerciseName: entries.first?.exerciseName ?? "Exercise", points: points))
+                exerciseName: entries.first?.exerciseName ?? "Exercise", points: points, usesAddedWeight: addedWeight, usesAssistance: assistance))
         })
     }
 
@@ -839,7 +901,7 @@ nonisolated final class WorkoutMetricsService {
                 reps: record.reps,
                 weight: record.weight,
                 loadUnit: record.loadUnit,
-                estimatedOneRepMax: record.estimatedOneRepMax,
+                estimatedOneRepMax: record.usesAddedWeight ? nil : record.estimatedOneRepMax,
                 achievedAt: record.achievedAt
             )
         }
@@ -881,6 +943,14 @@ nonisolated final class WorkoutMetricsService {
             oneRepMaxTrend: oneRepMaxTrend,
             volumeTrend: volumeTrend
         )
+    }
+
+    private func assistanceExerciseIDs(_ ids: Set<String>) throws -> Set<String> {
+        try ExerciseLoadContextRepository.assistanceIDs(for: ids, in: modelContext)
+    }
+
+    private func addedWeightExerciseIDs(_ ids: Set<String>) throws -> Set<String> {
+        try ExerciseLoadContextRepository.addedWeightIDs(for: ids, in: modelContext)
     }
 
     func exerciseProgressDataset(
@@ -928,10 +998,13 @@ nonisolated final class WorkoutMetricsService {
                                 ? entry.weightedVolumeUnit
                                 : .bodyweight,
                     durationSeconds: entry.durationSeconds,
-                    distanceMeters: entry.distanceMeters
+                    distanceMeters: entry.distanceMeters,
+                    loadContext: entry.loadContext
                 )
             },
-            preferredLoadUnit: preferredUnit
+            preferredLoadUnit: preferredUnit,
+            usesAddedWeight: try addedWeightExerciseIDs([normalizedUUID]).contains(normalizedUUID),
+            usesAssistance: try assistanceExerciseIDs([normalizedUUID]).contains(normalizedUUID)
         )
     }
 
@@ -951,17 +1024,22 @@ nonisolated final class WorkoutMetricsService {
                 weeksToInclude.append(week)
             }
         }
+        let addedWeightIDs = try addedWeightExerciseIDs(Set(snapshot.bestPRByExercise.keys))
         let personalRecords = snapshot.bestPRByExercise.values
             .sorted { lhs, rhs in
-                let lhsValue = normalizedLoadForComparison(lhs.estimatedOneRepMax, unit: lhs.loadUnit)
-                let rhsValue = normalizedLoadForComparison(rhs.estimatedOneRepMax, unit: rhs.loadUnit)
+                let lhsValue = normalizedLoadForComparison(lhs.estimatedOneRepMax ?? lhs.weight, unit: lhs.loadUnit)
+                let rhsValue = normalizedLoadForComparison(rhs.estimatedOneRepMax ?? rhs.weight, unit: rhs.loadUnit)
                 if lhsValue != rhsValue {
                     return lhsValue > rhsValue
                 }
                 return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
             }
             .prefix(safePRLimit)
-            .map { $0 }
+            .map { record in
+                var record = record
+                record.usesAddedWeight = addedWeightIDs.contains(record.catalogExerciseUUID)
+                return record
+            }
         let weeklyProgress = weeksToInclude.map { week in
             WeeklyWorkoutProgressPoint(
                 id: week.formatted(date: .numeric, time: .omitted),
@@ -1122,9 +1200,10 @@ nonisolated final class WorkoutMetricsService {
         }
     }
 
-    private func totalWeightedVolume(from facts: [CompletedSetFact]) -> Double {
-        facts.reduce(into: 0.0) { total, fact in
-            guard !fact.isWarmup, let volumeKg = fact.volumeKg else { return }
+    private func totalWeightedVolume(from facts: [CompletedSetFact]) throws -> Double {
+        let assistanceIDs = try assistanceExerciseIDs(Set(facts.map(\.catalogExerciseUUID)))
+        return facts.reduce(into: 0.0) { total, fact in
+            guard !fact.isWarmup, !assistanceIDs.contains(fact.catalogExerciseUUID), let volumeKg = fact.volumeKg else { return }
             total += volumeKg
         }
     }
@@ -1141,6 +1220,31 @@ nonisolated final class WorkoutMetricsService {
         return resolvedGoal
     }
 
+    /// PR comparisons must also work while older derived history is awaiting backfill.
+    /// Rebuild only dirty sessions in memory; a read never commits source data.
+    private func resolvedHistoryFacts(for exerciseIDs: Set<String>) throws -> [CompletedSetFact] {
+        let persisted = try historyProjectionRepository.facts(forExercises: exerciseIDs)
+        let dirty = try ExerciseHistoryRepository(context: modelContext).dirtySessions()
+        guard !dirty.isEmpty else { return persisted }
+        let dirtyIDs = Set(dirty.map(\.id))
+        let allExercises = try repository.sessionExercises(sessionIDs: dirtyIDs)
+        let canonicalSessionIDs = Set(allExercises.map(\.sessionID))
+        let requested = allExercises.filter { exerciseIDs.contains($0.catalogExerciseUUID) }
+        let sets = try repository.sessionSets(sessionExerciseIDs: Set(requested.map(\.id)))
+        let stages = try repository.sessionDropStages(setIDs: Set(sets.map(\.id)))
+        let bySession = Dictionary(grouping: requested, by: \.sessionID)
+        let byExercise = Dictionary(grouping: sets, by: \.sessionExerciseID)
+        let bySet = Dictionary(grouping: stages, by: \.sessionSetID)
+        var result = persisted.filter { !canonicalSessionIDs.contains($0.sessionID) }
+        for session in dirty where canonicalSessionIDs.contains(session.id) {
+            let source = HistoryProjectionSnapshotBuilder.Source(session: session,
+                exercises: bySession[session.id, default: []].map { ($0, byExercise[$0.id, default: []]) },
+                dropStagesBySetID: bySet)
+            result.append(contentsOf: source.projectedFacts().map { $0.makeModel() })
+        }
+        return result
+    }
+
     private func priorSetMetricPeaksByExerciseUUID(
         for catalogExerciseUUIDs: Set<String>,
         before date: Date? = nil,
@@ -1148,7 +1252,7 @@ nonisolated final class WorkoutMetricsService {
     ) throws -> [String: PriorSetMetricPeaks] {
         guard !catalogExerciseUUIDs.isEmpty else { return [:] }
 
-        let facts = try historyProjectionRepository.facts(forExercises: catalogExerciseUUIDs)
+        let facts = try resolvedHistoryFacts(for: catalogExerciseUUIDs)
         let visibleSessionIDs = try visibleCompletedSessionIDs()
         var peaksByExerciseUUID: [String: PriorSetMetricPeaks] = [:]
 
@@ -1163,6 +1267,7 @@ nonisolated final class WorkoutMetricsService {
             }
 
             var peaks = peaksByExerciseUUID[fact.catalogExerciseUUID] ?? PriorSetMetricPeaks()
+            if fact.weight != nil { _ = peaks.assistance.consume(kilograms: fact.normalizedWeightKg ?? 0, reps: fact.reps) }
             if fact.isWeightedMetric,
                let weightedOneRepMax = fact.estimatedOneRepMaxKg,
                let normalizedWeight = fact.normalizedWeightKg,
@@ -1319,14 +1424,16 @@ nonisolated final class WorkoutMetricsService {
     private func buildExerciseMetricSeries(
         catalogExerciseUUID: String,
         exerciseName: String,
-        points: [CollectedExerciseMetricPoint]
+        points: [CollectedExerciseMetricPoint],
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false
     ) -> ExerciseMetricSeries {
         let displayUnit = points.first?.sourceUnit ?? .kg
         let orderedPoints = points.reversed().map { point in
             ExerciseMetricPoint(
                 id: "\(catalogExerciseUUID.lowercased())_\(point.completedAt.timeIntervalSinceReferenceDate)",
                 completedAt: point.completedAt,
-                value: displayValue(point.normalizedValue, unit: displayUnit)
+                value: displayValue(point.normalizedValue, unit: displayUnit),
+                context: point.context, performance: point.performance
             )
         }
 
@@ -1334,13 +1441,14 @@ nonisolated final class WorkoutMetricsService {
             catalogExerciseUUID: catalogExerciseUUID,
             exerciseName: exerciseName,
             loadUnit: displayUnit,
-            points: orderedPoints
+            points: orderedPoints,
+            usesAddedWeight: usesAddedWeight, usesAssistance: usesAssistance
         )
     }
 
     private func isBetterPRRecord(_ candidate: WorkoutPRRecord, than existing: WorkoutPRRecord) -> Bool {
-        let candidateValue = normalizedLoadForComparison(candidate.estimatedOneRepMax, unit: candidate.loadUnit)
-        let existingValue = normalizedLoadForComparison(existing.estimatedOneRepMax, unit: existing.loadUnit)
+        let candidateValue = normalizedLoadForComparison(candidate.estimatedOneRepMax ?? candidate.weight, unit: candidate.loadUnit)
+        let existingValue = normalizedLoadForComparison(existing.estimatedOneRepMax ?? existing.weight, unit: existing.loadUnit)
 
         if candidateValue != existingValue {
             return candidateValue > existingValue
@@ -1430,9 +1538,12 @@ nonisolated private struct CollectedExerciseMetricPoint {
     let completedAt: Date
     let normalizedValue: Double
     let sourceUnit: TemplateLoadUnit
+    var context: String? = nil
+    var performance: ExerciseSetPerformance? = nil
 }
 
 nonisolated private struct PriorSetMetricPeaks {
+    var assistance = AssistanceRecordTracker()
     var strength: Double = 0
     var weight: Double = 0
     var reps: Int = 0
@@ -1473,6 +1584,7 @@ nonisolated struct CompletedExerciseHistoryEntry: Codable, Sendable {
     var bestReps: Int? = nil
     var bestBodyweightReps: Int? = nil
     var muscleSummary: String? = nil
+    var loadContext: ExerciseLoadContext? = nil
 }
 
 private extension CompletedExerciseHistoryEntry {
@@ -1553,7 +1665,57 @@ extension ExerciseMetricSeries {
             catalogExerciseUUID: catalogExerciseUUID,
             exerciseName: trimmed,
             loadUnit: loadUnit,
-            points: points
+            points: points,
+            usesAddedWeight: usesAddedWeight, usesAssistance: usesAssistance
         )
+    }
+}
+
+
+extension ExerciseMetricSeries {
+    func comparisonText(for metric: ProfileExerciseTrendMetric) -> String? {
+        guard let first = points.first, let last = points.last, points.count >= 2 else { return nil }
+        if metric == .maxReps {
+            guard let firstSet = first.performance, let lastSet = last.performance else {
+                return "Compare reps alongside the load used."
+            }
+            if !firstSet.hasSameLoad(as: lastSet) {
+                return usesAssistance ? "Assistance changed. Compare reps at the same assistance on the same machine." : "Load changed. Fewer reps at a heavier load can still be progress."
+            }
+        }
+        let delta = last.value - first.value
+        let suffix = metric == .maxReps ? " at the same logged load" : ""
+        guard abs(delta) >= 0.1 else {
+            return "Unchanged across the last \(points.count) logged workouts\(suffix)."
+        }
+        let direction = delta > 0 ? "up" : "down"
+        return "\(metric.formattedTrendValue(abs(delta), loadUnit: loadUnit)) \(direction) across your last \(points.count) logged workouts\(suffix)."
+    }
+}
+
+
+extension SessionSetPRAchievement {
+    nonisolated var performanceText: String {
+        if usesAddedWeight || usesAssistance {
+            let kilograms = loadUnit == .bodyweight ? 0 : WorkoutPerformanceMath.normalizedLoadInKilograms(weight ?? 0, unit: loadUnit)
+            return ExerciseSetPerformance(reps: reps, kilograms: kilograms).label(unit: loadUnit, addedWeight: usesAddedWeight, assistance: usesAssistance)
+        }
+        if let weight, loadUnit != .bodyweight {
+            return "\(WGJFormatters.decimalString(weight)) \(loadUnit.shortLabel) x \(reps)"
+        }
+        return "\(reps) reps"
+    }
+
+    nonisolated var detailText: String {
+        let titles = kinds.map { kind in
+            usesAddedWeight && kind == .weight ? "Added Weight" : kind.title
+        }.joined(separator: " + ") + " PR"
+        if !usesAddedWeight, kinds.contains(.strength), let estimatedOneRepMax {
+            return "\(titles) · \(WGJFormatters.oneDecimalString(estimatedOneRepMax)) \(loadUnit.shortLabel) e1RM"
+        }
+        if kinds.contains(.volume), let volume {
+            return "\(titles) · \(WGJFormatters.integerString(volume)) kg \(usesAddedWeight ? "added-weight volume" : "volume")"
+        }
+        return titles
     }
 }

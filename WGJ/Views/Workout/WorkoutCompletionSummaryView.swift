@@ -868,7 +868,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
         let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
-        let exerciseData = exercises.map(makeExerciseData)
+        let addedWeightIDs = try repository.addedWeightExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
+        let assistanceIDs = try repository.assistanceExerciseIDs(Set(exercises.map(\.catalogExerciseUUID)))
+        let exerciseData = exercises.map { makeExerciseData($0, usesAddedWeight: addedWeightIDs.contains($0.catalogExerciseUUID), usesAssistance: assistanceIDs.contains($0.catalogExerciseUUID)) }
         let completedSetCount = exerciseData.reduce(0) { partialResult, data in
             partialResult + data.completedSetCount
         }
@@ -934,7 +936,7 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         )
     }
 
-    private static func makeExerciseData(_ exercise: WorkoutSessionExercise) -> WorkoutCompletionExerciseData {
+    private static func makeExerciseData(_ exercise: WorkoutSessionExercise, usesAddedWeight: Bool, usesAssistance: Bool) -> WorkoutCompletionExerciseData {
         let sets = orderedSessionSets(for: exercise)
         let completedSets = sets.filter {
             WorkoutSessionSetDraft(model: $0).isCycleCompleted
@@ -954,7 +956,7 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
                 totalSetCount: workingSets.count,
                 completedWarmupSetCount: completedWarmupSets.count,
                 totalWarmupSetCount: warmupSets.count,
-                bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged"),
+                bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged", usesAddedWeight: usesAddedWeight, usesAssistance: usesAssistance),
                 structure: WorkoutExerciseStructurePresentation(
                     supersetMembership: exercise.supersetMembership,
                     hasDropset: sets.contains { !($0.dropStages ?? []).isEmpty }
@@ -1000,30 +1002,11 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
     }
 
     private static func performanceText(for achievement: SessionSetPRAchievement) -> String {
-        if let weight = achievement.weight, achievement.loadUnit != .bodyweight {
-            return "\(WGJFormatters.decimalString(weight)) \(achievement.loadUnit.shortLabel) x \(achievement.reps)"
-        }
-
-        return "\(achievement.reps) reps"
+        achievement.performanceText
     }
 
     private static func detailText(for achievement: SessionSetPRAchievement) -> String {
-        let kindsText = achievement.kinds.map(\.title).joined(separator: " + ") + " PR"
-
-        if achievement.kinds.contains(.strength), let estimatedOneRepMax = achievement.estimatedOneRepMax {
-            let estimatedStrength = [
-                WGJFormatters.oneDecimalString(estimatedOneRepMax),
-                achievement.loadUnit.shortLabel,
-                "e1RM",
-            ].joined(separator: "\u{00A0}")
-            return "\(kindsText) · \(estimatedStrength)"
-        }
-
-        if achievement.kinds.contains(.volume), let volume = achievement.volume {
-            return "\(kindsText) · \(WGJFormatters.integerString(volume)) kg volume"
-        }
-
-        return kindsText
+        achievement.detailText
     }
 
     private static func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {

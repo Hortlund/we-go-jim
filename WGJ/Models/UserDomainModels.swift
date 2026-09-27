@@ -30,7 +30,10 @@ nonisolated enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Ide
         }
     }
 
-    nonisolated static func inferredDefault(fromEquipmentSummary equipmentSummary: String) -> TemplateLoadUnit? {
+    nonisolated static func inferredDefault(fromEquipmentSummary equipmentSummary: String, loadTrackingRaw: String? = nil) -> TemplateLoadUnit? {
+        if let loadTrackingRaw, let kind = ExerciseLoadKind(rawValue: loadTrackingRaw) {
+            return kind == .addedWeight ? .bodyweight : nil
+        }
         let normalized = equipmentSummary.folding(
             options: [.caseInsensitive, .diacriticInsensitive],
             locale: .current

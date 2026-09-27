@@ -160,6 +160,14 @@ nonisolated final class WorkoutSessionRepository {
         category: "WorkoutSessionRepository"
     )
 
+    func assistanceExerciseIDs(_ ids: Set<String>) throws -> Set<String> {
+        try ExerciseLoadContextRepository.assistanceIDs(for: ids, in: modelContext)
+    }
+
+    func addedWeightExerciseIDs(_ ids: Set<String>) throws -> Set<String> {
+        try ExerciseLoadContextRepository.addedWeightIDs(for: ids, in: modelContext)
+    }
+
     private let modelContext: ModelContext
     private let weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher?
     private let autoSaveChanges: Bool
@@ -756,7 +764,7 @@ nonisolated final class WorkoutSessionRepository {
         let sets = defaultSessionSets(
             sessionExerciseID: created.id,
             restSeconds: created.restSeconds,
-            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary, loadTrackingRaw: selection.loadTrackingRaw)
                 ?? preferredLoadUnit(),
             sessionExercise: created
         )

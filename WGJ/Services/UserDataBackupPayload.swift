@@ -738,6 +738,7 @@ nonisolated struct BackupCustomExercise: Codable, UserDataBackupModel {
     var equipmentSummary: String
     var instructionText: String?
     var cardioTrackingProfileRaw: String?
+    var loadTrackingRaw: String?
     var isHidden: Bool
     var lastUpdateGlobal: Date?
     var updatedAt: Date
@@ -753,6 +754,7 @@ nonisolated struct BackupCustomExercise: Codable, UserDataBackupModel {
         equipmentSummary = model.equipmentSummary
         instructionText = model.instructionText
         cardioTrackingProfileRaw = model.cardioTrackingProfileRaw
+        loadTrackingRaw = model.loadTrackingRaw
         isHidden = model.isHidden
         lastUpdateGlobal = model.lastUpdateGlobal
         updatedAt = model.updatedAt
@@ -770,6 +772,7 @@ nonisolated struct BackupCustomExercise: Codable, UserDataBackupModel {
             equipmentSummary: equipmentSummary,
             instructionText: instructionText,
             cardioTrackingProfileRaw: cardioTrackingProfileRaw,
+            loadTrackingRaw: loadTrackingRaw,
             isCurated: false,
             isHidden: isHidden,
             sourceName: "custom",
@@ -785,6 +788,7 @@ nonisolated struct BackupCustomExercise: Codable, UserDataBackupModel {
         model.equipmentSummary = equipmentSummary
         model.instructionText = instructionText
         model.cardioTrackingProfileRaw = cardioTrackingProfileRaw
+        model.loadTrackingRaw = loadTrackingRaw
         model.isCurated = false
         model.isHidden = isHidden
         model.sourceName = "custom"
