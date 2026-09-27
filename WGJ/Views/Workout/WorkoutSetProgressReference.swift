@@ -27,6 +27,7 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
             weight: previous.weight,
             reps: previous.reps,
             unit: previous.unit,
+            usesAssistance: usesAssistance,
             formatWeight: formatWeight
         )
         let aimValue = usesAssistance ? "Compare reps at the same assistance" : aimText(
@@ -67,14 +68,19 @@ nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
         weight: Double?,
         reps: Int?,
         unit: TemplateLoadUnit,
+        usesAssistance: Bool,
         formatWeight: (Double) -> String
     ) -> String {
         if unit == .bodyweight {
             if let reps {
-                return "BW x \(reps)"
+                return "\(reps) \(reps == 1 ? "rep" : "reps")"
             }
 
             return "Bodyweight"
+        }
+
+        if !usesAssistance, let reps, (weight ?? 0) == 0 {
+            return "\(reps) \(reps == 1 ? "rep" : "reps")"
         }
 
         if let weight, let reps {

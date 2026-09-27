@@ -456,7 +456,7 @@ struct ProfileView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text("\(record.usesAddedWeight ? "+" : "")\(formatWeight(record.weight)) \(record.loadUnit.shortLabel) × \(record.reps)")
+                            Text("\(formatWeight(record.weight)) \(record.loadUnit.shortLabel) × \(record.reps)")
                                 .font(.headline.weight(.semibold))
                                 .foregroundStyle(WGJTheme.accentCyan)
                             Text(record.estimatedOneRepMax.map { "Est. 1RM \(formatWeight($0)) \(record.loadUnit.shortLabel)" } ?? (record.usesAssistance ? "Least assistance × reps" : "Added weight × reps"))

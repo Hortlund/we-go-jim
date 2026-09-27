@@ -346,11 +346,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 if usesAssistance {
                     Text("Log machine assistance. Less assistance is harder.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
                 }
-                if usesAddedWeight {
-                    Text("Log added weight only. Bodyweight is not included.")
-                        .font(.caption).foregroundStyle(WGJTheme.textSecondary)
-                        .accessibilityIdentifier("workout-added-weight-guidance")
-                }
 
                 Text(summaryLine)
                     .font(.subheadline)

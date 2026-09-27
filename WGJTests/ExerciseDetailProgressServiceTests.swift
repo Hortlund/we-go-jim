@@ -197,7 +197,7 @@ final class ExerciseDetailProgressServiceTests: XCTestCase {
             XCTAssertEqual(dataset.preferredMetric, .bestSetReps)
             XCTAssertEqual(dataset.sessions.count, 2)
             let reps = project(dataset, metric: .bestSetReps)
-            XCTAssertEqual(reps.points.map(\.context), ["10 reps · Bodyweight", "6 reps · +10 kg"])
+            XCTAssertEqual(reps.points.map(\.context), ["10 reps", "10 kg × 6 reps"])
             XCTAssertNotNil(reps.comparisonNote)
             XCTAssertFalse(project(dataset, metric: .estimatedOneRepMax).availability.isAvailable)
             XCTAssertTrue(project(dataset, metric: .estimatedOneRepMax).points.isEmpty)
@@ -276,20 +276,20 @@ final class ExerciseDetailProgressServiceTests: XCTestCase {
         XCTAssertNil(record.estimatedOneRepMax)
         let history = try HistoryDetailSnapshotBuilder.load(modelContext: context, sessionID: heaviest.id)
         XCTAssertTrue(history.exercises.first?.usesAddedWeight == true)
-        XCTAssertEqual(history.personalRecordHighlights.first?.performanceText, "1 rep · +15 kg")
+        XCTAssertEqual(history.personalRecordHighlights.first?.performanceText, "15 kg × 1 rep")
         XCTAssertFalse(history.personalRecordHighlights.contains { $0.kinds.contains(.strength) })
         let recap = try XCTUnwrap(WorkoutCompletionSnapshotBuilder.build(sessionID: heaviest.id, modelContext: context))
-        XCTAssertEqual(recap.exerciseRecap.first?.bestSetText, "1 rep · +15 kg")
+        XCTAssertEqual(recap.exerciseRecap.first?.bestSetText, "15 kg × 1 rep")
         let rows = try HistorySessionSummaryBuilder.rows(for: try WorkoutSessionRepository(modelContext: context)
             .sessionExercises(sessionID: heaviest.id), cardioBlocks: [], repository: WorkoutSessionRepository(modelContext: context))
-        XCTAssertEqual(rows.first?.bestSet, "1 rep · +15 kg")
+        XCTAssertEqual(rows.first?.bestSet, "15 kg × 1 rep")
         let comparison = try WorkoutProgressSnapshotLoader.load(modelContext: context,
             selectedPreviousSessionID: bodyweight.id, selectedCurrentSessionID: volume.id)
         guard case let .ready(result) = comparison.state else { return XCTFail("Expected comparison") }
         XCTAssertEqual(result.exerciseComparisons.first?.direction, .flat)
         XCTAssertTrue(result.exerciseComparisons.first?.deltaText.contains("Added weight changed") == true)
-        XCTAssertEqual(result.exerciseComparisons.first?.previousBestSetText, "40 reps · Bodyweight")
-        XCTAssertEqual(result.exerciseComparisons.first?.currentBestSetText, "20 reps · +10 kg")
+        XCTAssertEqual(result.exerciseComparisons.first?.previousBestSetText, "40 reps")
+        XCTAssertEqual(result.exerciseComparisons.first?.currentBestSetText, "10 kg × 20 reps")
         for session in [bodyweight, volume, heaviest, later] {
             _ = try HistoryProjectionRepository(modelContext: context).rebuildFacts(forSessionID: session.id)
             session.summaryMetricsVersion = 5
@@ -389,10 +389,10 @@ final class ExerciseDetailProgressServiceTests: XCTestCase {
             XCTAssertEqual(dataset.sessions.count, 2, "Variations must not merge histories")
             XCTAssertTrue(dataset.usesAddedWeight, variant.name)
             XCTAssertEqual(project(dataset, metric: .bestSetReps).points.map(\.context),
-                ["10 reps · Bodyweight", "6 reps · +10 kg"], variant.name)
+                ["10 reps", "10 kg × 6 reps"], variant.name)
             XCTAssertFalse(project(dataset, metric: .estimatedOneRepMax).availability.isAvailable)
             let trend = try service.exerciseMetricTrend(for: variant.uuid, metric: .maxReps)
-            XCTAssertEqual(trend.points.last?.context, "6 reps · +10 kg", variant.name)
+            XCTAssertEqual(trend.points.last?.context, "10 kg × 6 reps", variant.name)
             XCTAssertTrue(try service.exerciseMetricTrend(for: variant.uuid, metric: .oneRepMax).points.isEmpty)
             let record = try XCTUnwrap(records.first { $0.catalogExerciseUUID == variant.uuid })
             XCTAssertTrue(record.usesAddedWeight)
@@ -401,7 +401,7 @@ final class ExerciseDetailProgressServiceTests: XCTestCase {
             let detail = try HistoryDetailSnapshotBuilder.load(modelContext: context, sessionID: session.id)
             XCTAssertTrue(detail.exercises.first?.usesAddedWeight == true)
             let recap = try XCTUnwrap(WorkoutCompletionSnapshotBuilder.build(sessionID: session.id, modelContext: context))
-            XCTAssertEqual(recap.exerciseRecap.first?.bestSetText, "6 reps · +10 kg", variant.name)
+            XCTAssertEqual(recap.exerciseRecap.first?.bestSetText, "10 kg × 6 reps", variant.name)
         }
         XCTAssertFalse(context.hasChanges)
     }
