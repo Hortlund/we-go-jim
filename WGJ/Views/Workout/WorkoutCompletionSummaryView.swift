@@ -165,8 +165,16 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
     static func burstDescriptors(
         origin: WorkoutCompletionConfettiLaunchOrigin,
         intensity: WorkoutCompletionConfettiIntensity,
-        variant: WorkoutCompletionCelebrationVariant
+        variant: WorkoutCompletionCelebrationVariant,
+        birthday: Bool = false
     ) -> [WorkoutCompletionConfettiBurstDescriptor] {
+        if birthday {
+            let first = WorkoutCompletionConfettiBurstDescriptor(origin: origin, role: .centralThrow,
+                pieceCount: intensity == .completedWorkout ? 120 : 40, delay: 0, variant: variant)
+            guard intensity == .completedWorkout else { return [first] }
+            return [first, WorkoutCompletionConfettiBurstDescriptor(origin: origin, role: .centralThrow,
+                pieceCount: 60, delay: 0.3, variant: variant)]
+        }
         var descriptors = [
             WorkoutCompletionConfettiBurstDescriptor(
                 origin: origin,
@@ -375,7 +383,12 @@ struct WorkoutCompletionSummaryView: View {
                             .foregroundStyle(WGJTheme.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        if WGJTheme.isChristmas {
+                        if snapshot.isBirthday {
+                            Label("Birthday reps hit different.", systemImage: "birthday.cake.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else if WGJTheme.isChristmas {
                             Text("Sleigh all day. You earned this.")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(WGJTheme.accentGold)
@@ -719,9 +732,10 @@ struct WorkoutCompletionSummaryView: View {
         for descriptor in WorkoutCompletionConfettiPolicy.burstDescriptors(
             origin: origin,
             intensity: intensity,
-            variant: variant ?? celebrationVariant
+            variant: variant ?? celebrationVariant,
+            birthday: snapshot?.isBirthday == true
         ) {
-            let burst = WorkoutCompletionConfettiBurst(descriptor: descriptor)
+            let burst = WorkoutCompletionConfettiBurst(descriptor: descriptor, birthday: snapshot?.isBirthday == true)
             confettiBursts.append(burst)
             confettiDismissTasks[burst.id]?.cancel()
             confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
@@ -792,6 +806,7 @@ struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
     var hasWeightPR = false
     var isLegDay = false
+    var isBirthday = false
 }
 
 nonisolated struct WorkoutCalorieMetricPresentation: Equatable, Sendable {
@@ -956,7 +971,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             muscleHeatmap: WorkoutMuscleHeatmapBuilder.snapshot(scores: muscleHeatmapScores),
             exerciseRecap: exerciseData.map(\.recap),
             hasWeightPR: achievements.contains { $0.kinds.contains(.weight) && !$0.usesAssistance },
-            isLegDay: GymEasterEggPolicy.isLegDay(scores: muscleHeatmapScores)
+            isLegDay: GymEasterEggPolicy.isLegDay(scores: muscleHeatmapScores),
+            isBirthday: BirthdayCelebrationPolicy.isBirthday(dateOfBirth: calorieProfile?.dateOfBirth,
+                                                              on: session.endedAt ?? session.startedAt)
         )
     }
 
@@ -1252,13 +1269,13 @@ private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct WorkoutCompletionConfettiBurst: Identifiable {
+struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
     let origin: WorkoutCompletionConfettiLaunchOrigin
     let pieces: [WorkoutCompletionConfettiPiece]
     let startDate: Date
 
-    init(descriptor: WorkoutCompletionConfettiBurstDescriptor) {
+    init(descriptor: WorkoutCompletionConfettiBurstDescriptor, birthday: Bool = false) {
         origin = descriptor.origin
         startDate = Date().addingTimeInterval(descriptor.delay)
         self.pieces = WorkoutCompletionConfettiPiece.random(
@@ -1266,12 +1283,13 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
             role: descriptor.role,
             count: descriptor.pieceCount,
             variant: descriptor.variant,
-            christmas: WGJTheme.isChristmas
+            christmas: WGJTheme.isChristmas,
+            birthday: birthday
         )
     }
 }
 
-private struct WorkoutCompletionConfettiOverlay: View {
+struct WorkoutCompletionConfettiOverlay: View {
     let origin: WorkoutCompletionConfettiLaunchOrigin
     let pieces: [WorkoutCompletionConfettiPiece]
     let startDate: Date
@@ -1317,7 +1335,8 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
         role: WorkoutCompletionConfettiBurstRole,
         count: Int,
         variant: WorkoutCompletionCelebrationVariant,
-        christmas: Bool = false
+        christmas: Bool = false,
+        birthday: Bool = false
     ) -> [WorkoutCompletionConfettiPiece] {
         var generator = WorkoutCompletionConfettiRandom(seed: seed)
         let colorRoles = WorkoutCompletionConfettiPolicy.colorRoles(for: variant)
@@ -1337,10 +1356,13 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
             let delay = index.isMultiple(of: 4)
                 ? generator.value(in: 0...0.02)
                 : generator.value(in: 0.02...0.14)
+            let birthdaySymbol: String? = index % 6 == 0 ? "🎂" : (index % 6 == 1 ? "🕯️" : nil)
+            let symbol = birthday ? birthdaySymbol : (christmas ? ["snowflake", "bell.fill", "🎄", "snowflake", "star.fill"][index % 5] : nil)
+            let symbolSize: CGFloat = birthday ? 26 : 18
             return WorkoutCompletionConfettiPiece(
                 id: index,
-                width: christmas ? 18 : width,
-                height: christmas ? 18 : height,
+                width: symbol != nil ? symbolSize : width,
+                height: symbol != nil ? symbolSize : height,
                 cornerRadius: min(width, height) * generator.value(in: 0.18...0.5),
                 originX: originX,
                 originY: generator.value(in: CGFloat(-0.75)...CGFloat(0.65)),
@@ -1351,8 +1373,8 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
                 rotationDelta: generator.value(in: 210...520) * (generator.nextBool() ? 1 : -1),
                 delay: delay,
                 duration: generator.value(in: 4.2...5.4),
-                color: christmas ? christmasColor(index: index) : color(for: colorRoles[index % colorRoles.count]),
-                symbolName: christmas ? ["snowflake", "bell.fill", "🎄", "snowflake", "star.fill"][index % 5] : nil
+                color: christmas && !birthday ? christmasColor(index: index) : color(for: colorRoles[index % colorRoles.count]),
+                symbolName: symbol
             )
         }
     }

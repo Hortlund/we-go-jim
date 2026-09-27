@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class WorkoutCaloriePresentationTests: XCTestCase {
+    func testBirthdayRecapUsesWorkoutDateEvenWithCaloriesDisabled() throws {
+        let profile = eligibleProfile(showsCalorieEstimates: false)
+        let fixture = try makeFixture(profile: profile, estimatedActiveCalories: nil)
+        let snapshot = try XCTUnwrap(WorkoutCompletionSnapshotBuilder.build(sessionID: fixture.sessionID, modelContext: fixture.context))
+        XCTAssertTrue(snapshot.isBirthday)
+        XCTAssertNil(snapshot.estimatedActiveCaloriesText)
+        let session = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<WorkoutSession>()).first)
+        session.endedAt = Calendar.current.date(byAdding: .day, value: -1, to: session.endedAt!)
+        try fixture.context.saveWithRecoveryProtection()
+        XCTAssertFalse(try XCTUnwrap(WorkoutCompletionSnapshotBuilder.build(sessionID: fixture.sessionID, modelContext: fixture.context)).isBirthday)
+    }
+
     func testCompletionProjectionIncludesStoredEstimateForEligibleProfile() throws {
         let fixture = try makeFixture(
             profile: eligibleProfile(),

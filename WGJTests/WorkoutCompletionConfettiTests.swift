@@ -5,6 +5,29 @@ import SwiftUI
 
 @MainActor
 final class WorkoutCompletionConfettiTests: XCTestCase {
+    func testBirthdayBurstMixesCakesCandlesAndPaperWithBoundedExtraVolume() throws {
+        let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
+            origin: .overlayCenter, intensity: .completedWorkout, variant: .standard, birthday: true)
+        XCTAssertEqual(bursts.map(\.pieceCount), [120, 60])
+        XCTAssertEqual(bursts.map(\.delay), [0, 0.3])
+        let pieces = WorkoutCompletionConfettiPiece.random(seed: 42, role: .centralThrow, count: 180,
+            variant: .standard, christmas: true, birthday: true)
+        XCTAssertEqual(pieces.filter { $0.symbolName == "🎂" }.count, 30)
+        XCTAssertEqual(pieces.filter { $0.symbolName == "🕯️" }.count, 30)
+        XCTAssertEqual(pieces.filter { $0.symbolName == nil }.count, 120)
+        XCTAssertTrue(pieces.allSatisfy { $0.delay + $0.duration + 0.3 < 7 })
+        let view = WorkoutCompletionConfettiUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        view.configure(origin: .zero, pieces: pieces, startDate: .now)
+        view.layoutIfNeeded()
+        let layers = try XCTUnwrap(view.layer.sublayers)
+        XCTAssertEqual(layers.count, 180)
+        XCTAssertEqual(layers.filter { $0.contents != nil }.count, 60)
+        XCTAssertEqual(layers.filter { $0.backgroundColor != nil }.count, 120)
+        let manual = WorkoutCompletionConfettiPolicy.burstDescriptors(origin: .overlayCenter,
+            intensity: .manualTap, variant: .personalRecord, birthday: true)
+        XCTAssertEqual(manual.map(\.pieceCount), [40])
+    }
+
     func testLayerAnimationPreservesTrajectoryRotationAndFade() throws {
         let piece = try XCTUnwrap(WorkoutCompletionConfettiPiece.random(
             seed: 42, role: .centralThrow, count: 1, variant: .standard

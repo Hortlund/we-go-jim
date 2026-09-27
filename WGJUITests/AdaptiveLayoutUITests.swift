@@ -492,6 +492,63 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testBirthdayGreetingDismissalAndWorkoutCelebration() {
+        let app = launchLocalApp(
+            additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "-appearance.theme", "original"],
+            environment: ["UITEST_BIRTHDAY_PROFILE_ID": UUID().uuidString]
+        )
+        XCTAssertTrue(app.staticTexts["Happy birthday, Andreas!"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Another year stronger."].exists)
+        let home = XCTAttachment(screenshot: app.screenshot())
+        home.name = "Birthday home celebration"
+        home.lifetime = .keepAlways
+        add(home)
+        app.buttons["birthday-dismiss-button"].tap()
+        XCTAssertFalse(app.staticTexts["Happy birthday, Andreas!"].exists)
+        app.terminate()
+        app.launch()
+        let local = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(local.waitForExistence(timeout: 8))
+        local.tap()
+        XCTAssertTrue(app.buttons["start-workout-empty-button"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Happy birthday, Andreas!"].exists)
+        openPreviousTemplateFixture(in: app)
+        let weight = app.textFields["workout-set-0-weight-field"]
+        for _ in 0..<5 where !weight.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        weight.tap()
+        weight.typeText("50")
+        let reps = app.textFields["workout-set-0-reps-field"]
+        reps.tap()
+        reps.typeText("8")
+        app.buttons["workout-set-0-completion-button"].tap()
+        app.buttons["active-workout-finish-button"].tap()
+        let save = app.buttons["Finish and Save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Birthday reps hit different."].waitForExistence(timeout: 8))
+        let recap = XCTAttachment(screenshot: app.screenshot())
+        recap.name = "Birthday workout celebration"
+        recap.lifetime = .keepAlways
+        add(recap)
+    }
+
+    @MainActor
+    func testBirthdayGreetingAtAccessibilityTextSize() {
+        let app = launchLocalApp(additionalArguments: ["-appearance.theme", "original",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+            environment: ["UITEST_BIRTHDAY_PROFILE_ID": UUID().uuidString])
+        let title = app.staticTexts["Happy birthday, Andreas!"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !title.isHittable { app.swipeUp() }
+        XCTAssertTrue(title.isHittable)
+        let dismiss = app.buttons["birthday-dismiss-button"]
+        for _ in 0..<5 where !dismiss.isHittable { app.swipeDown() }
+        XCTAssertTrue(dismiss.isHittable)
+        dismiss.tap()
+        XCTAssertFalse(title.exists)
+    }
+
+    @MainActor
     func testChristmasWelcomeAtAccessibilityTextSize() {
         let app = launchLocalApp(
             additionalArguments: ["-appearance.theme", "christmas", "-appearance.christmasYear", "2026",

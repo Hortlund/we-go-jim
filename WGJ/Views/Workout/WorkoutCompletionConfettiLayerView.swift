@@ -53,13 +53,17 @@ final class WorkoutCompletionConfettiUIView: UIView {
 
         let elapsed = Date.now.timeIntervalSince(startDate)
         let burstStart = layer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+        var symbolImages: [String: UIImage] = [:]
         for piece in pieces where elapsed < piece.delay + piece.duration {
             let particle = CALayer()
             particle.bounds = CGRect(x: 0, y: 0, width: piece.width, height: piece.height)
             particle.cornerRadius = piece.cornerRadius
             let color = UIColor(piece.color).resolvedColor(with: traitCollection)
             if let symbol = piece.symbolName {
-                particle.contents = Self.symbolImage(symbol, color: color).cgImage
+                let key = "\(symbol)-\(color)"
+                let image = symbolImages[key] ?? Self.symbolImage(symbol, color: color)
+                symbolImages[key] = image
+                particle.contents = image.cgImage
                 particle.contentsGravity = .resizeAspect
                 particle.contentsScale = traitCollection.displayScale
             } else {
@@ -77,9 +81,13 @@ final class WorkoutCompletionConfettiUIView: UIView {
     static func symbolImage(_ symbol: String, color: UIColor) -> UIImage {
         // Rasterize the tinted UIImage: its raw cgImage alone can still contain
         // the untinted SF Symbol mask and would display black in a CALayer.
-        UIGraphicsImageRenderer(size: CGSize(width: 22, height: 22)).image { _ in
-            if symbol == "🎄" {
-                (symbol as NSString).draw(at: .zero, withAttributes: [.font: UIFont.systemFont(ofSize: 18)])
+        let isEmoji = ["🎄", "🎂", "🕯️"].contains(symbol)
+        let size: CGFloat = isEmoji ? 32 : 22
+        return UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { _ in
+            if isEmoji {
+                let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 26)]
+                let textSize = (symbol as NSString).size(withAttributes: attributes)
+                (symbol as NSString).draw(at: CGPoint(x: (size - textSize.width) / 2, y: (size - textSize.height) / 2), withAttributes: attributes)
             } else {
                 UIImage(systemName: symbol,
                         withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))?

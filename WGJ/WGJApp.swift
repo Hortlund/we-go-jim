@@ -117,6 +117,16 @@ struct WGJApp: App {
         try seedUITestProfileBodyweightIfRequested(container: container)
         try seedUITestHistoryMainCardioIfRequested(container: container)
 #if DEBUG
+        if let value = ProcessInfo.processInfo.environment["UITEST_BIRTHDAY_PROFILE_ID"],
+           let profileID = UUID(uuidString: value) {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+            profile.id = profileID
+            profile.displayName = "Andreas"
+            profile.dateOfBirth = BirthdayCelebrationPolicy.localCalendar.date(byAdding: .year, value: -30, to: .now)
+            try context.saveWithRecoveryProtection()
+        }
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_REVIEW") {
             let context = ModelContext(container)
             let template = WorkoutTemplate(
