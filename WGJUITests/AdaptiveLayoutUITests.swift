@@ -138,7 +138,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertFalse(app.buttons["workout-set-0-use-last-button"].exists)
         XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "No reps entered")
         preview.tap()
-        XCTAssertTrue(app.staticTexts["Other Workout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["From Other Workout"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["80 kg × 8 reps"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Preview values from another workout"
@@ -181,6 +181,39 @@ final class AdaptiveLayoutUITests: XCTestCase {
         for _ in 0..<5 where !weight.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertEqual(weight.value as? String, "30 kilograms")
         XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "10 reps")
+    }
+
+    @MainActor
+    func testNoPreviousSetsHidesOtherWorkoutOption() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        openPreviousTemplateFixture(in: app)
+        XCTAssertTrue(app.staticTexts["no-template-history"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["preview-other-workout"].exists)
+        XCTAssertFalse(app.buttons["workout-set-0-use-last-button"].exists)
+    }
+
+    @MainActor
+    func testPreviousSetsSheetShowsMultipleSetsAndFullWidthCopyButton() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_TEMPLATE_PREVIOUS", "UITEST_TEMPLATE_PREVIOUS_ALTERNATE_ONLY", "UITEST_TEMPLATE_PREVIOUS_MULTIPLE"])
+        openPreviousTemplateFixture(in: app)
+        let preview = app.buttons["preview-other-workout"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        preview.tap()
+        XCTAssertTrue(app.staticTexts["From Other Workout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Warmup 1"].exists)
+        XCTAssertTrue(app.staticTexts["Set 2"].exists)
+        let copy = app.buttons["use-other-workout-values"]
+        XCTAssertTrue(copy.isHittable)
+        XCTAssertGreaterThan(copy.frame.width, app.frame.width * 0.8)
+        let lastSet = app.staticTexts["12 kg × 12 reps"]
+        XCTAssertTrue(lastSet.isHittable)
+        XCTAssertLessThan(lastSet.frame.maxY, copy.frame.minY)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Previous sets redesigned"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        copy.tap()
+        XCTAssertFalse(app.navigationBars["Previous sets"].exists)
     }
 
     @MainActor
