@@ -256,7 +256,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private var valueObservedCard: some View {
         lifecycleObservedCard
             .sheet(item: $previousWorkoutPreview) { source in
-                WorkoutPreviousWorkoutSheet(source: source, drafts: setDrafts, usesAssistance: usesAssistance) {
+                WorkoutPreviousWorkoutSheet(exerciseName: exerciseName, source: source, drafts: setDrafts, usesAssistance: usesAssistance) {
                     copyPreviousWorkout(source)
                 }
             }
