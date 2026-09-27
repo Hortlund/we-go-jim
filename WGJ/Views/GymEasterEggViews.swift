@@ -54,10 +54,7 @@ struct GymBroSettingsCard: View {
             if showingReveal {
                 HStack(spacing: 12) {
                     GymPlateAnimation()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Brain empty. We go jim.").font(.headline)
-                        Text("Gym-bro mode unlocked.").font(.caption).foregroundStyle(WGJTheme.textSecondary)
-                    }
+                    Text("Gym-bro mode unlocked.").font(.headline)
                 }
                 .accessibilityIdentifier("gym-secret-reveal")
             }

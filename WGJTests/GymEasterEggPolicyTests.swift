@@ -55,7 +55,7 @@ final class GymEasterEggPolicyTests: XCTestCase {
         XCTAssertTrue((20...60).contains(normalCount))
         XCTAssertTrue((30...70).contains(weightCount))
         XCTAssertEqual(legMessages.count, 2)
-        XCTAssertEqual(broMessages.count, 3)
+        XCTAssertEqual(broMessages.count, 5)
         XCTAssertFalse(broMessages.contains("See you next episode of we go jim."))
     }
 

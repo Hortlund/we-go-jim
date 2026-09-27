@@ -9,7 +9,7 @@ nonisolated enum GymEasterEggPolicy {
     static let warmupMessage = String(localized: "Respect the empty bar. It was here before you.")
 
     enum Completion: Equatable, Sendable {
-        case lightWeight, stairs, sitting, heavyCircles, lore, weGoJim
+        case lightWeight, stairs, sitting, heavyCircles, lore, gravity, reracked, oneMoreSet
 
         var message: String {
             switch self {
@@ -18,7 +18,9 @@ nonisolated enum GymEasterEggPolicy {
             case .sitting: String(localized: "Good luck sitting down tomorrow.")
             case .heavyCircles: String(localized: "Heavy circles moved successfully.")
             case .lore: String(localized: "The lore continues.")
-            case .weGoJim: String(localized: "Brain empty. We go jim.")
+            case .gravity: String(localized: "You vs. gravity. Rematch pending.")
+            case .reracked: String(localized: "All that work just to put the weights back.")
+            case .oneMoreSet: String(localized: "One more set. Famous last words.")
             }
         }
     }
@@ -43,7 +45,8 @@ nonisolated enum GymEasterEggPolicy {
             return roll % 2 == 0 ? .stairs : .sitting
         }
         guard gymBroMode || roll % 5 == 0 else { return nil }
-        return [.heavyCircles, .lore, .weGoJim][Int((roll / 7) % 3)]
+        let messages: [Completion] = [.heavyCircles, .lore, .gravity, .reracked, .oneMoreSet]
+        return messages[Int((roll / 7) % UInt64(messages.count))]
     }
 
     static func canRevealRest(completedRest: RestTimerSnapshot?, sessionStartedAt: Date, now: Date) -> Bool {
