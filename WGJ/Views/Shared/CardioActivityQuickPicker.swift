@@ -101,15 +101,16 @@ struct CardioActivityQuickPicker: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    WGJSectionHeader(
-                        String(localized: "Quick choices"),
-                        subtitle: String(
-                            localized: "Pick an activity now, or open the full Cardio catalog."
-                        )
-                    )
-
+                    WGJSectionHeader("Outdoors", subtitle: "Record distance and your route with GPS.")
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(CardioActivityQuickChoice.all) { choice in
+                        ForEach(CardioActivityQuickChoice.all.filter { $0.remoteUUID.contains("outdoor") }) { choice in
+                            quickChoiceButton(choice)
+                        }
+                    }
+
+                    WGJSectionHeader("Indoors", subtitle: "Time your activity and add distance afterward.")
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(CardioActivityQuickChoice.all.filter { !$0.remoteUUID.contains("outdoor") }) { choice in
                             quickChoiceButton(choice)
                         }
                     }

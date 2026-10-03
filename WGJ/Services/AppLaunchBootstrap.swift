@@ -148,7 +148,8 @@ final class AppLaunchBootstrapState {
             activeWorkoutCoordinator: ActiveWorkoutCoordinator(
                 persistence: ModelContainerActiveWorkoutPersistence(
                     backgroundStore: backgroundStore
-                )
+                ),
+                liveActivityPublisher: WorkoutLiveActivityPublisher.shared
             )
         )
         recoveryState = nil

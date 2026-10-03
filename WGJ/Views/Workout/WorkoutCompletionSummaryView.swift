@@ -271,11 +271,16 @@ struct WorkoutCompletionSummaryView: View {
                             isLegDay: snapshot.isLegDay, gymBroMode: gymBroMode) {
                             GymCompletionEasterEgg(egg: egg)
                         }
-                        statGrid(snapshot)
-                        muscleHeatmapSection(snapshot)
-                        personalRecordsSection(snapshot)
-                        cardioRecapSection(snapshot)
-                        exerciseRecapSection(snapshot)
+                        if snapshot.exerciseCount == 0 && !snapshot.cardioRecap.isEmpty {
+                            cardioRecapSection(snapshot)
+                            estimatedCaloriesCard(snapshot)
+                        } else {
+                            statGrid(snapshot)
+                            muscleHeatmapSection(snapshot)
+                            personalRecordsSection(snapshot)
+                            cardioRecapSection(snapshot)
+                            exerciseRecapSection(snapshot)
+                        }
                     } else {
                         loadingState
                     }
@@ -437,11 +442,13 @@ struct WorkoutCompletionSummaryView: View {
                             value: snapshot.completedAtText,
                             tint: WGJTheme.accentCyan
                         )
-                        WGJMetricPill(
-                            systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
-                            value: snapshot.prHeadline,
-                            tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
-                        )
+                        if snapshot.exerciseCount > 0 {
+                            WGJMetricPill(
+                                systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
+                                value: snapshot.prHeadline,
+                                tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
+                            )
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -450,11 +457,13 @@ struct WorkoutCompletionSummaryView: View {
                             value: snapshot.completedAtText,
                             tint: WGJTheme.accentCyan
                         )
-                        WGJMetricPill(
-                            systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
-                            value: snapshot.prHeadline,
-                            tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
-                        )
+                        if snapshot.exerciseCount > 0 {
+                            WGJMetricPill(
+                                systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
+                                value: snapshot.prHeadline,
+                                tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
+                            )
+                        }
                     }
                 }
             }
@@ -557,17 +566,20 @@ struct WorkoutCompletionSummaryView: View {
                 systemImage: "scalemass.fill",
                 tint: WGJTheme.accentGold
             )
-            if let estimatedActiveCaloriesText = snapshot.estimatedActiveCaloriesText,
-               let accessibilityLabel = snapshot.estimatedActiveCaloriesAccessibilityLabel {
-                WorkoutCompletionStatCard(
-                    title: "Est. active calories",
-                    value: estimatedActiveCaloriesText,
-                    systemImage: "flame.fill",
-                    tint: WGJTheme.warning
-                )
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(accessibilityLabel)
-            }
+            estimatedCaloriesCard(snapshot)
+        }
+    }
+
+    @ViewBuilder
+    private func estimatedCaloriesCard(_ snapshot: WorkoutCompletionSnapshot) -> some View {
+        if let text = snapshot.estimatedActiveCaloriesText,
+           let label = snapshot.estimatedActiveCaloriesAccessibilityLabel {
+            WorkoutCompletionStatCard(
+                title: "Est. active calories", value: text,
+                systemImage: "flame.fill", tint: WGJTheme.warning
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
         }
     }
 
@@ -614,16 +626,18 @@ struct WorkoutCompletionSummaryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
                     String(localized: "Cardio Activities"),
-                    subtitle: String(localized: "Your saved results grouped by workout role.")
+                    subtitle: snapshot.exerciseCount == 0 ? String(localized: "Your saved time, distance and pace.") : String(localized: "Your saved results grouped by workout role.")
                 )
 
                 ForEach(WorkoutCardioRole.allCases) { role in
                     let roleActivities = snapshot.cardioRecap.filter { $0.role == role }
                     if !roleActivities.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(role.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(WGJTheme.textSecondary)
+                            if snapshot.exerciseCount > 0 {
+                                Text(role.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textSecondary)
+                            }
 
                             ForEach(roleActivities) { cardio in
                                 WorkoutCardioResultSummaryCard(
@@ -641,6 +655,7 @@ struct WorkoutCompletionSummaryView: View {
                                             localized: "This workout was finished before this activity was completed."
                                         )
                                 )
+                                SavedCardioRouteView(activityID: cardio.id)
                             }
                         }
                     }

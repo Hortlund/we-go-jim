@@ -435,13 +435,15 @@ nonisolated final class UserDataCloudBackupService {
     private let restoreTransaction: UserDataCloudRestoreTransaction
     private let artifactCleanupQueue: AppDataArtifactCleanupQueue
     private let progressCenter: CloudBackupProgressCenter?
+    private let routeFiles: CardioRouteFiles
 
     init(
         localContainer: ModelContainer,
         backupStore: any UserDataCloudBackupStoring,
         restoreTransaction: UserDataCloudRestoreTransaction? = nil,
         artifactCleanupQueue: AppDataArtifactCleanupQueue = .shared,
-        progressCenter: CloudBackupProgressCenter? = nil
+        progressCenter: CloudBackupProgressCenter? = nil,
+        routeFiles: CardioRouteFiles = .init()
     ) {
         self.localContainer = localContainer
         self.backupStore = backupStore
@@ -449,6 +451,7 @@ nonisolated final class UserDataCloudBackupService {
             ?? UserDataCloudRestoreTransaction(container: localContainer)
         self.artifactCleanupQueue = artifactCleanupQueue
         self.progressCenter = progressCenter
+        self.routeFiles = routeFiles
     }
 
     @discardableResult
@@ -556,7 +559,7 @@ nonisolated final class UserDataCloudBackupService {
         if let archive = backupStore as? any IncrementalBackupStoring {
             let previous = state.manifest?.generation == remote?.generation ? state.manifest : try await archive.fetchManifest()
             guard previous?.generation == remote?.generation else { throw UserDataCloudBackupSafetyError.remoteChanged }
-            let plan = try BackupExportPlan.build(container: localContainer, previous: previous, attempted: state.attemptedManifest, progress: progress)
+            let plan = try BackupExportPlan.build(container: localContainer, previous: previous, attempted: state.attemptedManifest, progress: progress, routeFiles: routeFiles)
             defer { plan.cleanUp() }
             if let previous, previous.chunks == plan.manifest.chunks, state.attemptedManifest == nil {
                 // Avoid advancing retention or uploading manifests for a no-op save.
@@ -626,7 +629,8 @@ nonisolated final class UserDataCloudBackupService {
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
         try TemplateRepository(modelContext: context, autoSaveChanges: false).pruneOrphanedTemplateGraphs()
-        let payload = try UserDataCloudBackupPayload(context: context)
+        var payload = try UserDataCloudBackupPayload(context: context)
+        payload.cardioRoutes = try routeFiles.completedRoutes(for: payload.workoutCardioBlocks)
         let summary = payload.contentSummary
         return (
             UserDataCloudBackupRemoteRecord(
@@ -726,6 +730,8 @@ nonisolated final class UserDataCloudBackupService {
         guard var request = try BackupLocalJournal.restoreRequest(for: localContainer),
               request.ticket == original.ticket else { return nil }
         let sessionRevision = await MainActor.run { AppRuntimeState.shared.cloudBackupSessionRevision }
+        var didCommitDatabase = false
+        var didNotifyRestore = false
         do {
             guard request.requiresExplicitRetry != true else { throw UserDataCloudRestorePause.localSaveFailed }
             guard request.account != nil || bindingSessionRevision != nil else { throw UserDataCloudRestorePause.accountNotConfirmed }
@@ -768,14 +774,19 @@ nonisolated final class UserDataCloudBackupService {
                 legacyUpdatedAt: headMetadata?.generation == nil ? headMetadata?.updatedAt : nil,
                 garbageRecords: cleanup.isEmpty ? nil : cleanup)
             request.pendingBeforeCommit = try BackupLocalJournal.pending(for: localContainer)
+            try BackupLocalJournal.stageRouteRestore(.init(ticket: request.ticket, files: routeFiles,
+                payload: payload, cleanupBefore: request.cleanupBefore), for: localContainer)
+            request.hasRouteRestore = true
             try updateRestore(request)
             progress(.restoring)
             try restoreTransaction.commit(replacingLocalData: request.replacingLocalData, restoreTicket: request.ticket, replacementPayload: payload, progress: progress,
                 mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
                 relinkRelationships: { try payload.relinkRelationships(in: $0) })
+            didCommitDatabase = true
             try LocalStoreWriteBarrier.exclusively {
                 if BackupLocalJournal.directory(for: localContainer) == nil {
                     // Memory-only test/preview stores have no crash recovery receipt.
+                    try BackupLocalJournal.finishRouteRestore(request, for: localContainer)
                     if let state = request.stateAfterCommit { try BackupLocalJournal.save(state, for: localContainer) }
                     if let pending = request.pendingBeforeCommit { try BackupLocalJournal.finish(pending, for: localContainer) }
                     try BackupLocalJournal.saveRestoreCleanup(request.cleanupBefore, for: localContainer)
@@ -785,10 +796,8 @@ nonisolated final class UserDataCloudBackupService {
             HistoryAnalyticsCache.shared.clear()
             // Emit once for this commit, before any asynchronous cleanup. Cleanup
             // retries (including crash recovery) must never reset a newer workout.
-            await MainActor.run {
-                NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil,
-                    userInfo: ["cleanupBefore": request.cleanupBefore])
-            }
+            await notifyRestoredData(cleanupBefore: request.cleanupBefore)
+            didNotifyRestore = true
             progress(.finishing)
             let cleanupWarnings = try await finishRestoreCleanup()
             await MainActor.run {
@@ -808,12 +817,27 @@ nonisolated final class UserDataCloudBackupService {
             try pause.get()
             throw error
         } catch {
+            if didCommitDatabase && !didNotifyRestore {
+                // The committed graph must replace the old in-memory workout
+                // even if route-file installation needs a later retry.
+                await notifyRestoredData(cleanupBefore: request.cleanupBefore)
+            }
             // Transport/cancellation errors keep the request for the next foreground
             // or launch. Invalid data and changed accounts/heads require a new choice.
-            if error is UserDataCloudBackupSafetyError || error is UserDataCloudRestoreValidationError || error is BackupArchiveError || error is DecodingError {
+            if !didCommitDatabase && (error is UserDataCloudBackupSafetyError || error is UserDataCloudRestoreValidationError || error is BackupArchiveError || error is DecodingError) {
                 try clearRestore(request.ticket)
             }
             throw error
+        }
+    }
+
+    private func notifyRestoredData(cleanupBefore: Date) async {
+        await MainActor.run { [routeFiles] in
+            if routeFiles.directory == CardioRouteFiles.defaultDirectory {
+                CardioRouteRecorder.shared.invalidateAfterRestore()
+            }
+            NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil,
+                userInfo: ["cleanupBefore": cleanupBefore])
         }
     }
 

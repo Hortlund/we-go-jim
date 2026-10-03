@@ -128,6 +128,7 @@ nonisolated enum BackupLocalJournal {
         var requiresExplicitRetry: Bool? = nil
         var stateAfterCommit: State?
         var pendingBeforeCommit: Pending?
+        var hasRouteRestore: Bool? = nil
     }
 
     private final class WeakContainer: @unchecked Sendable {
@@ -143,6 +144,7 @@ nonisolated enum BackupLocalJournal {
                 pending[id] = nil
                 restores[id] = nil
                 restoreCleanups[id] = nil
+                routeRestores[id] = nil
                 containers[id] = WeakContainer(container)
             }
         }
@@ -150,6 +152,7 @@ nonisolated enum BackupLocalJournal {
         var pending: [ObjectIdentifier: Pending] = [:]
         var restores: [ObjectIdentifier: RestoreRequest] = [:]
         var restoreCleanups: [ObjectIdentifier: Date] = [:]
+        var routeRestores: [ObjectIdentifier: CardioRouteRestoration] = [:]
     }
     private static let lock = Mutex(Memory())
     private static let restoreReconciliationLock = NSLock()
@@ -270,8 +273,43 @@ nonisolated enum BackupLocalJournal {
                 let paused = directory.appendingPathComponent("restore-paused.json")
                 if FileManager.default.fileExists(atPath: paused.path) { try FileManager.default.removeItem(at: paused) }
                 if request == nil, FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-            } else { memory.restores[ObjectIdentifier(container)] = request }
+                if request == nil {
+                    let routes = directory.appendingPathComponent("route-restore.json")
+                    if FileManager.default.fileExists(atPath: routes.path) { try FileManager.default.removeItem(at: routes) }
+                }
+            } else {
+                memory.restores[ObjectIdentifier(container)] = request
+                if request == nil { memory.routeRestores[ObjectIdentifier(container)] = nil }
+            }
         }
+    }
+
+    /// Keep large coordinate arrays outside the frequently updated intent file.
+    /// The ticket binds them to the same database restore commit receipt.
+    static func stageRouteRestore(_ restoration: CardioRouteRestoration, for container: ModelContainer) throws {
+        try lock.withLock { memory in
+            memory.prepare(container)
+            if let directory = directory(for: container) {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try CardioRouteFiles.protect(directory)
+                let url = directory.appendingPathComponent("route-restore.json")
+                try BackupArchiveCodec.json(restoration).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                try CardioRouteFiles.protect(url)
+            } else { memory.routeRestores[ObjectIdentifier(container)] = restoration }
+        }
+    }
+
+    static func finishRouteRestore(_ request: RestoreRequest, for container: ModelContainer) throws {
+        guard request.hasRouteRestore == true else { return }
+        let restoration = try lock.withLock { memory in
+            memory.prepare(container)
+            if let directory = directory(for: container) {
+                return try read(CardioRouteRestoration.self, at: directory.appendingPathComponent("route-restore.json"))
+            }
+            return memory.routeRestores[ObjectIdentifier(container)]
+        }
+        guard let restoration, restoration.ticket == request.ticket else { throw BackupArchiveError.missingChunk }
+        try CardioRouteFiles(directory: restoration.directory).restore(restoration)
     }
 
     /// Called under the write barrier. Rename the already durable intent rather
@@ -301,6 +339,7 @@ nonisolated enum BackupLocalJournal {
         guard let request = try restoreRequest(for: container),
               try PersistentRestoreRecovery.committedTicket(container: container) == request.ticket,
               let state = request.stateAfterCommit else { return }
+        try finishRouteRestore(request, for: container)
         try save(state, for: container)
         if let pending = request.pendingBeforeCommit { try finish(pending, for: container) }
         try saveRestoreCleanup(request.cleanupBefore, for: container)
@@ -389,7 +428,7 @@ nonisolated struct BackupExportPlan {
 
     func cleanUp() { BackupTemporaryFiles.remove(temporaryDirectory) }
 
-    static func build(container: ModelContainer, previous: BackupManifest?, attempted: BackupManifest? = nil, progress: CloudBackupProgressReporter = .init()) throws -> Self {
+    static func build(container: ModelContainer, previous: BackupManifest?, attempted: BackupManifest? = nil, progress: CloudBackupProgressReporter = .init(), routeFiles: CardioRouteFiles = .init()) throws -> Self {
         try WGJPerformance.measure("backup.plan") {
             let context = ModelContext(container)
             context.autosaveEnabled = false
@@ -408,7 +447,10 @@ nonisolated struct BackupExportPlan {
                 let completed = WorkoutSessionStatus.completed.rawValue
                 let sessions = try context.fetch(FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.statusRaw == completed }))
                 let historyBatches = try BackupHistoryBatch.make(sessions)
-                let totalParts = 1 + templates.count + historyBatches.count
+                let sessionIDs = Set(sessions.map(\.id))
+                let blocks = sessionIDs.isEmpty ? [] : try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>(predicate: #Predicate { sessionIDs.contains($0.sessionID) }))
+                let routes = try routeFiles.completedRoutes(for: blocks.map(WorkoutCardioBlockBackup.init))
+                let totalParts = 1 + templates.count + historyBatches.count + routes.count
                 progress(.preparing, completed: 0, total: totalParts)
                 func append(key: String, updatedAt: Date, fingerprint: String? = nil, payload: () throws -> (Data, UserDataCloudBackupContentSummary)) throws {
                     defer { progress(.preparing, completed: chunks.count, total: totalParts) }
@@ -449,6 +491,13 @@ nonisolated struct BackupExportPlan {
                 for batch in historyBatches {
                     try append(key: batch.key, updatedAt: batch.updatedAt, fingerprint: batch.fingerprint) {
                         try UserDataBackupPayloadCodec.makeHistoryChunk(context: context, sessionIDs: Set(batch.entries.map(\.id)))
+                    }
+                }
+                for route in routes {
+                    let fingerprint = BackupArchiveCodec.digest(try BackupArchiveCodec.json(route))
+                    try append(key: "route-v1-\(route.activityID.uuidString)",
+                        updatedAt: route.points.last?.timestamp ?? .distantPast, fingerprint: fingerprint) {
+                        try UserDataBackupPayloadCodec.makeRouteChunk(context: context, route: route)
                     }
                 }
                 let summary = UserDataBackupPayloadCodec.combinedSummary(chunks.map(\.summary))

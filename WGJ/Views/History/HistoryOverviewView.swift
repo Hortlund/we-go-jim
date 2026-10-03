@@ -538,6 +538,7 @@ nonisolated struct HistorySessionCardData: Identifiable, Equatable, Sendable {
     let estimatedActiveCaloriesText: String?
     let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
+    var isCardioOnly = false
 }
 
 nonisolated struct HistoryOverviewSessionSnapshot: Identifiable, Equatable, Sendable {
@@ -552,6 +553,7 @@ nonisolated struct HistoryOverviewSessionSnapshot: Identifiable, Equatable, Send
     let estimatedActiveCaloriesText: String?
     let estimatedActiveCaloriesAccessibilityLabel: String?
     let summaryRows: [HistorySessionSummaryRow]
+    var isCardioOnly = false
 
     var displayDate: Date {
         endedAt ?? startedAt
@@ -889,7 +891,8 @@ nonisolated enum HistoryOverviewSnapshotBuilder {
             prsText: "\(session.prHitsCount) PR\(session.prHitsCount == 1 ? "" : "s")",
             estimatedActiveCaloriesText: session.estimatedActiveCaloriesText,
             estimatedActiveCaloriesAccessibilityLabel: session.estimatedActiveCaloriesAccessibilityLabel,
-            summaryRows: session.summaryRows
+            summaryRows: session.summaryRows,
+            isCardioOnly: session.isCardioOnly
         )
     }
 
@@ -948,7 +951,8 @@ extension HistoryOverviewSessionSnapshot {
             prHitsCount: session.prHitsCount,
             estimatedActiveCaloriesText: calorieMetric?.text,
             estimatedActiveCaloriesAccessibilityLabel: calorieMetric?.accessibilityLabel,
-            summaryRows: summaryRows
+            summaryRows: summaryRows,
+            isCardioOnly: (session.exercises ?? []).isEmpty && !(session.cardioBlocks ?? []).isEmpty
         )
     }
 }
@@ -1008,18 +1012,24 @@ private struct HistorySessionCardView: View, Equatable {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 16) {
                         WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
-                        WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
-                        WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        if !card.isCardioOnly {
+                            WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
+                            WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                        }
                         estimatedActiveCaloriesMetric
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 16) {
                             WGJMetricPill(systemImage: "clock.fill", value: card.durationText)
-                            WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
+                            if !card.isCardioOnly {
+                                WGJMetricPill(systemImage: "scalemass.fill", value: card.volumeText)
+                            }
                         }
                         HStack(spacing: 16) {
-                            WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                            if !card.isCardioOnly {
+                                WGJMetricPill(systemImage: "trophy.fill", value: card.prsText, tint: WGJTheme.accentGold)
+                            }
                             estimatedActiveCaloriesMetric
                         }
                     }
@@ -1411,10 +1421,14 @@ private struct HistoryArchivedWorkoutsSheet: View {
         let backgroundStore = historyBackgroundStore
         Task.detached(priority: .utility) {
             do {
-                try await backgroundStore.performWrite("history-hidden.delete") { backgroundContext in
-                    try WorkoutSessionRepository(modelContext: backgroundContext).deleteSession(id: sessionID)
+                let activityIDs = try await backgroundStore.performWrite("history-hidden.delete") { backgroundContext in
+                    let repository = WorkoutSessionRepository(modelContext: backgroundContext)
+                    let identities = Set(try repository.sessionCardioBlocks(sessionID: sessionID).map(\.id))
+                    try repository.deleteSession(id: sessionID)
+                    return identities
                 }
                 await removeDeletedArchivedSession(id: sessionID)
+                try await CardioRouteStore.shared.delete(sessionID: sessionID, activityIDs: activityIDs)
             } catch {
                 await showError(error)
             }

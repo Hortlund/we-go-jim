@@ -64,6 +64,12 @@ struct ActiveWorkoutView: View {
     @State private var pendingCardioSelection: ActiveWorkoutCardioPendingSelection?
     @State private var cardioSetupRequest: ActiveWorkoutCardioSetupRequest?
     @State private var cardioConfirmation: ActiveWorkoutCardioConfirmation?
+    @State private var cardioRecordingRequest: CardioRecordingRequest?
+    @State private var pendingRecordingResultID: UUID?
+    @State private var shouldFinishAfterRecordingDismissal = false
+    @State private var shouldFinishAfterCardioResultDismissal = false
+    @State private var didSaveRecordingResult = false
+    @State private var prefersRecordedCardioDuration = false
     @State private var pendingFinishedCardioID: UUID?
     @State private var pendingFinishedCardioResult: ActiveWorkoutPendingCardioResult?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
@@ -98,12 +104,18 @@ struct ActiveWorkoutView: View {
 
     var body: some View {
         Group {
-            ScrollView {
-                // Exercise cards can change height aggressively as set rows update, and a
-                // non-lazy stack keeps the scroll position stable during active logging.
-                activeWorkoutScrollContent
-                .scrollTargetLayout()
-                .padding(16)
+            Group {
+                if let activityID = standaloneCardioActivityID {
+                    standaloneCardioView(activityID: activityID)
+                } else {
+                    ScrollView {
+                        // Exercise cards can change height aggressively as set rows update, and a
+                        // non-lazy stack keeps the scroll position stable during active logging.
+                        activeWorkoutScrollContent
+                        .scrollTargetLayout()
+                        .padding(16)
+                    }
+                }
             }
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -123,24 +135,26 @@ struct ActiveWorkoutView: View {
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
-            .navigationTitle("Active Workout")
+            .navigationTitle(activeWorkoutNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button {
-                        minimizeWorkout()
-                    } label: {
-                        Label("Minimize", systemImage: "chevron.down")
+                if standaloneCardioActivityID == nil {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button {
+                            minimizeWorkout()
+                        } label: {
+                            Label("Minimize", systemImage: "chevron.down")
+                        }
+                        .accessibilityIdentifier("active-workout-minimize-button")
                     }
-                    .accessibilityIdentifier("active-workout-minimize-button")
-                }
 
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    finishToolbarButton
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        finishToolbarButton
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
+                if standaloneCardioActivityID == nil && ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
                     hasSession: session != nil,
                     isEndingSession: isEndingSession,
                     isCancelArmed: isCancelArmed
@@ -200,8 +214,34 @@ struct ActiveWorkoutView: View {
                     applyCardioSetup(request: request, validatedSetup: validatedSetup)
                 }
             }
+            .fullScreenCover(item: $cardioRecordingRequest, onDismiss: {
+                if let current = activeWorkoutCoordinator.storedSnapshot?.session, current.id == sessionID {
+                    applyRuntimeSessionState(current)
+                }
+                if let activityID = pendingRecordingResultID {
+                    pendingRecordingResultID = nil
+                    presentCardioResult(activityID: activityID)
+                } else if shouldFinishAfterRecordingDismissal {
+                    shouldFinishAfterRecordingDismissal = false
+                    finishWorkout()
+                }
+            }) { request in
+                CardioRecordingView(activityID: request.id, coordinator: activeWorkoutCoordinator, onSaveWorkout: {
+                    shouldFinishAfterRecordingDismissal = true
+                }) { finishesWorkout in
+                    didSaveRecordingResult = false
+                    prefersRecordedCardioDuration = true
+                    shouldFinishAfterCardioResultDismissal = finishesWorkout
+                    pendingRecordingResultID = request.id
+                }
+            }
             .sheet(item: $pendingFinishedCardioResult, onDismiss: {
                 pendingFinishedCardioID = nil
+                let finishesWorkout = shouldFinishAfterCardioResultDismissal && didSaveRecordingResult
+                shouldFinishAfterCardioResultDismissal = false
+                didSaveRecordingResult = false
+                prefersRecordedCardioDuration = false
+                if finishesWorkout { finishWorkout() }
             }) { result in
                 let trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
                     storedProfile: result.trackingProfile,
@@ -219,12 +259,14 @@ struct ActiveWorkoutView: View {
                         resistanceLevel: result.resistanceLevel,
                         notes: result.notes,
                         trackingProfile: trackingProfile
-                    )
+                    ),
+                    recordedDurationSeconds: prefersRecordedCardioDuration ? result.actualDurationSeconds : nil
                 ) { validatedResult in
                     try saveCardioResult(
                         activityID: result.id,
                         result: validatedResult
                     )
+                    didSaveRecordingResult = true
                 }
             }
             .sheet(item: $exerciseReorderRequest) { request in
@@ -258,6 +300,14 @@ struct ActiveWorkoutView: View {
             }
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
+            }
+            // Metadata revisions (such as previous-performance hydration) must
+            // not replace name/notes drafts that have not been submitted yet.
+            .onChange(of: activeWorkoutCoordinator.storedSnapshot?.session) { _, _ in
+                guard hasBootstrapped,
+                      let current = activeWorkoutCoordinator.storedSnapshot?.session,
+                      current.id == sessionID else { return }
+                applyRuntimeSessionState(current)
             }
             .onChange(of: showingFinishConfirmation) { oldValue, newValue in
                 handleFinishConfirmationChange(from: oldValue, to: newValue)
@@ -324,10 +374,10 @@ struct ActiveWorkoutView: View {
             activeWorkoutHeaderContent
             cardioRoleSection(for: .warmUp)
             cardioRoleSection(for: .main)
-            if session != nil {
+            if session != nil && (!sessionExercises.isEmpty || orderedCardioBlocks.isEmpty) {
                 exercisesSectionHeader
+                emptyWorkoutContent
             }
-            emptyWorkoutContent
 
             ForEach(exerciseDisplayGroups) { group in
                 exerciseSection(for: group)
@@ -336,6 +386,9 @@ struct ActiveWorkoutView: View {
             if session != nil && !sessionExercises.isEmpty {
                 addExerciseButton(title: "Add another exercise")
                     .disabled(session == nil)
+            } else if session != nil && !orderedCardioBlocks.isEmpty {
+                addExerciseButton(title: "Add Exercise")
+                    .accessibilityIdentifier("active-workout-empty-add-exercise-button")
             }
 
             cardioRoleSection(for: .finisher)
@@ -348,18 +401,30 @@ struct ActiveWorkoutView: View {
     @ViewBuilder
     private var activeWorkoutHeaderContent: some View {
         if let session {
-            ActiveWorkoutHeaderCard(
-                sessionNameDraft: $sessionNameDraft,
-                notesDraft: $notesDraft,
-                session: session,
-                exerciseCount: sessionExercises.count,
-                cardioCount: orderedCardioBlocks.count,
-                onSubmit: {
-                    persistCommittedUserEditSnapshot()
-                },
-                onAddCardio: showCardioPicker
-            )
-            .id(ActiveWorkoutScrollTarget.header)
+            if sessionExercises.isEmpty && !orderedCardioBlocks.isEmpty {
+                HStack {
+                    Text(session.name == "Empty Workout" ? String(localized: "Cardio Session") : session.name)
+                        .font(.title2.weight(.bold))
+                    Spacer()
+                    Button(action: showCardioPicker) { Image(systemName: "plus") }
+                        .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityLabel("Add Cardio")
+                }
+                .padding(.vertical, 8)
+            } else {
+                ActiveWorkoutHeaderCard(
+                    sessionNameDraft: $sessionNameDraft,
+                    notesDraft: $notesDraft,
+                    session: session,
+                    exerciseCount: sessionExercises.count,
+                    cardioCount: orderedCardioBlocks.count,
+                    onSubmit: {
+                        persistCommittedUserEditSnapshot()
+                    },
+                    onAddCardio: showCardioPicker
+                )
+                .id(ActiveWorkoutScrollTarget.header)
+            }
         } else if isEndingSession || completedSessionID != nil {
             WGJEmptyStateCard(
                 title: "Wrapping up workout",
@@ -635,7 +700,10 @@ struct ActiveWorkoutView: View {
         let activities = cardioBlocks(for: role)
         if !activities.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                WGJActionHeader(role.title, subtitle: cardioSectionSubtitle(for: role)) {
+                WGJActionHeader(
+                    sessionExercises.isEmpty && role == .main ? String(localized: "Activities") : role.title,
+                    subtitle: sessionExercises.isEmpty ? nil : cardioSectionSubtitle(for: role)
+                ) {
                     Button {
                         showCardioPicker(for: role)
                     } label: {
@@ -646,7 +714,16 @@ struct ActiveWorkoutView: View {
                 }
 
                 ForEach(activities) { activity in
-                    if ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: activity.role) {
+                    if CardioRecordingPolicy.usesSessionScreen(activity) {
+                        CardioSessionCard(
+                            activity: activity,
+                            onOpen: { openCardioRecording(activityID: activity.id) },
+                            onEditPlan: { presentCardioSetup(for: activity) },
+                            onChange: { requestCardioReplacement(for: activity) },
+                            onRemove: { requestCardioRemoval(for: activity) }
+                        )
+                        .id(cardioScrollTarget(for: activity))
+                    } else if ActiveWorkoutCardioInteractionPolicy.usesQuickCompletion(for: activity.role) {
                         quickCompletionCard(for: activity)
                             .id(cardioScrollTarget(for: activity))
                     } else {
@@ -1082,6 +1159,11 @@ struct ActiveWorkoutView: View {
         }
         hasBootstrapped = true
         restoreInitialScrollPositionIfNeeded()
+        if let activityID = activeWorkoutPresentationState.pendingCardioRecordingActivityID,
+           orderedCardioBlocks.contains(where: { $0.id == activityID }) {
+            activeWorkoutPresentationState.pendingCardioRecordingActivityID = nil
+            if standaloneCardioActivityID == nil { openCardioRecording(activityID: activityID) }
+        }
     }
 
     @MainActor
@@ -1391,6 +1473,11 @@ struct ActiveWorkoutView: View {
         guard !pendingCompletionAfterSaveTemplateSheet else { return }
         guard !showingSaveTemplateSheet, pendingTemplateUpdatePreview == nil else { return }
 
+        if sessionExercises.isEmpty && !orderedCardioBlocks.isEmpty {
+            presentWorkoutCompletionSummary()
+            return
+        }
+
         if result.completedTemplateID == nil {
             canSaveCompletedWorkoutAsTemplate = result.canCreateTemplateFromCompletedWorkout
 
@@ -1472,12 +1559,63 @@ struct ActiveWorkoutView: View {
     private func presentPendingCardioSetup() {
         guard let pendingCardioSelection else { return }
         self.pendingCardioSelection = nil
-        cardioSetupRequest = makeCardioSetupRequest(
+        let request = makeCardioSetupRequest(
             activityID: pendingCardioSelection.pickerRequest.activityID,
             role: pendingCardioSelection.pickerRequest.role,
             selection: pendingCardioSelection.selection,
             resetsResult: pendingCardioSelection.pickerRequest.resetsResult
         )
+        if request.isNewActivity && [.walkRun, .treadmill].contains(request.setupDraft.trackingProfile) {
+            applyCardioSetup(request: request, validatedSetup: ValidatedWorkoutCardioSetup(
+                role: request.setupDraft.role, goalKind: .open, targetDurationSeconds: 0,
+                targetDistanceMeters: nil, preferredDistanceUnit: request.setupDraft.distanceUnit,
+                trackingProfile: request.setupDraft.trackingProfile
+            ))
+            openCardioRecording(activityID: request.activityID)
+        } else {
+            cardioSetupRequest = request
+        }
+    }
+
+    private func openCardioRecording(activityID: UUID) {
+        persistCommittedUserEditSnapshot()
+        guard standaloneCardioActivityID != activityID else { return }
+        cardioRecordingRequest = CardioRecordingRequest(id: activityID)
+    }
+
+    private var standaloneCardioActivityID: UUID? {
+        guard let session else { return nil }
+        return CardioRecordingPolicy.standaloneActivityID(in: session)
+    }
+
+    private var activeWorkoutNavigationTitle: String {
+        guard let activityID = standaloneCardioActivityID else { return String(localized: "Active Workout") }
+        return session?.cardioBlocks.first(where: { $0.id == activityID })?.isCompleted == true
+            ? String(localized: "Activity Summary") : String(localized: "Record Activity")
+    }
+
+    private func standaloneCardioView(activityID: UUID) -> some View {
+        CardioRecordingView(
+            activityID: activityID, coordinator: activeWorkoutCoordinator, isEmbedded: true,
+            onMinimize: minimizeWorkout,
+            onCancelWorkout: cancelWorkout,
+            onSaveWorkout: {
+                if let current = activeWorkoutCoordinator.storedSnapshot?.session, current.id == sessionID {
+                    applyRuntimeSessionState(current)
+                }
+                finishWorkout()
+            },
+            onEditResult: { finishesWorkout in
+                if let current = activeWorkoutCoordinator.storedSnapshot?.session, current.id == sessionID {
+                    applyRuntimeSessionState(current)
+                }
+                didSaveRecordingResult = false
+                prefersRecordedCardioDuration = true
+                shouldFinishAfterCardioResultDismissal = finishesWorkout
+                presentCardioResult(activityID: activityID)
+            }
+        )
+        .disabled(isEndingSession || !hasBootstrapped)
     }
 
     private func presentCardioSetup(for activity: ActiveWorkoutRuntimeCardioBlock) {
@@ -1688,6 +1826,20 @@ struct ActiveWorkoutView: View {
             updatedAt: now
         )
 
+        if request.resetsResult {
+            updated = ActiveWorkoutRuntimeCardioBlock(
+                phase: updated.phase, role: updated.role, sortOrder: updated.sortOrder,
+                catalogExerciseUUID: updated.catalogExerciseUUID,
+                exerciseNameSnapshot: updated.exerciseNameSnapshot,
+                categorySnapshot: updated.categorySnapshot,
+                muscleSummarySnapshot: updated.muscleSummarySnapshot,
+                trackingProfile: updated.trackingProfile,
+                goalKind: updated.goalKind, targetDurationSeconds: updated.targetDurationSeconds,
+                targetDistanceMeters: updated.targetDistanceMeters,
+                preferredDistanceUnit: updated.preferredDistanceUnit,
+                createdAt: now, updatedAt: now
+            )
+        }
         updated.phase = TemplateCardioDraftReducer.legacyPhase(for: validatedSetup.role)
         updated.role = validatedSetup.role
         updated.catalogExerciseUUID = request.selection.remoteUUID
@@ -1701,7 +1853,16 @@ struct ActiveWorkoutView: View {
         updated.preferredDistanceUnit = validatedSetup.preferredDistanceUnit
         updated.updatedAt = now
 
+        if request.isNewActivity, sessionExercises.isEmpty, orderedCardioBlocks.isEmpty,
+           sessionNameDraft == "Empty Workout" {
+            sessionNameDraft = request.selection.displayName
+        }
+
         if request.resetsResult {
+            Task {
+                do { try await CardioRouteRecorder.shared.remove(activityID: request.activityID) }
+                catch { showError(error) }
+            }
             updated.sourceTemplateCardioID = nil
             updated.actualDurationSeconds = nil
             updated.actualDistanceMeters = nil
@@ -1715,9 +1876,13 @@ struct ActiveWorkoutView: View {
         }
 
         updateRuntimeSession { session in
-            session.cardioBlocks = request.isNewActivity
-                ? ActiveWorkoutRuntimeCardioPlanReducer.appending(updated, to: session.cardioBlocks)
-                : ActiveWorkoutRuntimeCardioPlanReducer.updating(updated, in: session.cardioBlocks)
+            if request.resetsResult {
+                session.cardioBlocks = session.cardioBlocks.map { $0.id == request.activityID ? updated : $0 }
+            } else {
+                session.cardioBlocks = request.isNewActivity
+                    ? ActiveWorkoutRuntimeCardioPlanReducer.appending(updated, to: session.cardioBlocks)
+                    : ActiveWorkoutRuntimeCardioPlanReducer.updating(updated, in: session.cardioBlocks)
+            }
         }
         persistCommittedUserEditSnapshot()
     }
@@ -1731,6 +1896,10 @@ struct ActiveWorkoutView: View {
     }
 
     private func removeCardioActivity(activityID: UUID) {
+        Task {
+            do { try await CardioRouteRecorder.shared.remove(activityID: activityID) }
+            catch { showError(error) }
+        }
         updateRuntimeSession { session in
             session.cardioBlocks = ActiveWorkoutRuntimeCardioPlanReducer.removing(
                 activityID: activityID,
@@ -2945,6 +3114,10 @@ struct ActiveWorkoutView: View {
             scrollTarget: scrollTarget,
             expandedExerciseIDs: expandedExerciseIDs
         ), persist: writeDurableSnapshot)
+        if receipt.session != snapshot {
+            runtimeSession = receipt.session
+            refreshRenderProjection()
+        }
         finishSummaryModel.refreshIfPresented(
             makeFinishSummaryInput(revision: receipt.revision)
         )

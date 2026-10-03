@@ -767,6 +767,9 @@ final class IncrementalBackupTests: XCTestCase {
             var payload = try UserDataCloudBackupPayload(context: context, sessionID: sessionID,
                 includeShared: sessionID == nil, includeHistory: sessionID != nil, includeTemplates: false)
             payload.generatedAt = .distantPast
+            // The shared chunk now marks route-aware snapshots explicitly. The
+            // existing entity encoding and workout chunks stay canonical.
+            if sessionID == nil { payload.cardioRoutes = [] }
             // Reproduce the shipped encoder, including its redundant first key sort.
             var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: BackupArchiveCodec.json(payload)) as? [String: Any])
             for (key, value) in legacy {
@@ -1221,6 +1224,314 @@ final class IncrementalBackupTests: XCTestCase {
             XCTAssertEqual(result.generation, state.generation)
             XCTAssertEqual(result.garbageRecords, state.garbageRecords)
         }
+    }
+
+    func testRoutesTravelThroughCompressedBackupAndRestoreWithoutHistoryUploadChurn() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceFiles = CardioRouteFiles(directory: root.appendingPathComponent("source"))
+        let targetFiles = CardioRouteFiles(directory: root.appendingPathComponent("target"))
+        let source = try makeContainer(workouts: 2)
+        var route = try makeOutdoorRoute(in: source, files: sourceFiles)
+        let store = MemoryArchiveStore()
+        let service = UserDataCloudBackupService(localContainer: source, backupStore: store, routeFiles: sourceFiles)
+        _ = try await service.exportCurrentBackup()
+        let firstManifest = try await store.fetchManifest()
+        let first = try XCTUnwrap(firstManifest)
+        XCTAssertEqual(first.chunks.filter { $0.key.hasPrefix("route-v1-") }.count, 1)
+        let initialPublications = await store.publicationCount
+        _ = try await service.exportCurrentBackup()
+        let unchangedPublications = await store.publicationCount
+        XCTAssertEqual(unchangedPublications, initialPublications)
+
+        // A route repair changes its own asset even without touching a workout's
+        // updatedAt. The cached history chunks remain reusable.
+        route.distanceMeters += 10
+        route.revision += 1
+        try sourceFiles.write(route)
+        _ = try await service.exportCurrentBackup()
+        let changedCount = await store.lastUploadedChunkCount
+        XCTAssertEqual(changedCount, 1)
+        let target = try makeContainer(workouts: 0)
+        let targetStore = CardioRouteStore(directory: targetFiles.directory)
+        let oldGeneration = await targetStore.writeGeneration()
+        try await targetStore.delete(activityID: route.activityID)
+        _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store, routeFiles: targetFiles)
+            .restoreLatestBackup(replacingLocalData: true)
+        XCTAssertEqual(try ModelContext(target).fetchCount(FetchDescriptor<WorkoutSession>()), 2)
+        XCTAssertEqual(try targetFiles.read(activityID: route.activityID), route)
+        let restoredThroughActor = try await targetStore.load(activityID: route.activityID)
+        XCTAssertEqual(restoredThroughActor, route)
+        var stale = route
+        stale.revision += 100
+        stale.distanceMeters = 999
+        try await targetStore.save(stale, generation: oldGeneration)
+        XCTAssertEqual(try targetFiles.read(activityID: route.activityID), route)
+        XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).first?.id, route.activityID)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        await waitForCleanup()
+    }
+
+    func testLiveAndDeletedRoutesAreExcludedFromNextBackup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = CardioRouteFiles(directory: root)
+        let container = try makeContainer(workouts: 2)
+        let route = try makeOutdoorRoute(in: container, files: files)
+        var live = route
+        live.beginSegment()
+        try files.write(live)
+        let livePlan = try BackupExportPlan.build(container: container, previous: nil, routeFiles: files)
+        defer { livePlan.cleanUp() }
+        XCTAssertFalse(livePlan.manifest.chunks.contains { $0.key.hasPrefix("route-v1-") })
+        try files.write(route)
+        let plan = try BackupExportPlan.build(container: container, previous: nil, routeFiles: files)
+        defer { plan.cleanUp() }
+        XCTAssertTrue(plan.manifest.chunks.contains { $0.key.hasPrefix("route-v1-") })
+
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        for session in try context.fetch(FetchDescriptor<WorkoutSession>()) where session.id == route.sessionID { context.delete(session) }
+        try context.saveWithRecoveryProtection()
+        // Even if delayed cleanup leaves the route file, an orphan is not uploaded.
+        let deletedPlan = try BackupExportPlan.build(container: container, previous: plan.manifest, routeFiles: files)
+        defer { deletedPlan.cleanUp() }
+        XCTAssertFalse(deletedPlan.manifest.chunks.contains { $0.key.hasPrefix("route-v1-") })
+    }
+
+    func testFailedDatabaseRestoreLeavesExistingRoutesUntouched() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceFiles = CardioRouteFiles(directory: root.appendingPathComponent("source"))
+        let targetFiles = CardioRouteFiles(directory: root.appendingPathComponent("target"))
+        let source = try makeContainer(workouts: 1)
+        let sourceRoute = try makeOutdoorRoute(in: source, files: sourceFiles)
+        let target = try makeContainer(workouts: 1)
+        let targetRoute = try makeOutdoorRoute(in: target, files: targetFiles)
+        let store = MemoryArchiveStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store, routeFiles: sourceFiles).exportCurrentBackup()
+        let transaction = UserDataCloudRestoreTransaction(container: target, dependencies: .init(checkpoint: {
+            if $0 == .beforeSave { throw ArchiveTestError.publication }
+        }))
+        do {
+            _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store,
+                restoreTransaction: transaction, routeFiles: targetFiles).restoreLatestBackup(replacingLocalData: true)
+            XCTFail("Expected database restore failure")
+        } catch ArchiveTestError.publication { }
+        XCTAssertEqual(try targetFiles.read(activityID: targetRoute.activityID), targetRoute)
+        XCTAssertNil(try targetFiles.read(activityID: sourceRoute.activityID))
+        XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<WorkoutSession>()).first?.id, targetRoute.sessionID)
+        await waitForCleanup()
+    }
+
+    func testCommittedRouteRestoreCanRetryFileFailureBeforeAcknowledgingDatabaseReceipt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try makeContainer(workouts: 1)
+        let sourceFiles = CardioRouteFiles(directory: root.appendingPathComponent("source"))
+        let route = try makeOutdoorRoute(in: source, files: sourceFiles)
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(source))
+        payload.cardioRoutes = [route]
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+        let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let targetFiles = CardioRouteFiles(directory: root.appendingPathComponent("target"))
+        // A file occupies the destination directory; the database can commit,
+        // but route installation must remain replayable until this is repaired.
+        try Data("blocked".utf8).write(to: targetFiles.directory)
+        var request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        request.stateAfterCommit = .init(account: "account-a")
+        request.hasRouteRestore = true
+        try BackupLocalJournal.saveRestore(request, for: target)
+        try BackupLocalJournal.stageRouteRestore(.init(ticket: request.ticket, files: targetFiles, payload: payload), for: target)
+        try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true,
+            restoreTicket: request.ticket, replacementPayload: payload,
+            mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+            relinkRelationships: { try payload.relinkRelationships(in: $0) })
+        XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
+        XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), request.ticket)
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
+        try FileManager.default.removeItem(at: targetFiles.directory)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) }
+        XCTAssertEqual(try targetFiles.read(activityID: route.activityID), route)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+    }
+
+    func testRestoreServiceRetainsCommittedIntentWhenRouteInstallationFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceFiles = CardioRouteFiles(directory: root.appendingPathComponent("source"))
+        let source = try makeContainer(workouts: 1)
+        let route = try makeOutdoorRoute(in: source, files: sourceFiles)
+        let store = MemoryArchiveStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store, routeFiles: sourceFiles).exportCurrentBackup()
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+        let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let targetFiles = CardioRouteFiles(directory: root.appendingPathComponent("target"))
+        try Data("blocked".utf8).write(to: targetFiles.directory)
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: store, routeFiles: targetFiles)
+        do {
+            _ = try await service.restoreLatestBackup(replacingLocalData: true)
+            XCTFail("Expected route file failure")
+        } catch { }
+        let ticket = try XCTUnwrap(BackupLocalJournal.restoreRequest(for: target)?.ticket)
+        XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), ticket)
+        XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<WorkoutSession>()).first?.id, route.sessionID)
+        try FileManager.default.removeItem(at: targetFiles.directory)
+        _ = try await service.resumePendingRestore()
+        XCTAssertEqual(try targetFiles.read(activityID: route.activityID), route)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+        await waitForCleanup()
+    }
+
+    func testCommittedRouteRestoreRetryKeepsRetainedRecorderWritesValid() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try makeContainer(workouts: 1)
+        let incoming = try makeOutdoorRoute(in: source, files: CardioRouteFiles(directory: root.appendingPathComponent("source")))
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(source))
+        payload.cardioRoutes = [incoming]
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+        let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let files = CardioRouteFiles(directory: root.appendingPathComponent("routes"))
+        let routeStore = CardioRouteStore(directory: files.directory)
+        let recorder = CardioRouteRecorder(store: routeStore)
+        let requestCutoff = Date.now.addingTimeInterval(-1)
+        let activity = ActiveWorkoutRuntimeCardioBlock(phase: .postWorkout, role: .main,
+            catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk",
+            categorySnapshot: "Cardio", muscleSummarySnapshot: "", trackingProfile: .walkRun,
+            goalKind: .open, targetDurationSeconds: 0, timerState: .paused, timerAccumulatedSeconds: 60)
+        var session = ActiveWorkoutRuntimeSession(name: "Newer walk", cardioBlocks: [activity])
+        let draftDirectory = root.appendingPathComponent("draft")
+        let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: draftDirectory)
+        _ = try await snapshotStore.save(ActiveWorkoutStoredSnapshot(session: session))
+        var live = CardioRoute(sessionID: session.id, activityID: activity.id)
+        live.distanceMeters = 100
+        let originalGeneration = await routeStore.writeGeneration()
+        try await routeStore.save(live, generation: originalGeneration)
+        try await recorder.prepare(sessionID: session.id, activityID: activity.id)
+
+        // Fail installation after the database commits, while keeping a newer
+        // active journal available for the first restore notification to reopen.
+        let blockedDestination = files.url(for: incoming.activityID)
+        try FileManager.default.createDirectory(at: blockedDestination, withIntermediateDirectories: true)
+        var request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        request.cleanupBefore = requestCutoff
+        request.stateAfterCommit = .init(account: "account-a")
+        request.hasRouteRestore = true
+        try BackupLocalJournal.saveRestore(request, for: target)
+        let restoration = CardioRouteRestoration(ticket: request.ticket, files: files, payload: payload,
+            cleanupBefore: requestCutoff, activeWorkoutSnapshotURL: draftDirectory.appendingPathComponent("active-workout-snapshot.json"))
+        try BackupLocalJournal.stageRouteRestore(restoration, for: target)
+        try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true,
+            restoreTicket: request.ticket, replacementPayload: payload,
+            mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+            relinkRelationships: { try payload.relinkRelationships(in: $0) })
+        XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
+        recorder.invalidateAfterRestore()
+        try await recorder.prepare(sessionID: session.id, activityID: activity.id)
+        let reboundGeneration = await routeStore.writeGeneration()
+        XCTAssertNotEqual(reboundGeneration, originalGeneration)
+
+        try FileManager.default.removeItem(at: blockedDestination)
+        _ = try await UserDataCloudBackupService(localContainer: target, backupStore: MemoryArchiveStore(), routeFiles: files)
+            .resumePendingRestore()
+        // No second notification is sent for a committed restore replay. The
+        // retained recorder must still be able to persist resumed recording.
+        try WorkoutCardioTimerCoordinator.resume(activityID: activity.id, blocks: &session.cardioBlocks, at: .now)
+        recorder.synchronize(with: session, requestPermission: false)
+        await recorder.flush()
+        let recorded = try XCTUnwrap(recorder.route)
+        XCTAssertTrue(recorded.isRecording)
+        XCTAssertEqual(try files.read(activityID: activity.id), recorded)
+        XCTAssertEqual(files.generation(), reboundGeneration)
+        XCTAssertEqual(try files.read(activityID: incoming.activityID), incoming)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+
+        // The original writer is still fenced, and a different restore ticket
+        // creates a new boundary instead of reusing this ticket's generation.
+        live.revision = recorded.revision + 100
+        live.distanceMeters = 999
+        try await routeStore.save(live, generation: originalGeneration)
+        XCTAssertEqual(try files.read(activityID: activity.id), recorded)
+        recorder.stop()
+        await recorder.flush()
+        try files.restore(.init(ticket: UUID(), files: files, payload: payload,
+            cleanupBefore: requestCutoff, activeWorkoutSnapshotURL: draftDirectory.appendingPathComponent("active-workout-snapshot.json")))
+        XCTAssertNotEqual(files.generation(), reboundGeneration)
+        await waitForCleanup()
+    }
+
+    func testLegacyBackupsKeepMatchingLocalRoutesAndRejectOrphanedRoutePayloads() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = CardioRouteFiles(directory: root)
+        let container = try makeContainer(workouts: 1)
+        let route = try makeOutdoorRoute(in: container, files: files)
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(container))
+        let legacy = try JSONDecoder().decode(UserDataCloudBackupPayload.self, from: JSONEncoder().encode(payload))
+        XCTAssertNil(legacy.cardioRoutes)
+        try legacy.validate()
+        try files.restore(.init(ticket: UUID(), files: files, payload: legacy))
+        XCTAssertEqual(try files.read(activityID: route.activityID), route)
+        payload.cardioRoutes = [CardioRoute(sessionID: UUID(), activityID: UUID())]
+        XCTAssertThrowsError(try payload.validate())
+        payload.cardioRoutes = [route, route]
+        XCTAssertThrowsError(try payload.validate())
+    }
+
+    func testRouteRestoreUsesDraftMutationBoundaryToPreserveNewerPausedWorkout() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cutoff = Date.now
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(makeContainer(workouts: 0)))
+        payload.cardioRoutes = []
+        for delta: TimeInterval in [-1, 1] {
+            let directory = root.appendingPathComponent(String(delta))
+            let files = CardioRouteFiles(directory: directory.appendingPathComponent("routes"))
+            let local = try makeContainer(workouts: 1)
+            let route = try makeOutdoorRoute(in: local, files: files)
+            let activity = ActiveWorkoutRuntimeCardioBlock(id: route.activityID, phase: .postWorkout,
+                role: .main, catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk",
+                categorySnapshot: "Cardio", muscleSummarySnapshot: "", trackingProfile: .walkRun,
+                goalKind: .open, targetDurationSeconds: 0, timerState: .paused, timerAccumulatedSeconds: 60)
+            let mutationDate = cutoff.addingTimeInterval(delta)
+            let session = ActiveWorkoutRuntimeSession(id: route.sessionID, name: "Walk",
+                cardioBlocks: [activity], updatedAt: mutationDate)
+            let snapshotDirectory = directory.appendingPathComponent("draft")
+            let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: snapshotDirectory)
+            _ = try await snapshotStore.save(ActiveWorkoutStoredSnapshot(session: session, mutationDate: mutationDate))
+            try files.restore(.init(ticket: UUID(), files: files, payload: payload, cleanupBefore: cutoff,
+                activeWorkoutSnapshotURL: snapshotDirectory.appendingPathComponent("active-workout-snapshot.json")))
+            XCTAssertEqual(try files.read(activityID: route.activityID), delta > 0 ? route : nil)
+        }
+    }
+
+    private func makeOutdoorRoute(in container: ModelContainer, files: CardioRouteFiles) throws -> CardioRoute {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let session = try XCTUnwrap(context.fetch(FetchDescriptor<WorkoutSession>()).first)
+        let block = WorkoutSessionCardioBlock(sessionID: session.id, phase: .postWorkout, role: .main,
+            catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk", categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "", trackingProfile: .walkRun, goalKind: .open, targetDurationSeconds: 0,
+            actualDurationSeconds: 60, actualDistanceMeters: 11.12, isCompleted: true, session: session)
+        context.insert(block)
+        try context.saveWithRecoveryProtection()
+        var route = CardioRoute(sessionID: session.id, activityID: block.id)
+        let date = Date(timeIntervalSince1970: 1_000)
+        route.beginSegment()
+        _ = route.append(latitude: 59, longitude: 18, timestamp: date, accuracy: 5, now: date, recordingStartedAt: date)
+        _ = route.append(latitude: 59.0001, longitude: 18, timestamp: date.addingTimeInterval(10), accuracy: 5,
+            now: date.addingTimeInterval(10), recordingStartedAt: date)
+        route.stop()
+        try files.write(route)
+        return route
     }
 
     private func waitForCleanup() async {

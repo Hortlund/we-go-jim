@@ -111,6 +111,9 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
 
     @ObservationIgnored private let snapshotStore: any ActiveWorkoutSnapshotStoring
     @ObservationIgnored private let persistence: any ActiveWorkoutPersistence
+    @ObservationIgnored private let routeRecorder: CardioRouteRecorder?
+    @ObservationIgnored private let liveActivityPublisher: (any WorkoutLiveActivityPublishing)?
+    @ObservationIgnored private var hasResolvedLiveActivitySession = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var scheduledSave: (id: UUID, revision: UInt64)?
     @ObservationIgnored private var completionTask: Task<WorkoutCompletionCommitResult, Error>?
@@ -118,10 +121,24 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
 
     init(
         snapshotStore: any ActiveWorkoutSnapshotStoring = ActiveWorkoutSnapshotStore.shared,
-        persistence: any ActiveWorkoutPersistence
+        persistence: any ActiveWorkoutPersistence,
+        routeRecorder: CardioRouteRecorder? = .shared,
+        liveActivityPublisher: (any WorkoutLiveActivityPublishing)? = nil
     ) {
         self.snapshotStore = snapshotStore
         self.persistence = persistence
+        self.routeRecorder = routeRecorder
+        self.liveActivityPublisher = liveActivityPublisher
+        if liveActivityPublisher != nil {
+            routeRecorder?.onProgress = { [weak self] in self?.refreshLiveActivity() }
+        }
+    }
+
+    func refreshLiveActivity() {
+        // Cold-launch foreground delivery can precede loading the durable draft.
+        // Do not end the system's activity until that lookup has completed.
+        guard hasResolvedLiveActivitySession else { return }
+        liveActivityPublisher?.synchronize(snapshot: storedSnapshot, route: routeRecorder?.route)
     }
 
     @discardableResult
@@ -137,6 +154,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         var snapshot: ActiveWorkoutStoredSnapshot
         switch command {
         case .start(let session):
+            hasResolvedLiveActivitySession = true
             snapshot = ActiveWorkoutStoredSnapshot(
                 revision: storedSnapshot?.revision ?? 0,
                 session: session
@@ -147,6 +165,17 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             }
             snapshot = current
             apply(command, to: &snapshot)
+        }
+
+        // Every completion path (including legacy timer-conflict resolution)
+        // commits GPS distance before another activity can take over the recorder.
+        if let route = routeRecorder?.route,
+           storedSnapshot?.session.id == snapshot.session.id,
+           storedSnapshot?.session.cardioBlocks.first(where: { $0.id == route.activityID })?.isCompleted == false,
+           snapshot.session.cardioBlocks.first(where: { $0.id == route.activityID })?.isCompleted == true {
+            snapshot.session = routeRecorder?.includingRecordedDistance(
+                in: snapshot.session, includeCompletedActivities: true
+            ) ?? snapshot.session
         }
 
         if snapshot == storedSnapshot {
@@ -160,6 +189,8 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         snapshot.mutationTimestamp = Date.now.timeIntervalSince1970
         snapshot.revision &+= 1
         storedSnapshot = snapshot
+        routeRecorder?.synchronize(with: snapshot.session)
+        refreshLiveActivity()
         persistenceWarning = nil
         if shouldPersist {
             scheduleSnapshotSave(snapshot)
@@ -185,6 +216,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     }
 
     func restore() async {
+        defer {
+            hasResolvedLiveActivitySession = true
+            refreshLiveActivity()
+        }
         let snapshot: ActiveWorkoutStoredSnapshot
         do {
             guard let loadedSnapshot = try await snapshotStore.loadStoredSnapshot() else {
@@ -217,6 +252,26 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             storedSnapshot = snapshot
             lastPersistedRevision = snapshot.revision
             persistenceWarning = nil
+            let outdoorActivities = snapshot.session.cardioBlocks.filter {
+                !$0.isCompleted && CardioRecordingPolicy.recordsGPS($0)
+            }
+            // Reload paused distance too, before the deferred Live Activity
+            // refresh can replace the system's retained summary with empty stats.
+            if let activity = outdoorActivities.first(where: { $0.timerState == .running })
+                ?? outdoorActivities.first(where: { $0.timerState == .paused }) {
+                do {
+                    try await routeRecorder?.restoreRoute(sessionID: snapshot.session.id, activityID: activity.id) {
+                        self.storedSnapshot?.session.id == snapshot.session.id
+                    }
+                    if let current = storedSnapshot?.session, current.id == snapshot.session.id {
+                        routeRecorder?.synchronize(with: current, requestPermission: false)
+                    } else {
+                        routeRecorder?.stop(sessionID: snapshot.session.id)
+                    }
+                } catch {
+                    persistenceWarning = String(localized: "Your saved outdoor route could not be restored.")
+                }
+            }
         } catch {
             storedSnapshot = nil
             persistenceWarning = String(describing: error)
@@ -227,12 +282,15 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         if let completionTask {
             return try await completionTask.value
         }
-        guard let session = storedSnapshot?.session else {
+        guard let storedSession = storedSnapshot?.session else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
+        routeRecorder?.stop(sessionID: storedSession.id)
+        let session = routeRecorder?.includingRecordedDistance(in: storedSession) ?? storedSession
 
         let task = Task {
-            try await persistence.complete(session: session, notes: notes)
+            await routeRecorder?.flush()
+            return try await persistence.complete(session: session, notes: notes)
         }
         completionTask = task
 
@@ -244,6 +302,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             scheduledSave = nil
             storedSnapshot = nil
             lastPersistedRevision = nil
+            refreshLiveActivity()
             do {
                 try await snapshotStore.delete()
                 persistenceWarning = nil
@@ -253,11 +312,18 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             return result
         } catch {
             completionTask = nil
+            if let current = storedSnapshot?.session, current.id == session.id {
+                routeRecorder?.synchronize(with: current)
+            }
             throw error
         }
     }
 
     func discard() async {
+        hasResolvedLiveActivitySession = true
+        let discardedSessionID = storedSnapshot?.session.id
+        let discardedActivityIDs = Set(storedSnapshot?.session.cardioBlocks.map(\.id) ?? [])
+        if let discardedSessionID { routeRecorder?.stop(sessionID: discardedSessionID) }
         saveTask?.cancel()
         saveTask = nil
         scheduledSave = nil
@@ -265,12 +331,19 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         completionTask = nil
         storedSnapshot = nil
         lastPersistedRevision = nil
-        do {
-            try await snapshotStore.delete()
-            persistenceWarning = nil
-        } catch {
-            persistenceWarning = String(describing: error)
+        refreshLiveActivity()
+        var cleanupWarnings: [String] = []
+        if let discardedSessionID {
+            do {
+                try await CardioRouteStore.shared.delete(
+                    sessionID: discardedSessionID, activityIDs: discardedActivityIDs
+                )
+            }
+            catch { cleanupWarnings.append(String(describing: error)) }
         }
+        do { try await snapshotStore.delete() }
+        catch { cleanupWarnings.append(String(describing: error)) }
+        persistenceWarning = cleanupWarnings.isEmpty ? nil : cleanupWarnings.joined(separator: "\n")
     }
 
     /// A restore may finish after the user has started or edited a workout.
@@ -283,6 +356,8 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     }
 
     func clearInMemory() {
+        hasResolvedLiveActivitySession = true
+        if let sessionID = storedSnapshot?.session.id { routeRecorder?.stop(sessionID: sessionID) }
         saveTask?.cancel()
         saveTask = nil
         scheduledSave = nil
@@ -290,7 +365,23 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         completionTask = nil
         storedSnapshot = nil
         lastPersistedRevision = nil
+        refreshLiveActivity()
         persistenceWarning = nil
+    }
+
+    /// Presentation can retain an active draft edited after the restore request.
+    /// Reopen its preserved journal after the cloud restore changes file generation.
+    func reloadRouteAfterRestore() async {
+        guard let snapshot = storedSnapshot else { return }
+        let activities = snapshot.session.cardioBlocks.filter { !$0.isCompleted && CardioRecordingPolicy.recordsGPS($0) }
+        guard let activity = activities.first(where: { $0.timerState == .running }) ?? activities.first else { return }
+        do {
+            try await routeRecorder?.prepare(sessionID: snapshot.session.id, activityID: activity.id)
+            guard let current = storedSnapshot?.session, current.id == snapshot.session.id else { return }
+            routeRecorder?.synchronize(with: current, requestPermission: false)
+        } catch {
+            persistenceWarning = String(localized: "Your saved outdoor route could not be restored.")
+        }
     }
 
     private func scheduleSnapshotSave(_ snapshot: ActiveWorkoutStoredSnapshot) {

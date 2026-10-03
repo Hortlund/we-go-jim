@@ -1008,6 +1008,7 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
+    var pendingCardioRecordingActivityID: UUID?
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
     @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
@@ -1050,6 +1051,7 @@ final class ActiveWorkoutPresentationState {
     }
 
     func clearPresentation() {
+        pendingCardioRecordingActivityID = nil
         guard activeSessionID != nil || isActiveWorkoutPresented || isActiveWorkoutStripCollapsed else {
             return
         }
@@ -1164,7 +1166,10 @@ final class ActiveWorkoutPresentationState {
         coordinator: ActiveWorkoutCoordinator,
         restTimerState: RestTimerState
     ) {
-        guard coordinator.clearInMemory(savedBefore: cutoff) else { return }
+        guard coordinator.clearInMemory(savedBefore: cutoff) else {
+            Task { await coordinator.reloadRouteAfterRestore() }
+            return
+        }
         clearActiveWorkout(restTimerState: restTimerState)
     }
 
@@ -1280,13 +1285,14 @@ final class RestTimerState {
 
         dismissRestTimerPopup()
         lastCompletedRest = nil
-        restTimerEndsAt = Date().addingTimeInterval(TimeInterval(normalized))
+        let endsAt = Date().addingTimeInterval(TimeInterval(normalized))
+        restTimerEndsAt = endsAt
         restTimerExerciseName = exerciseName
         restTimerSetLabel = setLabel
         restTimerSourceSetID = sourceSetID
-        scheduleExpirationTask(seconds: normalized, isEnabled: schedulesExpirationTask)
+        scheduleExpirationTask(endsAt: endsAt, isEnabled: schedulesExpirationTask)
         RestTimerNotificationManager.shared.scheduleRestTimer(
-            seconds: normalized,
+            endsAt: endsAt,
             style: AppRuntimeState.shared.workoutNotificationStyle
         )
     }
@@ -1362,10 +1368,9 @@ final class RestTimerState {
             return
         }
 
-        let remainingSeconds = Int(ceil(snapshot.endsAt.timeIntervalSince(date)))
-        scheduleExpirationTask(seconds: remainingSeconds, isEnabled: true)
+        scheduleExpirationTask(endsAt: snapshot.endsAt, isEnabled: true)
         RestTimerNotificationManager.shared.scheduleRestTimer(
-            seconds: remainingSeconds,
+            endsAt: snapshot.endsAt,
             style: AppRuntimeState.shared.workoutNotificationStyle
         )
     }
@@ -1394,13 +1399,13 @@ final class RestTimerState {
         restTimerPopup = nil
     }
 
-    private func scheduleExpirationTask(seconds: Int, isEnabled: Bool) {
+    private func scheduleExpirationTask(endsAt: Date, isEnabled: Bool) {
         restTimerExpirationTask?.cancel()
         restTimerExpirationTask = nil
-        guard isEnabled, let delay = RestTimerExpiryPolicy.expirationDelay(seconds: seconds) else { return }
+        guard isEnabled else { return }
 
         restTimerExpirationTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
+            try? await Task.sleep(for: .seconds(max(0, endsAt.timeIntervalSinceNow)))
             guard !Task.isCancelled else { return }
             await self.handleRestTimerExpirationAfterDelayIfStillNeeded()
         }
@@ -1610,11 +1615,11 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     }
 
     func scheduleRestTimer(
-        seconds: Int,
+        endsAt: Date,
         style: WorkoutNotificationStyle
     ) {
         enqueue { worker in
-            await worker.scheduleRestTimer(seconds: seconds, style: style)
+            await worker.scheduleRestTimer(endsAt: endsAt, style: style)
         }
     }
 
@@ -1676,7 +1681,7 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     }
 }
 
-private actor RestTimerNotificationWorker {
+actor RestTimerNotificationWorker {
     private let notificationIdentifierPrefix: String
     private let client: any UserNotificationCenterClient
     private var schedulingTask: Task<Void, Never>?
@@ -1692,7 +1697,7 @@ private actor RestTimerNotificationWorker {
     }
 
     func scheduleRestTimer(
-        seconds: Int,
+        endsAt: Date,
         style: WorkoutNotificationStyle
     ) async {
         schedulingGeneration += 1
@@ -1737,7 +1742,7 @@ private actor RestTimerNotificationWorker {
                 body: descriptor.body,
                 usesDefaultSound: descriptor.usesDefaultSound,
                 interruptionLevel: descriptor.interruptionLevel,
-                timeInterval: TimeInterval(seconds)
+                fireDate: endsAt
             )
 
             try? await client.add(request)
@@ -1748,6 +1753,8 @@ private actor RestTimerNotificationWorker {
             )
         }
     }
+
+    func waitForPendingScheduling() async { await schedulingTask?.value }
 
     func cancelRestTimerNotification() async {
         schedulingGeneration += 1

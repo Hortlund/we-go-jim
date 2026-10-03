@@ -4,6 +4,7 @@ struct WorkoutCardioResultEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     let activityName: String
+    let recordedDurationSeconds: Int?
     let onSave: (ValidatedWorkoutCardioResult) async throws -> Void
 
     @State private var draft: WorkoutCardioResultDraft
@@ -11,13 +12,16 @@ struct WorkoutCardioResultEditor: View {
     @State private var showsDetails: Bool
     @State private var validationMessage: String?
     @State private var isSaving = false
+    @State private var editingRecordedDuration = false
 
     init(
         activityName: String,
         draft: WorkoutCardioResultDraft,
+        recordedDurationSeconds: Int? = nil,
         onSave: @escaping (ValidatedWorkoutCardioResult) async throws -> Void
     ) {
         self.activityName = activityName
+        self.recordedDurationSeconds = recordedDurationSeconds
         self.onSave = onSave
         self._draft = State(initialValue: draft)
         self._durationMinutesText = State(
@@ -83,7 +87,9 @@ struct WorkoutCardioResultEditor: View {
         VStack(alignment: .leading, spacing: 18) {
             WGJSectionHeader(
                 activityName,
-                subtitle: String(localized: "Log at least a duration or distance.")
+                subtitle: recordedDurationSeconds != nil
+                    ? String(localized: "Time recorded. Add your distance below.")
+                    : String(localized: "Log at least a duration or distance.")
             )
 
             VStack(alignment: .leading, spacing: 8) {
@@ -91,16 +97,28 @@ struct WorkoutCardioResultEditor: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.textSecondary)
 
-                HStack(spacing: 10) {
-                    TextField("Minutes", text: $durationMinutesText)
-                        .keyboardType(.decimalPad)
-                        .wgjPillField()
-                        .accessibilityLabel("Duration in minutes")
-                        .accessibilityIdentifier("cardio-result-duration-field")
+                if let recordedDurationSeconds, !editingRecordedDuration {
+                    HStack {
+                        Text(Duration.seconds(recordedDurationSeconds).formatted(.time(pattern: .hourMinuteSecond)))
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                            .accessibilityIdentifier("cardio-result-recorded-duration")
+                        Spacer()
+                        Button("Edit") { editingRecordedDuration = true }
+                            .font(.subheadline)
+                            .accessibilityLabel("Edit recorded time")
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        TextField("Minutes", text: $durationMinutesText)
+                            .keyboardType(.decimalPad)
+                            .wgjPillField()
+                            .accessibilityLabel("Duration in minutes")
+                            .accessibilityIdentifier("cardio-result-duration-field")
 
-                    Text("min")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textSecondary)
+                        Text("min")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
                 }
             }
 
