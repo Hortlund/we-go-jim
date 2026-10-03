@@ -81,7 +81,12 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             "Save workout images to your photo library."
         )
         XCTAssertNil(info["NSPhotoLibraryUsageDescription"])
+        XCTAssertNotNil(info["NSHealthUpdateUsageDescription"])
+        XCTAssertNotNil(info["NSHealthShareUsageDescription"], "Recovery queries check only WGJ's own exported workouts")
+        XCTAssertFalse((info["UIRequiredDeviceCapabilities"] as? [String] ?? []).contains("healthkit"))
         for entitlements in [debug, release] {
+            XCTAssertEqual(entitlements["com.apple.developer.healthkit"] as? Bool, true)
+            XCTAssertNil(entitlements["com.apple.developer.healthkit.background-delivery"])
             XCTAssertNil(entitlements["aps-environment"])
             XCTAssertNotNil(entitlements["com.apple.security.application-groups"])
             XCTAssertNotNil(entitlements["com.apple.developer.icloud-container-identifiers"])
@@ -93,6 +98,7 @@ final class AppCapabilityConfigurationTests: XCTestCase {
         XCTAssertFalse(project.contains("com.apple.InAppPurchase"))
         XCTAssertFalse(project.contains("com.apple.Push"))
         XCTAssertTrue(project.contains("com.apple.TimeSensitiveNotifications"))
+        XCTAssertTrue(project.contains("com.apple.HealthKit"))
     }
 
     func testDevelopmentAndProductionBuildsKeepUserDataSurfacesIsolated() throws {

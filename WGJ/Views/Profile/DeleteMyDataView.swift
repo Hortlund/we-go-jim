@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct DeleteMyDataView: View {
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
 
@@ -90,28 +91,35 @@ struct DeleteMyDataView: View {
         defer { isDeleting = false }
 
         let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+        let activeSessionID = activeWorkoutCoordinator.storedSnapshot?.session.id
 
-        do {
-            try await AppDataDeletionService.deleteConfiguredCloudBackup(container: modelContext.container)
-            try await backgroundStore.performWrite("profile.delete-all-data.local") { backgroundContext in
-                try AppDataDeletionService(modelContext: backgroundContext).stageLocalDataDeletion()
+        let outcome = await AppDataDeletionService.performUserDataDeletion(
+            deleteCloudBackup: {
+                try await AppDataDeletionService.deleteConfiguredCloudBackup(container: modelContext.container)
+            },
+            commitLocalDeletion: {
+                try await backgroundStore.performWrite("profile.delete-all-data.local") { backgroundContext in
+                    try AppDataDeletionService(modelContext: backgroundContext).stageLocalDataDeletion()
+                }
+            },
+            didCommitLocalDeletion: { activeWorkoutCoordinator.clearInMemory() },
+            resetBackupState: {
+                try await backgroundStore.perform("profile.delete-all-data.invalidate-caches") { backgroundContext in
+                    let deletion = AppDataDeletionService(modelContext: backgroundContext)
+                    deletion.invalidateCommittedCaches()
+                    try deletion.resetLocalBackupState()
+                }
+            },
+            clearArtifacts: {
+                try await AppDataDeletionService.clearDefaultLocalArtifacts(clearActiveWorkoutSnapshot: {
+                    try await AppDataDeletionService.clearDefaultActiveWorkoutSnapshot(sessionID: activeSessionID)
+                })
             }
-            try await backgroundStore.perform("profile.delete-all-data.invalidate-caches") { backgroundContext in
-                let deletion = AppDataDeletionService(modelContext: backgroundContext)
-                try deletion.resetLocalBackupState()
-                deletion.invalidateCommittedCaches()
-            }
-            try await AppDataDeletionService.clearDefaultLocalArtifacts()
-            alertTitle = "Data Deleted"
-            alertMessage = "Your CloudKit backup and local WGJ data were deleted. WGJ will return to setup after you tap OK."
-            shouldReturnToSetupAfterAlert = true
-            showingAlert = true
-        } catch {
-            alertTitle = "Delete Failed"
-            alertMessage = error.localizedDescription
-            shouldReturnToSetupAfterAlert = false
-            showingAlert = true
-        }
+        )
+        alertTitle = outcome.title
+        alertMessage = outcome.message
+        shouldReturnToSetupAfterAlert = outcome.didDeleteLocalData
+        showingAlert = true
     }
 
     private func infoCard(title: String, lines: [String]) -> some View {
@@ -141,4 +149,5 @@ struct DeleteMyDataView: View {
         DeleteMyDataView()
     }
     .wgjPreviewModelContainer()
+    .environment(ActiveWorkoutCoordinator.preview())
 }
