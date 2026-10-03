@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class WorkoutCardioPersistenceTests: XCTestCase {
+    func testSavingSessionAsTemplateKeepsOnlyWarmupAndFinisher() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let repository = TemplateRepository(modelContext: context)
+        let original = try repository.createTemplate(name: "Legacy", notes: "")
+        try repository.setCardioActivities(templateID: original.id, drafts: [
+            .fixture(role: .warmUp, sortOrder: 0, name: "Warm-up Walk"),
+            .fixture(role: .main, sortOrder: 0, name: "Outdoor Run"),
+            .fixture(role: .finisher, sortOrder: 0, name: "Finisher Bike"),
+        ])
+        let session = try WorkoutSessionRepository(modelContext: context, weeklyGoalWidgetPublisher: nil)
+            .createSessionFromTemplate(templateID: original.id)
+        let copy = try repository.createTemplate(fromSessionID: session.id, name: "New plan")
+        let plans = try repository.cardioActivities(templateID: copy.id)
+        XCTAssertEqual(plans.map(\.role), [.warmUp, .finisher])
+        XCTAssertEqual(plans.map(\.exerciseNameSnapshot), ["Warm-up Walk", "Finisher Bike"])
+        XCTAssertEqual(try repository.cardioActivities(templateID: original.id).map(\.role), [.warmUp, .main, .finisher])
+    }
+
     func testTemplateCreatesTwoOrderedMainCardioActivities() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -315,7 +334,7 @@ final class WorkoutCardioPersistenceTests: XCTestCase {
             id: sessionAddedID,
             sessionID: session.id,
             phase: .preWorkout,
-            role: .main,
+            role: .finisher,
             sortOrder: 1,
             catalogExerciseUUID: "seed-bike",
             exerciseNameSnapshot: "Bike",
@@ -349,8 +368,8 @@ final class WorkoutCardioPersistenceTests: XCTestCase {
         guard synced.count == 2 else {
             return
         }
-        XCTAssertEqual(synced.map(\.role), [.main, .main])
-        XCTAssertEqual(synced.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(synced.map(\.role), [.main, .finisher])
+        XCTAssertEqual(synced.map(\.sortOrder), [0, 0])
         XCTAssertEqual(synced[0].id, treadmill.id)
         XCTAssertNotEqual(synced[1].id, sessionAddedID)
         XCTAssertEqual(synced.map(\.trackingProfile), [.treadmill, .machineDistance])

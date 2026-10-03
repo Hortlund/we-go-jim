@@ -399,8 +399,11 @@ struct WGJApp: App {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date()
+        let seedPriorYear = ProcessInfo.processInfo.arguments.contains("UITEST_PROGRESS_PRIOR_YEAR")
         let completedDates = [
-            calendar.date(byAdding: .month, value: -8, to: now)!,
+            seedPriorYear
+                ? calendar.date(byAdding: .year, value: -1, to: now)!
+                : calendar.date(byAdding: .month, value: -8, to: now)!,
             calendar.date(byAdding: .month, value: -4, to: now)!,
             calendar.date(byAdding: .day, value: -7, to: now)!,
         ]

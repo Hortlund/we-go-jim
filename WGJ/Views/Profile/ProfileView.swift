@@ -135,6 +135,7 @@ struct ProfileView: View {
 
                     identityCard
                     highlightsCard
+                    TrainingJourneyEntryView(compact: true)
                     dashboardSection
                     appSection
                     cloudBackupSection(scrollProxy: scrollProxy)

@@ -82,7 +82,7 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         )
     }
 
-    func testDetectsOtherwiseIdenticalSecondMainActivityAsAdded() throws {
+    func testIgnoresNewMainActivityWhileKeepingExistingMainPlan() throws {
         let fixture = try makeMatchedFixture()
         let added = makeSessionActivity(
             session: fixture.session,
@@ -92,18 +92,12 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         fixture.context.insert(added)
         fixture.session.cardioBlocks = [fixture.sessionActivity, added]
 
-        let preview = try XCTUnwrap(
-            WorkoutTemplateSyncPreviewBuilder.buildPreview(
-                template: fixture.template,
-                session: fixture.session
-            )
-        )
-
-        XCTAssertEqual(preview.addedCardioBlocks.map(\.exerciseName), ["Treadmill Walk"])
-        XCTAssertEqual(preview.addedCardioBlocks.map(\.role), [.main])
+        XCTAssertNil(WorkoutTemplateSyncPreviewBuilder.buildPreview(template: fixture.template, session: fixture.session))
+        fixture.session.notes = "Updated notes"
+        let preview = try XCTUnwrap(WorkoutTemplateSyncPreviewBuilder.buildPreview(template: fixture.template, session: fixture.session))
+        XCTAssertTrue(preview.addedCardioBlocks.isEmpty)
         XCTAssertTrue(preview.removedCardioBlocks.isEmpty)
-        XCTAssertTrue(preview.editedCardioBlocks.isEmpty)
-        XCTAssertEqual(preview.mutation.cardioBlocks.count, 2)
+        XCTAssertEqual(preview.mutation.cardioBlocks.map(\.sourceTemplateCardioID), [fixture.templateActivity.id])
     }
 
     func testDetectsRemovingOneOfTwoSameRoleActivities() throws {
@@ -148,6 +142,8 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
             sourceTemplateCardioID: UUID(),
             sortOrder: 1
         )
+        firstAdded.role = .finisher
+        secondAdded.role = .finisher
         fixture.context.insert(firstAdded)
         fixture.context.insert(secondAdded)
         fixture.session.cardioBlocks = [firstAdded, secondAdded]

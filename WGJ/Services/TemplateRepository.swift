@@ -624,7 +624,8 @@ nonisolated final class TemplateRepository {
             )
         }
 
-        let cardioDrafts = try workoutSessionCardioBlocks(sessionID: sessionID).map { cardioBlock in
+        let cardioDrafts = try workoutSessionCardioBlocks(sessionID: sessionID)
+            .filter { TemplateCardioPlanningPolicy.includes($0.role) }.map { cardioBlock in
             TemplateCardioBlockDraft(
                 phase: cardioBlock.phase,
                 role: cardioBlock.role,

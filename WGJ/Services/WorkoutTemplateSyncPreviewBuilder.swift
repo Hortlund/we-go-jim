@@ -9,7 +9,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         let orderedTemplateExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let orderedSessionExercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let orderedTemplateCardioBlocks = orderedCardioBlocks(for: template)
-        let orderedSessionCardioBlocks = orderedCardioBlocks(for: session)
+        let allSessionCardioBlocks = orderedCardioBlocks(for: session)
         let editedWorkoutNotes = editedWorkoutNotesChange(
             templateNotes: template.notes,
             sessionNotes: session.notes
@@ -20,7 +20,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         )
         var matchedTemplateCardioIDs: Set<UUID> = []
         var matchedTemplateCardioBySessionID: [UUID: TemplateCardioBlock] = [:]
-        for sessionCardioBlock in orderedSessionCardioBlocks {
+        for sessionCardioBlock in allSessionCardioBlocks {
             guard let sourceTemplateCardioID = sessionCardioBlock.sourceTemplateCardioID,
                   let templateCardioBlock = templateCardioByID[sourceTemplateCardioID],
                   matchedTemplateCardioIDs.insert(sourceTemplateCardioID).inserted else {
@@ -28,7 +28,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             }
             matchedTemplateCardioBySessionID[sessionCardioBlock.id] = templateCardioBlock
         }
-        for sessionCardioBlock in orderedSessionCardioBlocks
+        for sessionCardioBlock in allSessionCardioBlocks
         where sessionCardioBlock.sourceTemplateCardioID == nil
             && matchedTemplateCardioBySessionID[sessionCardioBlock.id] == nil
         {
@@ -42,6 +42,13 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             matchedTemplateCardioIDs.insert(templateCardioBlock.id)
             matchedTemplateCardioBySessionID[sessionCardioBlock.id] = templateCardioBlock
         }
+        let orderedSessionCardioBlocks = allSessionCardioBlocks.filter {
+            TemplateCardioPlanningPolicy.includes($0.role,
+                preservingExistingMain: matchedTemplateCardioBySessionID[$0.id]?.role == .main)
+        }
+        matchedTemplateCardioIDs = Set(orderedSessionCardioBlocks.compactMap {
+            matchedTemplateCardioBySessionID[$0.id]?.id
+        })
         let templateExercisesByUUID = Dictionary(
             orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) },
             uniquingKeysWith: { first, _ in first }
