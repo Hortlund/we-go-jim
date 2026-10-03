@@ -167,6 +167,7 @@ struct WorkoutCardioSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let activityName: String
+    let allowedRoles: [WorkoutCardioRole]
     let onSave: (ValidatedWorkoutCardioSetup) -> Void
 
     @State private var draft: WorkoutCardioSetupDraft
@@ -175,9 +176,11 @@ struct WorkoutCardioSetupSheet: View {
     init(
         activityName: String,
         draft: WorkoutCardioSetupDraft,
+        allowedRoles: [WorkoutCardioRole] = WorkoutCardioRole.allCases,
         onSave: @escaping (ValidatedWorkoutCardioSetup) -> Void
     ) {
         self.activityName = activityName
+        self.allowedRoles = allowedRoles
         self.onSave = onSave
         self._draft = State(initialValue: draft)
     }
@@ -235,7 +238,7 @@ struct WorkoutCardioSetupSheet: View {
                     .foregroundStyle(WGJTheme.textSecondary)
 
                 Picker("Role", selection: $draft.role) {
-                    ForEach(WorkoutCardioRole.allCases) { role in
+                    ForEach(allowedRoles) { role in
                         Text(role.compactTitle).tag(role)
                     }
                 }

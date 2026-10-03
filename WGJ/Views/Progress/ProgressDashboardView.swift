@@ -29,9 +29,10 @@ struct ProgressDashboardView: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader(
                     "Progress",
-                    subtitle: "Compare two completed workouts and see what moved."
+                    subtitle: "See how far you've come, then explore what's changing."
                 )
 
+                TrainingJourneyEntryView()
                 content
             }
             .padding(.top, 8)

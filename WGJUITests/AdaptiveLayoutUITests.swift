@@ -2,6 +2,170 @@ import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
+    func testTemplateCardioPlanningOnlyOffersWarmupAndFinisher() {
+        let app = launchLocalApp()
+        let newTemplate = app.buttons["start-workout-new-template-button"]
+        XCTAssertTrue(newTemplate.waitForExistence(timeout: 8))
+        newTemplate.tap()
+        let warmup = app.buttons["template-editor-warmUp-add-button"]
+        XCTAssertTrue(warmup.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["template-editor-main-add-button"].exists)
+        XCTAssertFalse(app.staticTexts["Main Cardio"].exists)
+        let name = app.textFields["template-editor-name-field"]
+        name.tap()
+        name.typeText("Strength Plan")
+        warmup.tap()
+        let walk = app.buttons["cardio-quick-choice-seed-outdoor-walk"]
+        XCTAssertTrue(walk.waitForExistence(timeout: 8))
+        walk.tap()
+        let roles = app.segmentedControls["cardio-setup-role-picker"]
+        XCTAssertTrue(roles.waitForExistence(timeout: 8))
+        XCTAssertEqual(roles.buttons.count, 2)
+        XCTAssertTrue(roles.buttons["Warm-up"].exists)
+        XCTAssertTrue(roles.buttons["Finisher"].exists)
+        XCTAssertFalse(roles.buttons["Main"].exists)
+        roles.buttons["Finisher"].tap()
+        app.buttons["cardio-setup-save-button"].tap()
+        XCTAssertTrue(warmup.waitForExistence(timeout: 8))
+        let finisher = app.buttons["template-editor-finisher-add-button"]
+        for _ in 0..<3 where !finisher.isHittable { app.swipeUp() }
+        XCTAssertTrue(finisher.isHittable)
+        XCTAssertFalse(app.staticTexts["Main Cardio"].exists)
+        app.buttons["template-editor-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Strength Plan"].firstMatch.waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testYearInTrainingRecapPreviewsAndSharesAnImage() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE", "UITEST_PROGRESS_PRIOR_YEAR"])
+        app.buttons["Progress"].firstMatch.tap()
+        let journey = app.buttons["training-journey-entry"]
+        XCTAssertTrue(journey.waitForExistence(timeout: 8))
+        journey.tap()
+        let recap = app.buttons["training-year-recap-entry"]
+        for _ in 0..<3 where !recap.isHittable { app.swipeUp() }
+        XCTAssertTrue(recap.isHittable)
+        recap.tap()
+        XCTAssertTrue(app.images["training-year-recap-image"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["training-year-recap-picker"].isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "My Year in Training preview"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let previousDate = Calendar.current.date(byAdding: .year, value: -1, to: Date())!
+        let previousYear = previousDate.formatted(.dateTime.year())
+        app.buttons["training-year-recap-picker"].tap()
+        app.buttons[previousYear].firstMatch.tap()
+        let image = app.images["training-year-recap-image"]
+        XCTAssertTrue(image.waitForExistence(timeout: 8))
+        XCTAssertTrue(image.label.contains(previousYear))
+        XCTAssertTrue(app.staticTexts["Year in training"].exists)
+        let picker = app.buttons["training-year-recap-picker"]
+        let pickerFrame = picker.frame
+        app.scrollViews.firstMatch.swipeUp()
+        XCTAssertTrue(picker.isHittable)
+        XCTAssertEqual(picker.frame.minY, pickerFrame.minY, accuracy: 2)
+        app.scrollViews.firstMatch.swipeDown()
+        let previousYearAttachment = XCTAttachment(screenshot: app.screenshot())
+        previousYearAttachment.name = "Previous year recap"
+        previousYearAttachment.lifetime = .keepAlways
+        add(previousYearAttachment)
+        let share = app.buttons["training-year-recap-share"]
+        XCTAssertTrue(share.isEnabled)
+        share.tap()
+        XCTAssertTrue(app.cells["Copy"].firstMatch.waitForExistence(timeout: 8))
+        app.cells["Copy"].firstMatch.tap()
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["training-year-recap-entry"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testYearInTrainingRecapSupportsAccessibilityTextSize() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        app.buttons["Progress"].firstMatch.tap()
+        let journey = app.buttons["training-journey-entry"]
+        XCTAssertTrue(journey.waitForExistence(timeout: 8))
+        journey.tap()
+        let recap = app.buttons["training-year-recap-entry"]
+        for _ in 0..<5 where !recap.isHittable { app.swipeUp() }
+        XCTAssertTrue(recap.isHittable)
+        recap.tap()
+        XCTAssertTrue(app.images["training-year-recap-image"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["training-year-recap-share"].isHittable)
+        XCTAssertTrue(app.buttons["training-year-recap-share"].isEnabled)
+        app.buttons["Close"].firstMatch.tap()
+    }
+
+    @MainActor
+    func testTrainingJourneyEmptyHistoryAndProfileEntry() {
+        let app = launchLocalApp()
+        app.buttons["Progress"].firstMatch.tap()
+        let entry = app.buttons["training-journey-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8))
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["Your story starts here"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["training-year-recap-entry"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["Profile"].firstMatch.tap()
+        let profileEntry = app.buttons["training-journey-entry"]
+        for _ in 0..<4 where !profileEntry.isHittable { app.swipeUp() }
+        XCTAssertTrue(profileEntry.isHittable)
+        profileEntry.tap()
+        XCTAssertTrue(app.staticTexts["Your story starts here"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE"])
+        app.buttons["Progress"].firstMatch.tap()
+        let entry = app.buttons["training-journey-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8))
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
+        let fixtureDate = Calendar.current.date(byAdding: .month, value: -8, to: Date())!
+        let fixtureYear = Calendar.current.component(.year, from: fixtureDate)
+        if fixtureYear != Calendar.current.component(.year, from: Date()) {
+            app.buttons["journey-year-picker"].tap()
+            app.buttons[fixtureYear.formatted(.number.grouping(.never))].tap()
+        }
+        let fixtureMonth = Calendar.current.component(.month, from: fixtureDate)
+        let month = app.buttons["journey-month-\(fixtureMonth)"]
+        for _ in 0..<4 where !month.isHittable { app.swipeUp() }
+        XCTAssertTrue(month.isHittable)
+        month.tap()
+        let workout = app.buttons.containing(.staticText, identifier: "Progress Fixture 1").firstMatch
+        XCTAssertTrue(workout.waitForExistence(timeout: 8))
+        workout.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 8))
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["Close"].firstMatch.tap()
+
+        let strength = app.buttons["journey-milestone-strength"].firstMatch
+        for _ in 0..<6 where !strength.isHittable { app.swipeUp() }
+        XCTAssertTrue(strength.isHittable)
+        strength.tap()
+        XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testTrainingJourneySupportsAccessibilityTextSize() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        app.buttons["Progress"].firstMatch.tap()
+        let entry = app.buttons["training-journey-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8))
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
+        let month = app.buttons["journey-month-2"]
+        for _ in 0..<5 where !month.isHittable { app.swipeUp() }
+        XCTAssertTrue(month.isHittable)
+        month.tap()
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testBackgroundRestNotificationAppearsNearTheTimerDeadline() {
         verifyBackgroundRestNotificationTiming(liveActivitiesEnabled: false)
     }
@@ -283,6 +447,11 @@ final class AdaptiveLayoutUITests: XCTestCase {
         app.buttons["Share Workout"].firstMatch.tap()
         XCTAssertTrue(app.otherElements["workout-share-cardio-story"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.images["workout-share-cardio-route"].waitForExistence(timeout: 8))
+        let route = app.images["workout-share-cardio-route"]
+        let routeY = route.frame.minY
+        app.scrollViews.firstMatch.swipeUp()
+        XCTAssertLessThan(route.frame.minY, routeY)
+        XCTAssertTrue(app.buttons["workout-share-preview-share-button"].isHittable)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Outdoor cardio story with recorded route"
         screenshot.lifetime = .keepAlways

@@ -247,18 +247,10 @@ private struct WorkoutShareSheetItem: Identifiable {
 
 @MainActor
 enum WorkoutShareCardRenderer {
-    static let canvasSize = CGSize(width: 360, height: 640)
+    static let canvasSize = TrainingShareImageRenderer.canvasSize
 
     static func render(_ presentation: WorkoutSharePresentation, routeImage: UIImage? = nil) -> UIImage? {
-        let renderer = ImageRenderer(
-            content: WorkoutShareCard(presentation: presentation, routeImage: routeImage)
-                .frame(width: canvasSize.width, height: canvasSize.height)
-                .environment(\.colorScheme, .dark)
-                .environment(\.dynamicTypeSize, .medium)
-        )
-        renderer.scale = 3
-        renderer.isOpaque = true
-        return renderer.uiImage
+        TrainingShareImageRenderer.render(WorkoutShareCard(presentation: presentation, routeImage: routeImage))
     }
 }
 
@@ -374,13 +366,11 @@ struct WorkoutShareCard: View {
                 }
             }
             Spacer(minLength: 8)
-            HStack {
-                Label("ACTIVITY COMPLETE", systemImage: "checkmark.circle.fill")
-                Spacer()
-                if cardio.otherActivityCount > 0 { Text("+ \(cardio.otherActivityCount) more activities") }
+            if cardio.otherActivityCount > 0 {
+                Text("+ \(cardio.otherActivityCount) more activities")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
             }
-            .font(.system(size: 8, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.5))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workout-share-cardio-story")
@@ -610,12 +600,11 @@ struct WorkoutSharePreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
+            ScrollView {
                 GeometryReader { geometry in
                     WorkoutShareCard(presentation: presentation, routeImage: routeImage)
                         .frame(width: WorkoutShareCardRenderer.canvasSize.width, height: WorkoutShareCardRenderer.canvasSize.height)
+                        .environment(\.dynamicTypeSize, .medium)
                         .scaleEffect(geometry.size.width / WorkoutShareCardRenderer.canvasSize.width, anchor: .topLeading)
                 }
                     .aspectRatio(9.0 / 16.0, contentMode: .fit)
@@ -624,10 +613,12 @@ struct WorkoutSharePreviewSheet: View {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .stroke(Color.white.opacity(0.12), lineWidth: 1)
                     )
-                    .shadow(color: .black.opacity(0.45), radius: 22, y: 12)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 18)
+                    .padding(20)
+                    .frame(maxWidth: 540)
+                    .frame(maxWidth: .infinity)
             }
+            .wgjScreenBackground()
+            .wgjNavigationChrome()
             .navigationTitle("Workout Story")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

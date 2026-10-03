@@ -68,7 +68,7 @@ struct TemplateEditorView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     templateMetaCard
                     cardioSection(for: .warmUp)
-                    cardioSection(for: .main)
+                    if !cardioDrafts(for: .main).isEmpty { cardioSection(for: .main) }
                     exercisesSection
                     cardioSection(for: .finisher)
                 }
@@ -118,7 +118,8 @@ struct TemplateEditorView: View {
             .sheet(item: $cardioSetupRequest) { request in
                 WorkoutCardioSetupSheet(
                     activityName: request.selection.displayName,
-                    draft: request.setupDraft
+                    draft: request.setupDraft,
+                    allowedRoles: TemplateCardioPlanningPolicy.setupRoles(for: request.setupDraft.role)
                 ) { validatedSetup in
                     applyCardioSetup(request: request, validatedSetup: validatedSetup)
                 }
@@ -180,14 +181,16 @@ struct TemplateEditorView: View {
                 role.title,
                 subtitle: cardioSectionSubtitle(for: role)
             ) {
-                Button {
-                    cardioPickerRequest = TemplateCardioPickerRequest(role: role)
-                } label: {
-                    Label("Add", systemImage: "plus")
+                if TemplateCardioPlanningPolicy.roles.contains(role) {
+                    Button {
+                        cardioPickerRequest = TemplateCardioPickerRequest(role: role)
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJCompactGhostButtonStyle())
+                    .accessibilityLabel("Add \(role.title)")
+                    .accessibilityIdentifier("template-editor-\(role.rawValue)-add-button")
                 }
-                .buttonStyle(WGJCompactGhostButtonStyle())
-                .accessibilityLabel("Add \(role.title)")
-                .accessibilityIdentifier("template-editor-\(role.rawValue)-add-button")
             }
 
             if roleDrafts.isEmpty {
@@ -832,7 +835,7 @@ struct TemplateEditorView: View {
         case .warmUp:
             return String(localized: "Activities to prepare for the main work.")
         case .main:
-            return String(localized: "Primary cardio for cardio-only or cardio-focused workouts.")
+            return String(localized: "Saved cardio plan. Edit or remove it here.")
         case .finisher:
             return String(localized: "Activities to close out the workout.")
         }

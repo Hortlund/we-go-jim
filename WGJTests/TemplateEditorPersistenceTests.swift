@@ -71,7 +71,7 @@ final class TemplateEditorPersistenceTests: XCTestCase {
             cardioDrafts: [
                 TemplateCardioBlockDraft(
                     phase: .preWorkout,
-                    role: .main,
+                    role: .finisher,
                     sortOrder: 0,
                     catalogExerciseUUID: "seed-treadmill-walk",
                     exerciseNameSnapshot: "Treadmill Walk",
@@ -85,7 +85,7 @@ final class TemplateEditorPersistenceTests: XCTestCase {
                 ),
                 TemplateCardioBlockDraft(
                     phase: .preWorkout,
-                    role: .main,
+                    role: .finisher,
                     sortOrder: 1,
                     catalogExerciseUUID: "seed-bike",
                     exerciseNameSnapshot: "Bike",
@@ -106,7 +106,7 @@ final class TemplateEditorPersistenceTests: XCTestCase {
             .sorted { $0.sortOrder < $1.sortOrder }
         XCTAssertEqual(activities.map(\.id), request.cardioDrafts.map(\.id))
         XCTAssertEqual(activities.map(\.exerciseNameSnapshot), ["Treadmill Walk", "Bike"])
-        XCTAssertEqual(activities.map(\.role), [.main, .main])
+        XCTAssertEqual(activities.map(\.role), [.finisher, .finisher])
         XCTAssertEqual(activities.map(\.sortOrder), [0, 1])
     }
 
@@ -116,42 +116,53 @@ final class TemplateEditorPersistenceTests: XCTestCase {
         context.autosaveEnabled = false
         let initialMainID = UUID()
         let removedWarmUpID = UUID()
-        let created = try XCTUnwrap(savedTemplate(from: try TemplateEditorPersistence.save(
-            TemplateEditorSaveRequest(
-                folderID: nil,
-                templateID: nil,
-                name: "Cardio",
-                notes: "",
-                exerciseDrafts: [],
-                cardioDrafts: [
-                    cardioDraft(id: removedWarmUpID, role: .warmUp, sortOrder: 0, name: "Walk"),
-                    cardioDraft(id: initialMainID, role: .main, sortOrder: 0, name: "Run"),
-                ]
-            ),
-            modelContext: context
-        )))
-        let addedMainID = UUID()
+        // Represents a template saved before main cardio was retired from planning.
+        let repository = TemplateRepository(modelContext: context)
+        let created = try repository.createTemplate(name: "Cardio", notes: "")
+        try repository.setCardioActivities(templateID: created.id, drafts: [
+            cardioDraft(id: removedWarmUpID, role: .warmUp, sortOrder: 0, name: "Walk"),
+            cardioDraft(id: initialMainID, role: .main, sortOrder: 0, name: "Run"),
+        ])
+        let addedFinisherID = UUID()
+        let rejectedMainID = UUID()
 
         _ = try TemplateEditorPersistence.save(
             TemplateEditorSaveRequest(
                 folderID: nil,
-                templateID: created.templateID,
+                templateID: created.id,
                 name: "Cardio",
                 notes: "",
                 exerciseDrafts: [],
                 cardioDrafts: [
-                    cardioDraft(id: addedMainID, role: .main, sortOrder: 0, name: "Bike"),
+                    cardioDraft(id: addedFinisherID, role: .finisher, sortOrder: 0, name: "Bike"),
                     cardioDraft(id: initialMainID, role: .main, sortOrder: 1, name: "Run"),
+                    cardioDraft(id: rejectedMainID, role: .main, sortOrder: 2, name: "Unplanned Run"),
                 ]
             ),
             modelContext: context
         )
 
         let activities = try TemplateRepository(modelContext: context)
-            .cardioActivities(templateID: created.templateID)
-        XCTAssertEqual(activities.map(\.id), [addedMainID, initialMainID])
-        XCTAssertEqual(activities.map(\.sortOrder), [0, 1])
+            .cardioActivities(templateID: created.id)
+        XCTAssertEqual(activities.map(\.id), [initialMainID, addedFinisherID])
+        XCTAssertEqual(activities.map(\.role), [.main, .finisher])
+        XCTAssertEqual(activities.map(\.sortOrder), [0, 0])
         XCTAssertFalse(activities.contains(where: { $0.id == removedWarmUpID }))
+    }
+
+    func testNewTemplateOmitsMainCardioAndKeepsWarmupAndFinisher() throws {
+        let context = ModelContext(try makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let result = try TemplateEditorPersistence.save(.init(folderID: nil, templateID: nil,
+            name: "Strength", notes: "", exerciseDrafts: [], cardioDrafts: [
+                cardioDraft(id: UUID(), role: .warmUp, sortOrder: 0, name: "Walk"),
+                cardioDraft(id: UUID(), role: .main, sortOrder: 0, name: "Run"),
+                cardioDraft(id: UUID(), role: .finisher, sortOrder: 0, name: "Bike"),
+            ]), modelContext: context)
+        let saved = try XCTUnwrap(savedTemplate(from: result))
+        let activities = try TemplateRepository(modelContext: context).cardioActivities(templateID: saved.templateID)
+        XCTAssertEqual(activities.map(\.role), [.warmUp, .finisher])
+        XCTAssertEqual(activities.map(\.exerciseNameSnapshot), ["Walk", "Bike"])
     }
 
     func testCardioDraftReducerAppendsAtEndOfRoleAndNormalizesEveryRole() {

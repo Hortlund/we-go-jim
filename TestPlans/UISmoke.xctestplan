@@ -22,6 +22,7 @@
       },
       "parallelizable": false,
       "selectedTests": [
+        "AdaptiveLayoutUITests/testTemplateCardioPlanningOnlyOffersWarmupAndFinisher",
         "AdaptiveLayoutUITests/testBackgroundRestNotificationAppearsNearTheTimerDeadline",
         "AdaptiveLayoutUITests/testBackgroundRestNotificationAppearsNearTheDeadlineWithLiveActivity",
         "AdaptiveLayoutUITests/testLiveActivitiesSettingDefaultsOffAndCanBeEnabled",
@@ -42,7 +43,12 @@
         "AdaptiveLayoutUITests/testHistoryMainCardioSummaryOpensDetailWithoutHanging",
         "AdaptiveLayoutUITests/testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn",
         "AdaptiveLayoutUITests/testTemplateLibraryScrollsToOffscreenRowsAndBack",
-        "DeepLinkAccessibilityUITests"
+        "DeepLinkAccessibilityUITests",
+        "AdaptiveLayoutUITests/testTrainingJourneyEmptyHistoryAndProfileEntry",
+        "AdaptiveLayoutUITests/testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts",
+        "AdaptiveLayoutUITests/testTrainingJourneySupportsAccessibilityTextSize",
+        "AdaptiveLayoutUITests/testYearInTrainingRecapPreviewsAndSharesAnImage",
+        "AdaptiveLayoutUITests/testYearInTrainingRecapSupportsAccessibilityTextSize"
       ]
     }
   ],

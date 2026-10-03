@@ -87,12 +87,14 @@ nonisolated enum TemplateEditorPersistence {
         let savedTemplateID: UUID
 
         if let templateID = request.templateID {
+            let existingMainIDs = Set(try repository.cardioActivities(templateID: templateID)
+                .filter { $0.role == .main }.map(\.id))
             try repository.updateTemplateContents(
                 id: templateID,
                 name: request.name,
                 notes: request.notes,
                 exerciseDrafts: request.exerciseDrafts,
-                cardioDrafts: request.cardioDrafts
+                cardioDrafts: TemplateCardioPlanningPolicy.drafts(request.cardioDrafts, preservingMainIDs: existingMainIDs)
             )
             savedTemplateID = templateID
         } else {
@@ -102,7 +104,8 @@ nonisolated enum TemplateEditorPersistence {
                 notes: request.notes
             )
             try repository.setExercises(templateID: created.id, drafts: request.exerciseDrafts)
-            try repository.setCardioActivities(templateID: created.id, drafts: request.cardioDrafts)
+            try repository.setCardioActivities(templateID: created.id,
+                drafts: TemplateCardioPlanningPolicy.drafts(request.cardioDrafts))
             savedTemplateID = created.id
         }
 
