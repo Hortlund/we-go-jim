@@ -2,6 +2,409 @@ import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
+    func testBackgroundRestNotificationAppearsNearTheTimerDeadline() {
+        verifyBackgroundRestNotificationTiming(liveActivitiesEnabled: false)
+    }
+
+    @MainActor
+    func testBackgroundRestNotificationAppearsNearTheDeadlineWithLiveActivity() {
+        verifyBackgroundRestNotificationTiming(liveActivitiesEnabled: true)
+    }
+
+    @MainActor
+    private func verifyBackgroundRestNotificationTiming(liveActivitiesEnabled: Bool) {
+        let arguments = ["UITEST_ALLOW_NOTIFICATIONS"]
+            + (liveActivitiesEnabled ? ["UITEST_ENABLE_LIVE_ACTIVITIES"] : [])
+        let app = launchLocalApp(additionalArguments: arguments)
+        app.buttons["start-workout-empty-button"].tap()
+        let add = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(add.waitForExistence(timeout: 8))
+        add.tap()
+        let select = app.buttons["Select Barbell Bench Press"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !select.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        select.tap()
+        let expand = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-expand-button")).firstMatch
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        expand.tap()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
+            "active-workout-exercise-", "-actions-button")).firstMatch.tap()
+        app.buttons["Exercise Settings"].firstMatch.tap()
+        let rest = app.buttons["active-workout-settings-rest-button"]
+        XCTAssertTrue(rest.waitForExistence(timeout: 5))
+        rest.tap()
+        app.buttons["0:30"].firstMatch.tap()
+        app.buttons["Save"].tap()
+        let complete = app.buttons["workout-set-1-completion-button"]
+        for _ in 0..<5 {
+            if complete.isHittable && complete.frame.maxY < app.frame.maxY - 160 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        app.textFields["workout-set-1-weight-field"].tap()
+        app.textFields["workout-set-1-weight-field"].typeText("50")
+        app.textFields["workout-set-1-reps-field"].tap()
+        app.textFields["workout-set-1-reps-field"].typeText("8")
+        let startedAt = Date.now
+        complete.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.buttons["Allow"].firstMatch
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
+        XCTAssertTrue(app.descendants(matching: .any)["active-workout-rest-timer"].firstMatch.waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        if liveActivitiesEnabled {
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.01))
+                .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.85)))
+            let liveActivityAllow = springboard.buttons.matching(NSPredicate(format: "label == 'Allow' OR label == 'Always Allow'")).firstMatch
+            if liveActivityAllow.waitForExistence(timeout: 2) { liveActivityAllow.tap() }
+            XCTAssertTrue(springboard.staticTexts["Empty Workout"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(springboard.staticTexts["Next set"].firstMatch.exists)
+            // Observe the notification banner on the Home Screen in both runs.
+            XCUIDevice.shared.press(.home)
+        }
+        let notification = springboard.staticTexts["Rest complete"].firstMatch
+        XCTAssertTrue(notification.waitForExistence(timeout: 36), springboard.debugDescription)
+        let elapsed = Date.now.timeIntervalSince(startedAt)
+        let measurement = XCTAttachment(string: "Background notification visible \(elapsed) seconds after starting a 30-second rest. Live Activities enabled: \(liveActivitiesEnabled).")
+        measurement.lifetime = .keepAlways
+        self.add(measurement)
+        XCTAssertGreaterThanOrEqual(elapsed, 29)
+        XCTAssertLessThan(elapsed, 34, "The rest notification appeared noticeably after the deadline.")
+        let screenshot = XCTAttachment(screenshot: springboard.screenshot())
+        screenshot.name = "System rest notification at its deadline"
+        screenshot.lifetime = .keepAlways
+        self.add(screenshot)
+        app.activate()
+    }
+
+    @MainActor
+    func testLiveActivitiesSettingDefaultsOffAndCanBeEnabled() {
+        let app = launchLocalApp()
+        app.buttons["Profile"].firstMatch.tap()
+        let settings = app.buttons["profile-settings-tile"]
+        for _ in 0..<12 where !settings.isHittable { app.swipeUp() }
+        XCTAssertTrue(settings.isHittable)
+        settings.tap()
+        let toggle = app.switches["settings-live-activities-toggle"]
+        for _ in 0..<12 {
+            if toggle.isHittable && toggle.frame.maxY < app.frame.maxY - 160 { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(toggle.isHittable)
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+    }
+
+    @MainActor
+    func testStrengthLiveActivityKeepsWorkoutSummaryDuringRest() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_ENABLE_LIVE_ACTIVITIES"])
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        let addExercise = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExercise.waitForExistence(timeout: 8))
+        addExercise.tap()
+        let select = app.buttons["Select Barbell Bench Press"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !select.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        select.tap()
+        let expand = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-expand-button")).firstMatch
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        expand.tap()
+        let actions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "active-workout-exercise-", "-actions-button")).firstMatch
+        actions.tap()
+        app.buttons["Exercise Settings"].firstMatch.tap()
+        let restMenu = app.buttons["active-workout-settings-rest-button"]
+        XCTAssertTrue(restMenu.waitForExistence(timeout: 5))
+        restMenu.tap()
+        app.buttons["0:30"].firstMatch.tap()
+        app.buttons["Save"].tap()
+        let complete = app.buttons["workout-set-1-completion-button"]
+        for _ in 0..<5 {
+            if complete.isHittable && complete.frame.maxY < app.frame.maxY - 160 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        let weight = app.textFields["workout-set-1-weight-field"]
+        weight.tap()
+        weight.typeText("50")
+        let reps = app.textFields["workout-set-1-reps-field"]
+        reps.tap()
+        reps.typeText("8")
+        complete.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["active-workout-rest-timer"].firstMatch.waitForExistence(timeout: 5))
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.01))
+            .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.85)))
+        let allow = springboard.buttons.matching(NSPredicate(format: "label == 'Allow' OR label == 'Always Allow'")).firstMatch
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
+        XCTAssertTrue(springboard.staticTexts["Empty Workout"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(springboard.staticTexts["1/3 sets"].firstMatch.exists)
+        XCTAssertTrue(springboard.staticTexts["Next set"].firstMatch.exists)
+        XCTAssertTrue(springboard.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "0:[0-9]{2}")).firstMatch.waitForExistence(timeout: 5), springboard.debugDescription)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 2))
+        XCTAssertTrue(springboard.staticTexts["Empty Workout"].firstMatch.exists)
+        XCTAssertTrue(springboard.staticTexts["Workout in progress"].firstMatch.exists)
+        XCTAssertFalse(springboard.staticTexts["Open WGJ for the latest distance"].exists)
+        let screenshot = XCTAttachment(screenshot: springboard.screenshot())
+        screenshot.name = "WGJ Live Activity with in-app rest running"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        // WGJ stays asleep across the deadline. Native timer text clamps to
+        // zero; "now" needs a system layout refresh, which iOS may defer.
+        let due = springboard.staticTexts.matching(NSPredicate(format: "label == 'now' OR label == '0:00'")).firstMatch
+        XCTAssertTrue(due.waitForExistence(timeout: 40), springboard.debugDescription)
+        XCTAssertFalse(springboard.staticTexts.matching(NSPredicate(format: "label CONTAINS 'ago'")).firstMatch.exists)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 2))
+        let finishedRest = XCTAttachment(screenshot: springboard.screenshot())
+        finishedRest.name = "WGJ Live Activity after rest deadline while suspended"
+        finishedRest.lifetime = .keepAlways
+        add(finishedRest)
+        app.activate()
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 8))
+        XCUIDevice.shared.press(.home)
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.01))
+            .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.85)))
+        XCTAssertTrue(springboard.staticTexts["Empty Workout"].firstMatch.waitForExistence(timeout: 8))
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !springboard.staticTexts["Next set"].exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [cleared], timeout: 8), .completed)
+    }
+
+    @MainActor
+    func testCardioLiveActivityOpensTheActiveSessionFromNotificationCenter() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_ENABLE_LIVE_ACTIVITIES"])
+        app.buttons["start-workout-cardio-button"].tap()
+        let walk = app.buttons["cardio-quick-choice-seed-treadmill-walk"]
+        XCTAssertTrue(walk.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !walk.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        walk.tap()
+        let start = app.buttons["cardio-recording-primary-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["Add a completed activity"].exists)
+        start.tap()
+        XCTAssertTrue(app.buttons["cardio-recording-finish-button"].waitForExistence(timeout: 5))
+        app.buttons["cardio-recording-minimize-button"].tap()
+        openLiveActivityFromNotificationCenter(title: "Treadmill Walk", app: app)
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["active-workout-finish-button"].exists)
+        app.buttons["cardio-recording-options-button"].tap()
+        app.buttons["Cancel Workout"].firstMatch.tap()
+        app.alerts["Cancel workout?"].buttons["Cancel Workout"].tap()
+        XCTAssertTrue(app.buttons["start-workout-cardio-button"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testStrengthLiveActivityOpensTheActiveWorkoutFromNotificationCenter() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_ENABLE_LIVE_ACTIVITIES"])
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 8))
+        openLiveActivityFromNotificationCenter(title: "Empty Workout", app: app)
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    private func openLiveActivityFromNotificationCenter(title: String, app: XCUIApplication) {
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.01))
+            .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.85)))
+        let activity = springboard.staticTexts[title].firstMatch
+        XCTAssertTrue(activity.waitForExistence(timeout: 8), springboard.debugDescription)
+        // First use can include the system's per-app Live Activity prompt.
+        let allow = springboard.buttons.matching(NSPredicate(format: "label == 'Allow' OR label == 'Always Allow'")).firstMatch
+        if allow.exists {
+            allow.tap()
+            XCTAssertTrue(activity.waitForExistence(timeout: 5))
+        }
+        let screenshot = XCTAttachment(screenshot: springboard.screenshot())
+        screenshot.name = "Lock Screen Live Activity - \(title)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        activity.tap()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+    }
+
+    @MainActor
+    func testPreviousPerformanceHydrationPreservesUnsubmittedSessionNameAndNotes() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"],
+            environment: ["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS": "15000"])
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        let add = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(add.waitForExistence(timeout: 8))
+        add.tap()
+        let select = app.buttons.matching(NSPredicate(format: "label == %@", "Select Barbell Bench Press")).firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !select.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        select.tap()
+        let expand = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-expand-button")).firstMatch
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        for _ in 0..<5 where !expand.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        expand.tap()
+        let name = app.textFields["active-workout-name-field"]
+        for _ in 0..<5 where !name.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        XCTAssertTrue(name.isHittable)
+        name.tap()
+        name.typeText(" draft")
+        let expectedName = name.value as? String
+        let notes = app.descendants(matching: .any).matching(identifier: "active-workout-notes-field").firstMatch
+        XCTAssertTrue(notes.exists)
+        notes.tap()
+        notes.typeText("Keep these notes")
+        let expectedNotes = notes.value as? String
+        // Wait for actual history values: this completes the metadata-only
+        // coordinator revision that used to overwrite both header drafts.
+        // Set zero is a warmup; the fixture's history contains working sets.
+        XCTAssertTrue(app.buttons["workout-set-1-use-last-button"].waitForExistence(timeout: 25))
+        XCTAssertEqual(name.value as? String, expectedName)
+        XCTAssertTrue(expectedName?.contains("draft") == true)
+        XCTAssertEqual(notes.value as? String, expectedNotes)
+        XCTAssertTrue(expectedNotes?.contains("Keep these notes") == true)
+    }
+
+    @MainActor
+    func testCardioRouteStoryLoadsFromHistoryAndSharesAnImage() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_HISTORY_CARDIO_ROUTE"])
+        app.buttons["History"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["history-session-card"].firstMatch.waitForExistence(timeout: 8))
+        app.buttons["Workout Actions"].firstMatch.tap()
+        app.buttons["Share Workout"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["workout-share-cardio-story"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.images["workout-share-cardio-route"].waitForExistence(timeout: 8))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Outdoor cardio story with recorded route"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["workout-share-preview-share-button"].tap()
+        XCTAssertTrue(app.cells["Copy"].firstMatch.waitForExistence(timeout: 8))
+        app.cells["Copy"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["workout-share-preview-share-button"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testStandaloneCardioOptionsOnlyOfferCancelAndCanKeepRecording() {
+        let app = launchLocalApp()
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        let addCardio = app.buttons["active-workout-add-cardio-button"]
+        XCTAssertTrue(addCardio.waitForExistence(timeout: 8))
+        addCardio.tap()
+        let walk = app.buttons["cardio-quick-choice-seed-treadmill-walk"]
+        XCTAssertTrue(walk.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !walk.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        walk.tap()
+        let options = app.buttons["cardio-recording-options-button"]
+        XCTAssertTrue(options.waitForExistence(timeout: 8))
+        options.tap()
+        XCTAssertFalse(app.buttons["Add Exercise"].exists)
+        app.buttons["Cancel Workout"].firstMatch.tap()
+        let cancelAlert = app.alerts["Cancel workout?"]
+        XCTAssertTrue(cancelAlert.waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Centered cardio discard alert"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        cancelAlert.buttons["Keep Recording"].tap()
+        XCTAssertTrue(app.buttons["cardio-recording-primary-button"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["active-workout-finish-button"].exists)
+    }
+
+    @MainActor
+    func testStandaloneCardioMinimizesAndResumesDirectlyInActivityScreen() {
+        let app = launchLocalApp()
+        let cardio = app.buttons["start-workout-cardio-button"]
+        XCTAssertTrue(cardio.waitForExistence(timeout: 8))
+        let quickStartScreenshot = XCTAttachment(screenshot: app.screenshot())
+        quickStartScreenshot.name = "Matching workout and cardio quick start"
+        quickStartScreenshot.lifetime = .keepAlways
+        add(quickStartScreenshot)
+        cardio.tap()
+        let walk = app.buttons["cardio-quick-choice-seed-outdoor-walk"]
+        XCTAssertTrue(walk.waitForExistence(timeout: 5))
+        walk.tap()
+        let primary = app.buttons["cardio-recording-primary-button"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["active-workout-finish-button"].exists)
+        XCTAssertFalse(app.buttons["active-workout-empty-add-exercise-button"].exists)
+        XCTAssertFalse(app.buttons["Add a completed activity"].exists)
+        let activityScreenshot = XCTAttachment(screenshot: app.screenshot())
+        activityScreenshot.name = "Standalone outdoor activity screen"
+        activityScreenshot.lifetime = .keepAlways
+        add(activityScreenshot)
+        app.buttons["cardio-recording-minimize-button"].tap()
+        let resume = app.buttons["active-workout-strip"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 8))
+        resume.tap()
+        XCTAssertTrue(primary.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["active-workout-finish-button"].exists)
+        app.buttons["cardio-recording-options-button"].tap()
+        app.buttons["Cancel Workout"].firstMatch.tap()
+        let cancel = app.alerts["Cancel workout?"].buttons["Cancel Workout"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 4))
+        cancel.tap()
+        XCTAssertTrue(cardio.waitForExistence(timeout: 8))
+        XCTAssertFalse(primary.exists)
+    }
+
+    @MainActor
+    func testStandaloneIndoorCardioFinishesThroughDistanceEntryAndWorkoutSummary() {
+        let app = launchLocalApp()
+        let cardio = app.buttons["start-workout-cardio-button"]
+        XCTAssertTrue(cardio.waitForExistence(timeout: 8))
+        cardio.tap()
+        let walk = app.buttons["cardio-quick-choice-seed-treadmill-walk"]
+        XCTAssertTrue(walk.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !walk.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        walk.tap()
+        let primary = app.buttons["cardio-recording-primary-button"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 8))
+        primary.tap()
+        let finish = app.buttons["cardio-recording-finish-button"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 5))
+        finish.tap()
+        let confirmFinish = app.buttons["cardio-recording-confirm-finish-button"].firstMatch
+        XCTAssertTrue(confirmFinish.waitForExistence(timeout: 4))
+        let finishScreenshot = XCTAttachment(screenshot: app.screenshot())
+        finishScreenshot.name = "Cardio finish confirmation anchored to its button"
+        finishScreenshot.lifetime = .keepAlways
+        add(finishScreenshot)
+        confirmFinish.tap()
+        let distance = app.textFields["cardio-result-distance-field"]
+        XCTAssertTrue(distance.waitForExistence(timeout: 8))
+        distance.tap()
+        distance.typeText("0.25")
+        app.buttons["cardio-result-save-button"].tap()
+        XCTAssertTrue(app.otherElements["workout-completion-summary"].waitForExistence(timeout: 10))
+        XCTAssertFalse(primary.exists)
+        app.buttons["Share"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["workout-share-cardio-story"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.images["workout-share-cardio-route"].exists)
+        let storyScreenshot = XCTAttachment(screenshot: app.screenshot())
+        storyScreenshot.name = "Indoor cardio story"
+        storyScreenshot.lifetime = .keepAlways
+        add(storyScreenshot)
+        let share = app.buttons["workout-share-preview-share-button"]
+        XCTAssertTrue(share.isEnabled)
+        share.tap()
+        XCTAssertTrue(app.cells["Copy"].firstMatch.waitForExistence(timeout: 8))
+        app.buttons["header.closeButton"].tap()
+        XCTAssertTrue(share.waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testGymLogoSecretUnlocksOptionalModeAndPersists() {
         let app = launchLocalApp(additionalArguments: ["UITEST_RESET_GYM_EASTER_EGGS"])
         func openSettings() {

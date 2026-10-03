@@ -50,6 +50,15 @@ struct PrivacyOverviewView: View {
                 )
 
                 privacyCard(
+                    title: "Outdoor routes",
+                    lines: [
+                        "Location is used only while recording an outdoor walk or run, including with your screen locked. Pausing or finishing stops GPS recording.",
+                        "Live routes are saved on this device. Completed routes are included in WGJ’s private iCloud backup and restored with your workouts. Route coordinates are not exported to Apple Health.",
+                        "Apple Maps displays your route. Deleting a workout or deleting WGJ data also removes its locally recorded route.",
+                    ]
+                )
+
+                privacyCard(
                     title: "Apple Health",
                     lines: [
                         "Apple Health export is optional. When enabled, WGJ saves newly completed workouts and, with a separate opt-in, available estimated active calories.",

@@ -40,7 +40,7 @@ nonisolated struct UserNotificationRequestDescriptor: Equatable, Sendable {
     let body: String
     let usesDefaultSound: Bool
     let interruptionLevel: UNNotificationInterruptionLevel
-    let timeInterval: TimeInterval
+    let fireDate: Date
 }
 
 nonisolated enum RestTimerInterruptionPolicy {

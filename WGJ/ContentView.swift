@@ -76,6 +76,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                activeWorkoutCoordinator.refreshLiveActivity()
                 AppleHealthExportService.shared.resumePending()
                 BoundaryCloudBackupScheduler.resumeOperations(container: modelContext.container)
                 restTimerState.handleRestTimerExpirationIfNeeded()
@@ -246,10 +247,22 @@ struct ContentView: View {
     }
 
     private func routePendingDeepLinkIfNeeded() {
-        guard appPhase == .main,
-              case .profile = appRouteState.pendingRequest?.route
-        else { return }
-        appTabState.selectedTab = .profile
+        guard appPhase == .main, let request = appRouteState.pendingRequest else { return }
+        switch request.route {
+        case .profile:
+            appTabState.selectedTab = .profile
+        case .activeWorkout(let sessionID):
+            Task { @MainActor in
+                await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+                    coordinator: activeWorkoutCoordinator, modelContext: modelContext, backgroundStore: rootBackgroundStore
+                )
+                guard appRouteState.pendingRequest?.id == request.id else { return }
+                if activeWorkoutCoordinator.storedSnapshot?.session.id == sessionID {
+                    activeWorkoutPresentationState.present(sessionID: sessionID)
+                }
+                appRouteState.consume(id: request.id)
+            }
+        }
     }
 
     private func handleInitialUITestURLIfNeeded() {

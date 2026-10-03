@@ -1,5 +1,13 @@
 import UserNotifications
 
+nonisolated enum UserNotificationTiming {
+    static func trigger(fireDate: Date, at date: Date = .now) -> UNTimeIntervalNotificationTrigger? {
+        let remaining = fireDate.timeIntervalSince(date)
+        guard remaining > 0 else { return nil }
+        return UNTimeIntervalNotificationTrigger(timeInterval: remaining, repeats: false)
+    }
+}
+
 nonisolated protocol UserNotificationCenterClient: Sendable {
     func settings() async -> NotificationPermissionSnapshot
     func requestAlertAuthorization() async -> Bool
@@ -22,7 +30,12 @@ actor SystemUserNotificationCenterClient: UserNotificationCenterClient {
     }
 
     func requestAlertAuthorization() async -> Bool {
+#if DEBUG
+        guard !AppRuntimeConfig.isRunningTests
+            || ProcessInfo.processInfo.arguments.contains("UITEST_ALLOW_NOTIFICATIONS") else { return false }
+#else
         guard !AppRuntimeConfig.isRunningTests else { return false }
+#endif
         return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
     }
 
@@ -33,10 +46,9 @@ actor SystemUserNotificationCenterClient: UserNotificationCenterClient {
         content.body = descriptor.body
         content.sound = descriptor.usesDefaultSound ? .default : nil
         content.interruptionLevel = descriptor.interruptionLevel
-        let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: max(1, descriptor.timeInterval),
-            repeats: false
-        )
+        // Account for permission/cleanup/queue time instead of starting the
+        // original rest duration again when the request reaches the system.
+        let trigger = UserNotificationTiming.trigger(fireDate: descriptor.fireDate)
         let request = UNNotificationRequest(
             identifier: descriptor.identifier,
             content: content,

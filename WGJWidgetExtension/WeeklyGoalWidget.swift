@@ -432,7 +432,7 @@ private struct WeeklyGoalWidgetBarChart: View {
     }
 }
 
-private struct WGJWidgetBrandBadge: View {
+struct WGJWidgetBrandBadge: View {
     @Environment(\.widgetRenderingMode) private var renderingMode
 
     let size: CGFloat
@@ -473,6 +473,7 @@ private struct WGJWidgetBrandBadge: View {
 struct WGJWidgetBundle: WidgetBundle {
     var body: some Widget {
         WeeklyGoalWidget()
+        WorkoutLiveActivity()
     }
 }
 

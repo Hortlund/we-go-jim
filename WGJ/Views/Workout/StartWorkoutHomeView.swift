@@ -35,6 +35,8 @@ struct StartWorkoutHomeView: View {
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var isPreparingActiveWorkoutStart = false
+    @State private var showingCardioPicker = false
+    @State private var selectedStartingCardio: ExerciseCatalogSelection?
     @State private var pendingTemplateSaveResults: [UUID: TemplateEditorSaveResult] = [:]
 
     @State private var errorMessage = ""
@@ -123,6 +125,13 @@ struct StartWorkoutHomeView: View {
                 WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
                     cleanupExportedFile(at: sheet.fileURL)
                 }
+            }
+            .sheet(isPresented: $showingCardioPicker, onDismiss: {
+                guard let selection = selectedStartingCardio else { return }
+                selectedStartingCardio = nil
+                startEmptyWorkout(cardioSelection: selection)
+            }) {
+                CardioActivityQuickPicker { selection in selectedStartingCardio = selection }
             }
             .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
                 TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { result in
@@ -252,13 +261,37 @@ struct StartWorkoutHomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             quickStartCopy
 
-            HStack {
-                startEmptyWorkoutButton
-                Spacer(minLength: 0)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    startEmptyWorkoutButton
+                    startCardioButton
+                }
+                VStack(spacing: 12) {
+                    startEmptyWorkoutButton
+                    startCardioButton
+                }
             }
         }
         .padding(14)
         .wgjCardContainer(strong: true)
+    }
+
+    private var startCardioButton: some View {
+        Button {
+            guard !isPreparingActiveWorkoutStart else { return }
+            if let sessionID = activeWorkoutPresentationState.activeSessionID {
+                presentActiveWorkoutConflict(for: sessionID)
+            } else {
+                showingCardioPicker = true
+            }
+        } label: {
+            Label("Cardio", systemImage: "figure.run")
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+        .disabled(isPreparingActiveWorkoutStart)
+        .accessibilityIdentifier("start-workout-cardio-button")
     }
 
     private var quickStartCopy: some View {
@@ -279,12 +312,13 @@ struct StartWorkoutHomeView: View {
             requestStartEmptyWorkout()
         } label: {
             Label(
-                isPreparingActiveWorkoutStart ? "Starting" : "Start Empty",
+                isPreparingActiveWorkoutStart ? "Starting" : "Workout",
                 systemImage: isPreparingActiveWorkoutStart ? "hourglass" : "play.fill"
             )
-                .wgjSingleLineText(scale: 0.84)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(WGJCompactPrimaryButtonStyle())
+        .buttonStyle(WGJPrimaryButtonStyle())
         .disabled(isPreparingActiveWorkoutStart)
         .accessibilityIdentifier("start-workout-empty-button")
     }
@@ -670,16 +704,17 @@ struct StartWorkoutHomeView: View {
         startEmptyWorkout()
     }
 
-    private func startEmptyWorkout() {
+    private func startEmptyWorkout(cardioSelection: ExerciseCatalogSelection? = nil) {
         isPreparingActiveWorkoutStart = true
         let backgroundStore = startWorkoutBackgroundStore
         Task.detached(priority: .userInitiated) {
             do {
                 let preparation = try await Self.prepareActiveWorkoutStart(
                     templateID: nil,
-                    backgroundStore: backgroundStore
+                    backgroundStore: backgroundStore,
+                    cardioSelection: cardioSelection
                 )
-                await handleActiveWorkoutStartCompleted(preparation)
+                await handleActiveWorkoutStartCompleted(preparation, cardioSelection: cardioSelection)
             } catch {
                 await handleActiveWorkoutStartFailed(error)
             }
@@ -715,7 +750,8 @@ struct StartWorkoutHomeView: View {
 
     nonisolated private static func prepareActiveWorkoutStart(
         templateID: UUID?,
-        backgroundStore: AppBackgroundStore
+        backgroundStore: AppBackgroundStore,
+        cardioSelection: ExerciseCatalogSelection? = nil
     ) async throws -> ActiveWorkoutStartPreparation {
         let importedLegacy = try await backgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
@@ -733,7 +769,7 @@ struct StartWorkoutHomeView: View {
         }
 
         let runtimePreparation = try await backgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
-            try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
+            try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext, cardioSelection: cardioSelection)
         }
 
         return ActiveWorkoutStartPreparation(
@@ -747,12 +783,18 @@ struct StartWorkoutHomeView: View {
 
     nonisolated private static func prepareActiveWorkoutStart(
         templateID: UUID?,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        cardioSelection: ExerciseCatalogSelection? = nil
     ) throws -> ActiveWorkoutStartRuntimePreparation {
         let factory = ActiveWorkoutSessionFactory(modelContext: modelContext)
-        let session = try templateID.map {
+        var session = try templateID.map {
             try factory.createSessionFromTemplate(templateID: $0)
         } ?? factory.createEmptySession()
+        if let cardioSelection {
+            let unit = try ProfileRepository(modelContext: modelContext).currentProfile()?.preferredDistanceUnit
+                ?? .regionalDefault(locale: .current)
+            session = CardioSessionStarter.configuredSession(from: session, selection: cardioSelection, distanceUnit: unit)
+        }
         let firstRenderSnapshot = try ActiveWorkoutRuntimeFirstRenderSnapshotBuilder.build(
             session: session,
             modelContext: modelContext
@@ -798,8 +840,14 @@ struct StartWorkoutHomeView: View {
     @MainActor
     private func handleActiveWorkoutStartCompleted(
         _ preparation: ActiveWorkoutStartPreparation,
-        clearSelectedTemplatePreview: Bool = false
+        clearSelectedTemplatePreview: Bool = false,
+        cardioSelection: ExerciseCatalogSelection? = nil
     ) {
+        if cardioSelection != nil, !preparation.isExistingConflict,
+           let activity = preparation.runtimeSession?.cardioBlocks.first,
+           CardioRecordingPolicy.usesSessionScreen(activity) {
+            activeWorkoutPresentationState.pendingCardioRecordingActivityID = activity.id
+        }
         handlePreparedActiveWorkoutStart(preparation)
         if clearSelectedTemplatePreview {
             selectedTemplatePreview = nil

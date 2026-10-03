@@ -7,6 +7,15 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
         let value: String
     }
 
+    struct CardioStory: Equatable, Sendable {
+        let sessionID: UUID
+        let activityID: UUID
+        let activityName: String
+        let primaryMetric: Metric
+        let supportingMetrics: [Metric]
+        let otherActivityCount: Int
+    }
+
     struct Exercise: Equatable, Sendable {
         let name: String
         let setProgressText: String
@@ -36,6 +45,7 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
     let highlightDetail: String
     let exercises: [Exercise]
     let remainingExerciseCount: Int
+    var cardioStory: CardioStory? = nil
 
     var highlightEyebrowText: String {
         switch personalRecordCount {
@@ -166,6 +176,23 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
             return detail.isEmpty ? nil : detail
         }
 
+        let focusedCardio = completedCardio.first { $0.role == .main } ?? completedCardio.first
+        let cardioStory = !hasStrength ? focusedCardio.map { cardio in
+            let metrics = cardio.summary.metrics
+            let primary = metrics.first { $0.kind == .distance }
+                ?? metrics.first { $0.kind == .duration } ?? metrics.first
+            let supporting = metrics.filter { $0.kind != primary?.kind }
+            return CardioStory(
+                sessionID: snapshot.sessionID,
+                activityID: cardio.id,
+                activityName: cardio.exerciseName,
+                primaryMetric: primary.map { Metric(title: $0.title.uppercased(), value: $0.value) }
+                    ?? Metric(title: "DURATION", value: snapshot.durationText),
+                supportingMetrics: Array(supporting.prefix(3).map { Metric(title: $0.title.uppercased(), value: $0.value) }),
+                otherActivityCount: max(0, completedCardio.count - 1)
+            )
+        } : nil
+
         return Self(
             sessionName: snapshot.sessionName,
             completedAtText: snapshot.completedAtText,
@@ -180,7 +207,8 @@ nonisolated struct WorkoutSharePresentation: Equatable, Sendable {
                 ?? cardioHighlightDetail
                 ?? snapshot.shareSetBreakdownText,
             exercises: visibleExercises,
-            remainingExerciseCount: remainingExerciseCount
+            remainingExerciseCount: remainingExerciseCount,
+            cardioStory: cardioStory
         )
     }
 }
@@ -221,9 +249,9 @@ private struct WorkoutShareSheetItem: Identifiable {
 enum WorkoutShareCardRenderer {
     static let canvasSize = CGSize(width: 360, height: 640)
 
-    static func render(_ presentation: WorkoutSharePresentation) -> UIImage? {
+    static func render(_ presentation: WorkoutSharePresentation, routeImage: UIImage? = nil) -> UIImage? {
         let renderer = ImageRenderer(
-            content: WorkoutShareCard(presentation: presentation)
+            content: WorkoutShareCard(presentation: presentation, routeImage: routeImage)
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 .environment(\.colorScheme, .dark)
                 .environment(\.dynamicTypeSize, .medium)
@@ -250,6 +278,7 @@ private enum WorkoutShareAlert: String, Identifiable {
 
 struct WorkoutShareCard: View {
     let presentation: WorkoutSharePresentation
+    var routeImage: UIImage? = nil
 
     var body: some View {
         ZStack {
@@ -277,17 +306,21 @@ struct WorkoutShareCard: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 brand
-                title
-                    .padding(.top, 16)
-                    .padding(.bottom, 26)
-                primaryMetric
-                    .padding(.bottom, 24)
-                supportingMetrics
-                    .padding(.bottom, 18)
-                exerciseRecap
-                if presentation.personalRecordCount > 0 {
-                    highlight
+                if let cardio = presentation.cardioStory {
+                    cardioContent(cardio)
+                } else {
+                    title
                         .padding(.top, 16)
+                        .padding(.bottom, 26)
+                    primaryMetric
+                        .padding(.bottom, 24)
+                    supportingMetrics
+                        .padding(.bottom, 18)
+                    exerciseRecap
+                    if presentation.personalRecordCount > 0 {
+                        highlight
+                            .padding(.top, 16)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -295,6 +328,62 @@ struct WorkoutShareCard: View {
             .padding(.vertical, 30)
         }
         .clipped()
+    }
+
+    private func cardioContent(_ cardio: WorkoutSharePresentation.CardioStory) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            title.padding(.top, 20).padding(.bottom, 20)
+            if cardio.activityName != presentation.sessionName {
+                Text(cardio.activityName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
+                    .padding(.bottom, 12)
+            }
+            if let routeImage {
+                Image(uiImage: routeImage)
+                    .resizable().scaledToFit()
+                    .frame(maxHeight: 230)
+                    .layoutPriority(-1)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1))
+                    .accessibilityLabel("Recorded route")
+                    .accessibilityIdentifier("workout-share-cardio-route")
+                    .padding(.bottom, 20)
+            } else {
+                Image(systemName: "figure.mixed.cardio")
+                    .font(.system(size: 72, weight: .medium))
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
+                    .padding(.bottom, 26)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(cardio.primaryMetric.title)
+                    .font(.system(size: 9, weight: .bold, design: .rounded)).tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.48))
+                Text(cardio.primaryMetric.value)
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .lineLimit(1).minimumScaleFactor(0.56)
+            }
+            .padding(.bottom, 18)
+            HStack(spacing: 0) {
+                ForEach(Array(cardio.supportingMetrics.enumerated()), id: \.offset) { index, metric in
+                    supportingMetric(title: metric.title, value: metric.value, leadingPadding: index == 0 ? 0 : 10)
+                }
+            }
+            Spacer(minLength: 8)
+            HStack {
+                Label("ACTIVITY COMPLETE", systemImage: "checkmark.circle.fill")
+                Spacer()
+                if cardio.otherActivityCount > 0 { Text("+ \(cardio.otherActivityCount) more activities") }
+            }
+            .font(.system(size: 8, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.5))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workout-share-cardio-story")
     }
 
     private var brand: some View {
@@ -516,13 +605,19 @@ struct WorkoutSharePreviewSheet: View {
 
     @State private var shareSheetItem: WorkoutShareSheetItem?
     @State private var alert: WorkoutShareAlert?
+    @State private var routeImage: UIImage?
+    @State private var isLoadingRoute = true
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                WorkoutShareCard(presentation: presentation)
+                GeometryReader { geometry in
+                    WorkoutShareCard(presentation: presentation, routeImage: routeImage)
+                        .frame(width: WorkoutShareCardRenderer.canvasSize.width, height: WorkoutShareCardRenderer.canvasSize.height)
+                        .scaleEffect(geometry.size.width / WorkoutShareCardRenderer.canvasSize.width, anchor: .topLeading)
+                }
                     .aspectRatio(9.0 / 16.0, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .overlay(
@@ -549,11 +644,27 @@ struct WorkoutSharePreviewSheet: View {
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
                 .accessibilityIdentifier("workout-share-preview-share-button")
+                .disabled(isLoadingRoute)
                 .padding(16)
                 .background(.ultraThinMaterial)
             }
         }
         .preferredColorScheme(.dark)
+        .task(id: presentation.cardioStory?.activityID) {
+            routeImage = nil
+            isLoadingRoute = true
+            guard let cardio = presentation.cardioStory,
+                  let route = await WorkoutShareRouteImage.loadRoute(for: cardio), !Task.isCancelled else {
+                isLoadingRoute = false
+                return
+            }
+            // A route drawing is ready even offline; map tiles improve it when available.
+            routeImage = WorkoutShareRouteImage.drawing(route)
+            isLoadingRoute = false
+            if let mapImage = await WorkoutShareRouteImage.mapSnapshot(route), !Task.isCancelled {
+                routeImage = mapImage
+            }
+        }
         .sheet(item: $shareSheetItem) { item in
             WGJActivityShareSheet(activityItems: [item.image])
         }
@@ -569,7 +680,7 @@ struct WorkoutSharePreviewSheet: View {
 
     @MainActor
     private func shareStory() {
-        guard let image = WorkoutShareCardRenderer.render(presentation) else {
+        guard let image = WorkoutShareCardRenderer.render(presentation, routeImage: routeImage) else {
             alert = .renderFailed
             return
         }

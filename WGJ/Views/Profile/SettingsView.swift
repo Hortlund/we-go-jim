@@ -69,6 +69,7 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var appRuntimeState = AppRuntimeState.shared
+    @State private var liveActivityPublisher = WorkoutLiveActivityPublisher.shared
     @State private var settingsPersistenceCoordinator = SettingsDraftCoordinator()
     @State private var libraryStatusText = "Not loaded yet"
     @State private var visibleExerciseCount = 0
@@ -176,6 +177,19 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("App Preferences", subtitle: "Control how the app behaves while you train and browse.")
+
+                    Toggle(isOn: Binding(
+                        get: { liveActivityPublisher.isEnabled },
+                        set: { liveActivityPublisher.setEnabled($0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Show Live Activities").foregroundStyle(WGJTheme.textPrimary)
+                            Text("Show your workout on the Lock Screen and Dynamic Island.")
+                                .font(.caption).foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+                    .accessibilityIdentifier("settings-live-activities-toggle")
 
                     Toggle(isOn: $keepsScreenAwake) {
                         VStack(alignment: .leading, spacing: 4) {

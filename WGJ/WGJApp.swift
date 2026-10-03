@@ -117,6 +117,9 @@ struct WGJApp: App {
         try seedUITestProfileBodyweightIfRequested(container: container)
         try seedUITestHistoryMainCardioIfRequested(container: container)
 #if DEBUG
+        try seedUITestCardioRouteIfRequested(container: container)
+#endif
+#if DEBUG
         if let value = ProcessInfo.processInfo.environment["UITEST_BIRTHDAY_PROFILE_ID"],
            let profileID = UUID(uuidString: value) {
             let context = ModelContext(container)
@@ -581,6 +584,37 @@ struct WGJApp: App {
         try context.saveWithRecoveryProtection()
         HistoryAnalyticsCache.shared.invalidate(container: container)
     }
+
+#if DEBUG
+    nonisolated private static func seedUITestCardioRouteIfRequested(container: ModelContainer) throws {
+        guard ProcessInfo.processInfo.arguments.contains("UITEST_SEED_HISTORY_CARDIO_ROUTE") else { return }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let now = Date()
+        let session = WorkoutSession(name: "Evening Walk", status: .completed,
+            startedAt: now.addingTimeInterval(-1_800), endedAt: now, durationSeconds: 1_800,
+            totalVolume: 0, summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion,
+            createdAt: now, updatedAt: now)
+        let activity = WorkoutSessionCardioBlock(sessionID: session.id, phase: .preWorkout, role: .main,
+            catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk",
+            categorySnapshot: "Cardio", muscleSummarySnapshot: "Legs", trackingProfile: .walkRun,
+            goalKind: .open, targetDurationSeconds: 0, actualDurationSeconds: 1_800,
+            actualDistanceMeters: 2_500, preferredDistanceUnit: .kilometers, isCompleted: true, session: session)
+        context.insert(session)
+        context.insert(activity)
+        session.cardioBlocks = [activity]
+        try context.saveWithRecoveryProtection()
+        var route = CardioRoute(sessionID: session.id, activityID: activity.id)
+        route.points = [(59.3293, 18.0686), (59.331, 18.073), (59.334, 18.071), (59.337, 18.08), (59.333, 18.084)]
+            .enumerated().map { index, coordinate in
+                .init(latitude: coordinate.0, longitude: coordinate.1,
+                      timestamp: now.addingTimeInterval(Double(index) - 1_800), horizontalAccuracy: 5, segment: 0)
+            }
+        route.distanceMeters = 2_500
+        try CardioRouteFiles().write(route)
+        HistoryAnalyticsCache.shared.invalidate(container: container)
+    }
+#endif
 
     private static func configureNavigationTitleAppearance() {
         let titleColor = UIColor(red: 243.0 / 255.0, green: 246.0 / 255.0, blue: 255.0 / 255.0, alpha: 1.0)

@@ -61,8 +61,10 @@ struct HistoryDetailView: View {
             VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
-                    personalRecordHighlightsSection
-                    workoutMuscleHeatmapCard
+                    if !sessionExercises.isEmpty {
+                        personalRecordHighlightsSection
+                        workoutMuscleHeatmapCard
+                    }
                     cardioSection
                     if !sessionExercises.isEmpty || orderedCardioBlocks.isEmpty {
                         exercisesSectionHeader
@@ -234,11 +236,13 @@ struct HistoryDetailView: View {
     private func headerCard(_ session: HistoryDetailSnapshotBuilder.SessionSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Session", subtitle: "Saved workout details and logged values") {
-                WGJMetricPill(
-                    systemImage: personalRecordSummary.highlightedSetCount > 0 ? "trophy.fill" : "flag.checkered",
-                    value: personalRecordSummary.label,
-                    tint: personalRecordSummary.highlightedSetCount > 0 ? WGJTheme.accentGold : WGJTheme.textSecondary
-                )
+                if !sessionExercises.isEmpty {
+                    WGJMetricPill(
+                        systemImage: personalRecordSummary.highlightedSetCount > 0 ? "trophy.fill" : "flag.checkered",
+                        value: personalRecordSummary.label,
+                        tint: personalRecordSummary.highlightedSetCount > 0 ? WGJTheme.accentGold : WGJTheme.textSecondary
+                    )
+                }
             }
 
             HistorySessionHeaderDraftFields(
@@ -267,10 +271,9 @@ struct HistoryDetailView: View {
                     )
                     .accessibilityIdentifier("history-detail-duration-pill")
 
-                    WGJMetricPill(
-                        systemImage: "list.number",
-                        value: "\(sessionExercises.count) exercises"
-                    )
+                    if !sessionExercises.isEmpty {
+                        WGJMetricPill(systemImage: "list.number", value: "\(sessionExercises.count) exercises")
+                    }
 
                     Spacer(minLength: 0)
                 }
@@ -291,10 +294,9 @@ struct HistoryDetailView: View {
                     )
                     .accessibilityIdentifier("history-detail-duration-pill")
 
-                    WGJMetricPill(
-                        systemImage: "list.number",
-                        value: "\(sessionExercises.count) exercises"
-                    )
+                    if !sessionExercises.isEmpty {
+                        WGJMetricPill(systemImage: "list.number", value: "\(sessionExercises.count) exercises")
+                    }
                 }
             }
         }
@@ -320,16 +322,18 @@ struct HistoryDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
                     String(localized: "Cardio Activities"),
-                    subtitle: String(localized: "Saved results grouped by workout role.")
+                    subtitle: sessionExercises.isEmpty ? String(localized: "Your saved time, distance and pace.") : String(localized: "Saved results grouped by workout role.")
                 )
 
                 ForEach(WorkoutCardioRole.allCases) { role in
                     let roleActivities = orderedCardioBlocks.filter { $0.role == role }
                     if !roleActivities.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(role.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(WGJTheme.textSecondary)
+                            if !sessionExercises.isEmpty {
+                                Text(role.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textSecondary)
+                            }
 
                             ForEach(roleActivities) { cardioBlock in
                                 WorkoutCardioResultSummaryCard(
@@ -357,6 +361,7 @@ struct HistoryDetailView: View {
                                     .accessibilityLabel("Edit Result \(cardioBlock.exerciseNameSnapshot)")
                                     .accessibilityIdentifier("history-cardio-\(cardioBlock.id)-edit-result-button")
                                 }
+                                SavedCardioRouteView(activityID: cardioBlock.id)
                             }
                         }
                     }

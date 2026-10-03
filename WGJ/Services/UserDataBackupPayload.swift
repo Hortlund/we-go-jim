@@ -23,6 +23,8 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
     var workoutExercises: [WorkoutExerciseBackup]
     var workoutSets: [WorkoutSetBackup]
     var workoutDropStages: [WorkoutDropStageBackup]
+    /// Optional for compatibility with backups created before GPS recording.
+    var cardioRoutes: [CardioRoute]? = nil
 
     init(context: ModelContext, sessionID: UUID? = nil, sessionIDs: Set<UUID>? = nil, includeShared: Bool = true, includeHistory: Bool = true, templateID: UUID? = nil, includeTemplates: Bool = true) throws {
         profiles = includeShared ? try context.fetch(FetchDescriptor<UserProfile>()).map(BackupProfile.init) : []
@@ -124,6 +126,13 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
         try validateUnique(workoutExercises.map(\.id), entity: "WorkoutSessionExercise", render: \.uuidString)
         try validateUnique(workoutSets.map(\.id), entity: "WorkoutSessionSet", render: \.uuidString)
         try validateUnique(workoutDropStages.map(\.id), entity: "WorkoutSessionDropStage", render: \.uuidString)
+        try validateUnique((cardioRoutes ?? []).map(\.activityID), entity: "CardioRoute", render: \.uuidString)
+        let routeParents = Dictionary(uniqueKeysWithValues: workoutCardioBlocks.map { ($0.id, $0.sessionID) })
+        for route in cardioRoutes ?? [] {
+            try route.validateForBackup()
+            try requireParent(routeParents[route.activityID] == route.sessionID,
+                childEntity: "CardioRoute", childID: route.activityID, parentID: route.sessionID)
+        }
 
         let folderIDs = Set(templateFolders.map(\.id))
         let templateIDs = Set(workoutTemplates.map(\.id))
@@ -1644,10 +1653,13 @@ nonisolated enum UserDataBackupPayloadCodec {
     static func canonicalData(_ data: Data) throws -> Data {
         guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw BackupArchiveError.invalidManifest }
         object.removeValue(forKey: "generatedAt")
+        if let routes = object["cardioRoutes"] as? [Any], routes.isEmpty {
+            object.removeValue(forKey: "cardioRoutes")
+        }
         for (key, value) in object {
             if let rows = value as? [[String: Any]] {
                 object[key] = rows.sorted {
-                    String(describing: $0["id"] ?? $0["remoteUUID"] ?? "") < String(describing: $1["id"] ?? $1["remoteUUID"] ?? "")
+                    String(describing: $0["id"] ?? $0["activityID"] ?? $0["remoteUUID"] ?? "") < String(describing: $1["id"] ?? $1["activityID"] ?? $1["remoteUUID"] ?? "")
                 }
             }
         }
@@ -1655,17 +1667,24 @@ nonisolated enum UserDataBackupPayloadCodec {
     }
 
     static func makeChunk(context: ModelContext, sessionID: UUID?, templateID: UUID? = nil) throws -> (Data, UserDataCloudBackupContentSummary) {
-        let payload = try UserDataCloudBackupPayload(
+        var payload = try UserDataCloudBackupPayload(
             context: context, sessionID: sessionID,
             includeShared: sessionID == nil && templateID == nil, includeHistory: sessionID != nil,
             templateID: templateID, includeTemplates: templateID != nil
         )
+        if sessionID == nil && templateID == nil { payload.cardioRoutes = [] }
         return try encodeChunk(payload)
     }
 
     static func makeHistoryChunk(context: ModelContext, sessionIDs: Set<UUID>) throws -> (Data, UserDataCloudBackupContentSummary) {
         try encodeChunk(UserDataCloudBackupPayload(context: context, sessionIDs: sessionIDs,
             includeShared: false, includeTemplates: false))
+    }
+
+    static func makeRouteChunk(context: ModelContext, route: CardioRoute) throws -> (Data, UserDataCloudBackupContentSummary) {
+        var payload = try UserDataCloudBackupPayload(context: context, includeShared: false, includeHistory: false, includeTemplates: false)
+        payload.cardioRoutes = [route]
+        return try encodeChunk(payload)
     }
 
     private static func encodeChunk(_ input: UserDataCloudBackupPayload) throws -> (Data, UserDataCloudBackupContentSummary) {

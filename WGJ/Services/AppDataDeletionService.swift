@@ -184,6 +184,8 @@ nonisolated final class AppDataDeletionService {
         }
     ) async throws {
         var failures: [String] = []
+        do { try await CardioRouteRecorder.shared.reset() }
+        catch { failures.append("Outdoor routes: \(error.localizedDescription)") }
         do { try await resetAppleHealthState() }
         catch { failures.append("Apple Health: \(error.localizedDescription)") }
         clearExerciseImages()

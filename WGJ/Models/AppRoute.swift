@@ -3,6 +3,7 @@ import Observation
 
 nonisolated enum AppRoute: Equatable, Sendable {
     case profile(ProfileRoute)
+    case activeWorkout(UUID)
 }
 
 nonisolated enum ProfileRoute: Equatable, Sendable {
@@ -19,7 +20,11 @@ nonisolated enum AppRouteParser {
         _ url: URL,
         expectedScheme: String = AppRuntimeConfig.urlScheme
     ) -> AppRoute? {
-        guard url.scheme?.lowercased() == expectedScheme.lowercased(),
+        guard url.scheme?.lowercased() == expectedScheme.lowercased() else { return nil }
+        if url.host?.lowercased() == "workout", let id = UUID(uuidString: String(url.path.dropFirst())) {
+            return .activeWorkout(id)
+        }
+        guard
               url.host?.lowercased() == "profile",
               url.path.lowercased() == "/weekly-goal"
         else { return nil }

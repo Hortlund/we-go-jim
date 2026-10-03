@@ -79,6 +79,7 @@ struct ActiveWorkoutExerciseSettingsSheet: View {
                                     )
                             )
                         }
+                        .accessibilityIdentifier("active-workout-settings-rest-button")
 
                         HStack(spacing: 8) {
                             restAdjustButton(symbol: "minus.circle") {

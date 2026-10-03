@@ -731,6 +731,24 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     private static let invalidationFileName = "active-workout-invalidated-before.json"
     private static let deletedSessionsFileName = "active-workout-deleted-sessions.json"
 
+    nonisolated static var defaultSnapshotURL: URL {
+        defaultBaseDirectory().appendingPathComponent(defaultFileName)
+    }
+
+    /// A restore reads this atomic journal synchronously under its write barrier.
+    /// Match the same mutation boundary used by snapshot cleanup and presentation.
+    nonisolated static func routeActivitiesSaved(after cutoff: Date, at url: URL) throws -> Set<UUID> {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(ActiveWorkoutStoredSnapshot.self, from: Data(contentsOf: url))
+        let mutationDate = snapshot.mutationTimestamp == nil
+            ? max(snapshot.session.updatedAt, try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date ?? .distantPast)
+            : snapshot.mutationDate
+        guard mutationDate > cutoff else { return [] }
+        return Set(snapshot.session.cardioBlocks.filter(CardioRecordingPolicy.recordsGPS).map(\.id))
+    }
+
     private let baseDirectory: URL
     private var cachedSnapshotData: Data?
     private let pendingDeletionIDs: @Sendable () -> Set<UUID>
