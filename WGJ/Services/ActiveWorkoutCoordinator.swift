@@ -52,9 +52,21 @@ nonisolated protocol ActiveWorkoutPersistence: Sendable {
 
 nonisolated struct ModelContainerActiveWorkoutPersistence: ActiveWorkoutPersistence {
     private let backgroundStore: AppBackgroundStore
+    private let isHealthExportEnabled: @MainActor @Sendable () -> Bool
+    private let healthExport: @MainActor @Sendable (HealthWorkoutExport) -> Void
 
-    init(backgroundStore: AppBackgroundStore) {
+    init(
+        backgroundStore: AppBackgroundStore,
+        isHealthExportEnabled: @escaping @MainActor @Sendable () -> Bool = {
+            AppleHealthExportService.shared.isEnabled
+        },
+        healthExport: @escaping @MainActor @Sendable (HealthWorkoutExport) -> Void = {
+            AppleHealthExportService.shared.enqueue($0)
+        }
+    ) {
         self.backgroundStore = backgroundStore
+        self.isHealthExportEnabled = isHealthExportEnabled
+        self.healthExport = healthExport
     }
 
     func isCompleted(sessionID: UUID) async throws -> Bool {
@@ -73,10 +85,18 @@ nonisolated struct ModelContainerActiveWorkoutPersistence: ActiveWorkoutPersiste
         session: ActiveWorkoutRuntimeSession,
         notes: String?
     ) async throws -> WorkoutCompletionCommitResult {
-        try await backgroundStore.perform("active-workout.complete") { context in
-            try WorkoutCompletionRepository(modelContext: context)
+        let includesHealthExport = await isHealthExportEnabled()
+        let (result, export) = try await backgroundStore.perform("active-workout.complete") { context in
+            let result = try WorkoutCompletionRepository(modelContext: context)
                 .completeWorkout(session: session, notes: notes)
+            // The local commit succeeded. A Health export is a separate, best-effort boundary effect.
+            let completed = includesHealthExport
+                ? try? WorkoutSessionRepository(modelContext: context).session(id: result.sessionID)
+                : nil
+            return (result, completed.flatMap { HealthWorkoutExport.snapshot(from: $0) })
         }
+        if let export { await healthExport(export) }
+        return result
     }
 }
 

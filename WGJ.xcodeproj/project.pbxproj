@@ -331,6 +331,9 @@
 							com.apple.CloudKit = {
 								enabled = 1;
 							};
+							com.apple.HealthKit = {
+								enabled = 1;
+							};
 							com.apple.TimeSensitiveNotifications = {
 								enabled = 1;
 							};

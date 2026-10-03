@@ -172,6 +172,8 @@ struct SettingsView: View {
                     estimatedActiveCaloriesCard(calorieSettingsPresentation)
                 }
 
+                AppleHealthSettingsCard()
+
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("App Preferences", subtitle: "Control how the app behaves while you train and browse.")
 

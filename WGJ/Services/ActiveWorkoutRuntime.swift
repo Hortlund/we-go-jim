@@ -729,11 +729,17 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
 
     private static let defaultFileName = "active-workout-snapshot.json"
     private static let invalidationFileName = "active-workout-invalidated-before.json"
+    private static let deletedSessionsFileName = "active-workout-deleted-sessions.json"
 
     private let baseDirectory: URL
     private var cachedSnapshotData: Data?
+    private let pendingDeletionIDs: @Sendable () -> Set<UUID>
 
-    init(baseDirectory: URL? = nil) {
+    init(baseDirectory: URL? = nil, pendingDeletionIDs: @escaping @Sendable () -> Set<UUID> = {
+        Set((UserDefaults.standard.stringArray(forKey: AppDataArtifactCleanupQueue.deletedSessionsDefaultsKey) ?? [])
+            .compactMap(UUID.init(uuidString:)))
+    }) {
+        self.pendingDeletionIDs = pendingDeletionIDs
         if let baseDirectory {
             self.baseDirectory = baseDirectory
         } else {
@@ -773,6 +779,11 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         }
         let data = try Data(contentsOf: url)
         let snapshot = try decodeSnapshot(data, at: url)
+        if try isSessionDeleted(snapshot.session.id) {
+            cachedSnapshotData = nil
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
         if let cutoff = try invalidationCutoff(), snapshot.mutationDate <= cutoff {
             cachedSnapshotData = nil
             try? FileManager.default.removeItem(at: url)
@@ -819,6 +830,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         _ snapshot: ActiveWorkoutStoredSnapshot
     ) throws -> ActiveWorkoutSnapshotWriteResult {
         try Task.checkCancellation()
+        guard try !isSessionDeleted(snapshot.session.id) else { return .rejectedInvalidated }
         try FileManager.default.createDirectory(
             at: baseDirectory,
             withIntermediateDirectories: true
@@ -958,6 +970,34 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         }
         try FileManager.default.removeItem(at: url)
         cachedSnapshotData = nil
+    }
+
+    /// A committed user deletion also rejects late writes for that workout after clock changes.
+    func invalidateSession(_ sessionID: UUID) throws {
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        var deleted = try deletedSessionIDs()
+        if deleted.insert(sessionID).inserted {
+            let marker = baseDirectory.appendingPathComponent(Self.deletedSessionsFileName)
+            try JSONEncoder().encode(deleted).write(to: marker, options: [.atomic])
+        }
+        let url = snapshotURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let snapshot = try decodeSnapshot(Data(contentsOf: url), at: url)
+        guard snapshot.session.id == sessionID else { return }
+        try FileManager.default.removeItem(at: url)
+        cachedSnapshotData = nil
+    }
+
+    private func deletedSessionIDs() throws -> Set<UUID> {
+        let marker = baseDirectory.appendingPathComponent(Self.deletedSessionsFileName)
+        guard FileManager.default.fileExists(atPath: marker.path) else { return [] }
+        return try JSONDecoder().decode(Set<UUID>.self, from: Data(contentsOf: marker))
+    }
+
+    private func isSessionDeleted(_ id: UUID) throws -> Bool {
+        // A queued deletion also fences restore/late writes before startup cleanup finishes.
+        if pendingDeletionIDs().contains(id) { return true }
+        return try deletedSessionIDs().contains(id)
     }
 
     func hasSnapshot() throws -> Bool {

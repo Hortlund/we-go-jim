@@ -25,31 +25,50 @@ actor AppDataArtifactCleanupQueue {
 
     private let defaults: UserDefaults
     private let cleanup: @Sendable (AppDataArtifact, Date) async throws -> Void
+    private let snapshotDeletion: @Sendable (UUID) async throws -> Void
     private var pendingRun: Task<[AppDataArtifactCleanupWarning], Never>?
     private var runGeneration: UInt64 = 0
     private var artifactRevisions: [AppDataArtifact: UInt64] = [:]
     private let pendingDefaultsKey = "appDataArtifactCleanupQueue.pendingArtifacts"
+    nonisolated static let deletedSessionsDefaultsKey = "appDataArtifactCleanupQueue.deletedActiveWorkoutSessions"
 
     init(
         defaults: UserDefaults = .standard,
-        cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void
+        cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void,
+        snapshotDeletion: @escaping @Sendable (UUID) async throws -> Void = {
+            try ActiveWorkoutSnapshotStore.shared.invalidateSession($0)
+        }
     ) {
         self.defaults = defaults
         self.cleanup = { artifact, _ in try await cleanup(artifact) }
+        self.snapshotDeletion = snapshotDeletion
     }
 
     init(
         defaultsSuiteName: String,
-        cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void
+        cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void,
+        snapshotDeletion: @escaping @Sendable (UUID) async throws -> Void = {
+            try ActiveWorkoutSnapshotStore.shared.invalidateSession($0)
+        }
     ) {
         self.defaults = UserDefaults(suiteName: defaultsSuiteName) ?? .standard
         self.cleanup = { artifact, _ in try await cleanup(artifact) }
+        self.snapshotDeletion = snapshotDeletion
     }
 
     init(defaults: UserDefaults = .standard,
-         datedCleanup: @escaping @Sendable (AppDataArtifact, Date) async throws -> Void) {
+         datedCleanup: @escaping @Sendable (AppDataArtifact, Date) async throws -> Void,
+         snapshotDeletion: @escaping @Sendable (UUID) async throws -> Void = {
+             try ActiveWorkoutSnapshotStore.shared.invalidateSession($0)
+         }) {
         self.defaults = defaults
         self.cleanup = datedCleanup
+        self.snapshotDeletion = snapshotDeletion
+    }
+
+    func enqueueSnapshotDeletion(sessionIDs: Set<UUID>) async -> [AppDataArtifactCleanupWarning] {
+        setDeletedSessionIDs(deletedSessionIDs().union(sessionIDs))
+        return await scheduleRetry()
     }
 
     func enqueue(_ artifacts: Set<AppDataArtifact>, before cutoff: Date = .now) async -> [AppDataArtifactCleanupWarning] {
@@ -87,6 +106,19 @@ actor AppDataArtifactCleanupQueue {
         let pending = pendingArtifacts()
         var warnings: [AppDataArtifactCleanupWarning] = []
 
+        // A user deletion targets a workout, independent of wall-clock changes.
+        // Restore cleanup keeps its separate timestamp boundary below.
+        for id in deletedSessionIDs() {
+            do {
+                try await snapshotDeletion(id)
+                setDeletedSessionIDs(deletedSessionIDs().subtracting([id]))
+            } catch {
+                warnings.append(AppDataArtifactCleanupWarning(
+                    artifact: .activeWorkoutSnapshot, description: String(describing: error)
+                ))
+            }
+        }
+
         for artifact in AppDataArtifact.allCases where pending.contains(artifact) {
             let revision = artifactRevisions[artifact, default: 0]
             do {
@@ -114,6 +146,14 @@ actor AppDataArtifactCleanupQueue {
             (defaults.stringArray(forKey: pendingDefaultsKey) ?? [])
                 .compactMap(AppDataArtifact.init(rawValue:))
         )
+    }
+
+    private func deletedSessionIDs() -> Set<UUID> {
+        Set((defaults.stringArray(forKey: Self.deletedSessionsDefaultsKey) ?? []).compactMap(UUID.init(uuidString:)))
+    }
+
+    private func setDeletedSessionIDs(_ ids: Set<UUID>) {
+        defaults.set(ids.map(\.uuidString).sorted(), forKey: Self.deletedSessionsDefaultsKey)
     }
 
     private func setPendingArtifacts(_ artifacts: Set<AppDataArtifact>) {

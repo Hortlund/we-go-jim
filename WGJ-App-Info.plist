@@ -50,6 +50,10 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>WGJ checks only workouts it previously saved to Apple Health to recover interrupted exports and avoid duplicate saves.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>With your permission, WGJ saves completed workouts and optionally estimated active calories to Apple Health.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save workout images to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>

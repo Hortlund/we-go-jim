@@ -7,6 +7,7 @@ nonisolated final class AppDataDeletionService {
     private let deleteCloudBackup: @Sendable () async throws -> Void
     private let clearWeeklyGoalWidgetSnapshot: @Sendable () -> Void
     private let clearActiveWorkoutSnapshot: @Sendable () async throws -> Void
+    private let resetAppleHealthState: @Sendable () async throws -> Void
 
     init(
         modelContext: ModelContext,
@@ -16,7 +17,10 @@ nonisolated final class AppDataDeletionService {
             WeeklyGoalWidgetPublisher()?.clear()
         },
         clearActiveWorkoutSnapshot: @escaping @Sendable () async throws -> Void = {
-            try ActiveWorkoutSnapshotStore.shared.delete()
+            try await AppDataDeletionService.clearDefaultActiveWorkoutSnapshot()
+        },
+        resetAppleHealthState: @escaping @Sendable () async throws -> Void = {
+            try AppleHealthExportService.shared.resetLocalState()
         }
     ) {
         self.modelContext = modelContext
@@ -29,6 +33,7 @@ nonisolated final class AppDataDeletionService {
         }
         self.clearWeeklyGoalWidgetSnapshot = clearWeeklyGoalWidgetSnapshot
         self.clearActiveWorkoutSnapshot = clearActiveWorkoutSnapshot
+        self.resetAppleHealthState = resetAppleHealthState
     }
 
     func deleteAllUserData() async throws {
@@ -122,16 +127,80 @@ nonisolated final class AppDataDeletionService {
         await MainActor.run { AppRuntimeState.shared.recordCloudBackupDeletion() }
     }
 
-    static func clearDefaultLocalArtifacts() async throws {
-        removeExerciseImageCacheDirectory()
-        WeeklyGoalWidgetPublisher()?.clear()
-        try await ActiveWorkoutSnapshotStore.shared.delete()
+    /// Once local deletion commits, cleanup failures are warnings and must not keep the old UI alive.
+    @MainActor
+    static func performUserDataDeletion(
+        deleteCloudBackup: () async throws -> Void,
+        commitLocalDeletion: () async throws -> Void,
+        didCommitLocalDeletion: () -> Void,
+        resetBackupState: () async throws -> Void,
+        clearArtifacts: () async throws -> Void
+    ) async -> UserDataDeletionOutcome {
+        do {
+            try await deleteCloudBackup()
+            try await commitLocalDeletion()
+        } catch {
+            return UserDataDeletionOutcome(didDeleteLocalData: false, message: error.localizedDescription)
+        }
+        didCommitLocalDeletion()
+        var warnings: [String] = []
+        do { try await resetBackupState() }
+        catch { warnings.append(error.localizedDescription) }
+        do { try await clearArtifacts() }
+        catch { warnings.append(error.localizedDescription) }
+        var message = "Your CloudKit backup and local WGJ data were deleted. WGJ will return to setup after you tap OK."
+        if !warnings.isEmpty { message += "\n\nCleanup needs attention: " + warnings.joined(separator: "; ") }
+        return UserDataDeletionOutcome(didDeleteLocalData: true, message: message)
+    }
+
+    static func clearDefaultActiveWorkoutSnapshot(
+        sessionID: UUID? = nil,
+        queue: AppDataArtifactCleanupQueue = .shared,
+        snapshotStore: ActiveWorkoutSnapshotStore = .shared
+    ) async throws {
+        var targets = Set(sessionID.map { [$0] } ?? [])
+        do {
+            if let storedID = try await snapshotStore.loadStoredSnapshot()?.session.id { targets.insert(storedID) }
+        } catch {
+            // An in-memory identity still lets us fence a temporarily unreadable file.
+            guard !targets.isEmpty else { throw error }
+        }
+        guard !targets.isEmpty else { return }
+        // Retrying this identity cannot erase a newer workout, even after clock changes.
+        let warnings = await queue.enqueueSnapshotDeletion(sessionIDs: targets)
+        if !warnings.isEmpty {
+            throw LocalArtifactCleanupError(failures: warnings.map(\.description))
+        }
+    }
+
+    static func clearDefaultLocalArtifacts(
+        resetAppleHealthState: @Sendable () async throws -> Void = {
+            try AppleHealthExportService.shared.resetLocalState()
+        },
+        clearExerciseImages: () -> Void = { removeExerciseImageCacheDirectory() },
+        clearWeeklyGoalWidgetSnapshot: () -> Void = { WeeklyGoalWidgetPublisher()?.clear() },
+        clearActiveWorkoutSnapshot: @Sendable () async throws -> Void = {
+            try await AppDataDeletionService.clearDefaultActiveWorkoutSnapshot()
+        }
+    ) async throws {
+        var failures: [String] = []
+        do { try await resetAppleHealthState() }
+        catch { failures.append("Apple Health: \(error.localizedDescription)") }
+        clearExerciseImages()
+        clearWeeklyGoalWidgetSnapshot()
+        do { try await clearActiveWorkoutSnapshot() }
+        catch { failures.append("Active workout: \(error.localizedDescription)") }
+        if !failures.isEmpty { throw LocalArtifactCleanupError(failures: failures) }
     }
 
     func clearLocalArtifacts() async throws {
-        Self.removeExerciseImageCacheDirectory(fileManager: fileManager)
-        clearWeeklyGoalWidgetSnapshot()
-        try await clearActiveWorkoutSnapshot()
+        let fileManager = fileManager
+        try await Self.clearDefaultLocalArtifacts(
+            resetAppleHealthState: resetAppleHealthState,
+            clearExerciseImages: { Self.removeExerciseImageCacheDirectory(fileManager: fileManager) },
+            clearWeeklyGoalWidgetSnapshot: clearWeeklyGoalWidgetSnapshot,
+            clearActiveWorkoutSnapshot: clearActiveWorkoutSnapshot
+        )
     }
 
     static func removeExerciseImageCacheDirectory(fileManager: FileManager = .default) {
@@ -177,4 +246,18 @@ nonisolated final class AppDataDeletionService {
             modelContext.delete(item)
         }
     }
+}
+
+nonisolated struct LocalArtifactCleanupError: LocalizedError {
+    let failures: [String]
+
+    var errorDescription: String? {
+        "Some local files could not be cleared. " + failures.joined(separator: "; ")
+    }
+}
+
+nonisolated struct UserDataDeletionOutcome {
+    let didDeleteLocalData: Bool
+    let message: String
+    var title: String { didDeleteLocalData ? "Data Deleted" : "Delete Failed" }
 }

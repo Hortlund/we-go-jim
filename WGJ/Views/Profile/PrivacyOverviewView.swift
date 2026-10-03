@@ -34,6 +34,7 @@ struct PrivacyOverviewView: View {
                     title: "Data WGJ uses",
                     lines: [
                         "Profile details such as display name, avatar, weekly goal, preferences, and dashboard widget choices.",
+                        "Optional calorie-estimation details: sex, date of birth, height, and body weight, plus the resulting workout calorie estimates.",
                         "Workout history, active-workout drafts, templates, folders, custom exercises, notes, timers, and training summaries.",
                         "Local projections used for profile stats, widgets, history, and workout summaries.",
                     ]
@@ -45,6 +46,16 @@ struct PrivacyOverviewView: View {
                         "Core workout, template, exercise, history, and profile features work locally on your device.",
                         "When iCloud is available, WGJ may export a best-effort CloudKit backup after workout completion or template saves.",
                         "Active-workout drafts stay local while the workout is active.",
+                    ]
+                )
+
+                privacyCard(
+                    title: "Apple Health",
+                    lines: [
+                        "Apple Health export is optional. When enabled, WGJ saves newly completed workouts and, with a separate opt-in, available estimated active calories.",
+                        "WGJ checks only its own previously exported workouts to recover interrupted saves. It does not request access to other apps' Apple Health data.",
+                        "Pending exports and recovery records stay on this device and are excluded from WGJ's CloudKit backup and iCloud device backups.",
+                        "Turn export off in Settings or revoke access in the Health app. Editing or deleting WGJ data does not change records already saved to Health; manage those records in the Health app.",
                     ]
                 )
 

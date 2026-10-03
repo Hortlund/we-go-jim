@@ -72,9 +72,11 @@ struct ContentView: View {
             installUITestPendingTemplateIfNeeded()
             updateIdleTimerState()
             handleInitialUITestURLIfNeeded()
+            AppleHealthExportService.shared.resumePending()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                AppleHealthExportService.shared.resumePending()
                 BoundaryCloudBackupScheduler.resumeOperations(container: modelContext.container)
                 restTimerState.handleRestTimerExpirationIfNeeded()
                 scheduleResumeCriticalMaintenanceIfNeeded()
