@@ -13,7 +13,7 @@ struct CardioRecordingView: View {
     @State private var showingFinishConfirmation = false
     @State private var showingCancelConfirmation = false
     @ScaledMetric(relativeTo: .largeTitle) private var timerFontSize = 64
-    let onEditResult: (Bool) -> Void
+    let onEditResult: (Bool, Double?) -> Void
     let onSaveWorkout: () -> Void
     let isEmbedded: Bool
     let onMinimize: (() -> Void)?
@@ -22,7 +22,7 @@ struct CardioRecordingView: View {
     init(activityID: UUID, coordinator: ActiveWorkoutCoordinator, isEmbedded: Bool = false,
          onMinimize: (() -> Void)? = nil,
          onCancelWorkout: (() -> Void)? = nil,
-         onSaveWorkout: @escaping () -> Void, onEditResult: @escaping (Bool) -> Void) {
+         onSaveWorkout: @escaping () -> Void, onEditResult: @escaping (Bool, Double?) -> Void) {
         _controller = State(initialValue: CardioRecordingController(activityID: activityID, coordinator: coordinator))
         self.onEditResult = onEditResult
         self.onSaveWorkout = onSaveWorkout
@@ -110,7 +110,7 @@ struct CardioRecordingView: View {
 
     private func sessionHeading(_ activity: ActiveWorkoutRuntimeCardioBlock) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: activity.catalogExerciseUUID.contains("run") ? "figure.run" : "figure.walk")
+            Image(systemName: CardioRecordingPolicy.symbol(for: activity))
                 .font(.system(size: 32, weight: .medium)).foregroundStyle(WGJTheme.accentBlue)
             VStack(alignment: .leading, spacing: 5) {
                 Text(activity.exerciseNameSnapshot)
@@ -129,19 +129,27 @@ struct CardioRecordingView: View {
             : WorkoutCardioTimerCoordinator.elapsedSeconds(for: activity, at: date)
         let distance = activity.isCompleted ? activity.actualDistanceMeters : controller.route?.distanceMeters
         let unit = activity.preferredDistanceUnit == .miles ? WorkoutDistanceUnit.miles : .kilometers
-        let pace = WorkoutCardioMetricsCalculator.calculate(
-            durationSeconds: seconds, distanceMeters: distance, displayUnit: unit, profile: .walkRun
-        ).paceSecondsPerDisplayUnit
+        let profile = WorkoutCardioTrackingProfileResolver.resolved(storedProfile: activity.trackingProfile,
+            catalogExerciseUUID: activity.catalogExerciseUUID, exerciseName: activity.exerciseNameSnapshot,
+            hasDistance: distance != nil)
+        let metrics = WorkoutCardioMetricsCalculator.calculate(
+            durationSeconds: seconds, distanceMeters: distance, displayUnit: unit, profile: profile)
+        let showsSpeed = profile == .machineDistance
+        let rateTitle = showsSpeed ? String(localized: "Avg. speed") : String(localized: "Avg. pace")
+        let rateValue = showsSpeed
+            ? metrics.averageSpeedPerHour?.formatted(.number.precision(.fractionLength(1))) ?? "—"
+            : metrics.paceSecondsPerDisplayUnit.map { timeText(Int($0.rounded())) } ?? "—"
+        let rateUnit = showsSpeed ? "\(unit.symbol)/h" : "/\(unit.symbol)"
         return VStack(spacing: 22) {
             metric(title: String(localized: "Time"), value: timeText(seconds), unit: nil, large: true)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 20) {
                     metric(title: String(localized: "Distance"), value: distanceText(distance, unit: unit), unit: unit.symbol)
-                    metric(title: String(localized: "Avg. pace"), value: pace.map { timeText(Int($0.rounded())) } ?? "—", unit: "/\(unit.symbol)")
+                    metric(title: rateTitle, value: rateValue, unit: rateUnit)
                 }
                 VStack(spacing: 20) {
                     metric(title: String(localized: "Distance"), value: distanceText(distance, unit: unit), unit: unit.symbol)
-                    metric(title: String(localized: "Avg. pace"), value: pace.map { timeText(Int($0.rounded())) } ?? "—", unit: "/\(unit.symbol)")
+                    metric(title: rateTitle, value: rateValue, unit: rateUnit)
                 }
             }
         }
@@ -215,7 +223,7 @@ struct CardioRecordingView: View {
                     .accessibilityIdentifier("cardio-recording-save-workout-button")
                 }
                 Button {
-                    onEditResult(false)
+                    onEditResult(false, controller.recordedDistanceForResultReview)
                     closePresentation()
                 } label: { Label("Edit Result", systemImage: "square.and.pencil").frame(maxWidth: .infinity) }
                     .buttonStyle(WGJGhostButtonStyle())
@@ -255,13 +263,9 @@ struct CardioRecordingView: View {
     private func finish() {
         isWorking = true
         Task {
-            if await controller.finish(), let activity = controller.activity {
-                if !CardioRecordingPolicy.recordsGPS(activity) || (controller.route?.distanceMeters ?? 0) <= 0 {
-                    onEditResult(controller.canSaveWorkout)
-                    closePresentation()
-                } else if isEmbedded && controller.canSaveWorkout {
-                    onSaveWorkout()
-                }
+            if await controller.finish() {
+                onEditResult(controller.canSaveWorkout, controller.recordedDistanceForResultReview)
+                closePresentation()
             }
             isWorking = false
         }

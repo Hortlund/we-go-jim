@@ -57,7 +57,7 @@
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>With your permission, WGJ saves completed workouts and optionally estimated active calories to Apple Health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>WGJ uses your location during outdoor walks and runs to measure distance and record your route, including while your screen is locked.</string>
+	<string>WGJ uses your location during outdoor walks, runs, and bike rides to measure distance and record your route, including while your screen is locked.</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>OutdoorWorkout</key>

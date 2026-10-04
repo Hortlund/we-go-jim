@@ -81,6 +81,26 @@ final class WorkoutLiveActivityTests: XCTestCase {
         XCTAssertEqual(later, matching)
     }
 
+    func testOutdoorBikeShowsSpeedAndKeepsOlderActivityPayloadsDecodable() throws {
+        let choice = try XCTUnwrap(CardioActivityQuickChoice.all.first { $0.remoteUUID == "seed-outdoor-bike" })
+        let session = CardioSessionStarter.configuredSession(from: ActiveWorkoutRuntimeSession(name: "Bike"),
+            selection: choice.selection, distanceUnit: .kilometers)
+        var snapshot = ActiveWorkoutStoredSnapshot(session: session)
+        snapshot.session.cardioBlocks[0].timerState = .paused
+        snapshot.session.cardioBlocks[0].timerAccumulatedSeconds = 600
+        var route = CardioRoute(sessionID: session.id, activityID: session.cardioBlocks[0].id)
+        route.distanceMeters = 5_000
+        let projection = try XCTUnwrap(WorkoutLiveActivityProjection.make(snapshot: snapshot, route: route))
+        XCTAssertEqual(projection.state.averageSpeed, "\(Double(30).formatted(.number.precision(.fractionLength(1)))) km/h")
+        XCTAssertNil(projection.state.pace)
+        XCTAssertEqual(projection.state.symbol, "figure.outdoor.cycle")
+        let oldState = try XCTUnwrap(WorkoutLiveActivityProjection.make(snapshot: cardioSnapshot(), route: nil,
+            includesReadyCardio: true)).state
+        let oldJSON = try JSONEncoder().encode(oldState)
+        XCTAssertFalse(String(decoding: oldJSON, as: UTF8.self).contains("averageSpeed"))
+        XCTAssertNil(try JSONDecoder().decode(WorkoutActivityAttributes.ContentState.self, from: oldJSON).averageSpeed)
+    }
+
     func testCompletedCardioUsesSavedManualResultRatherThanGPSCache() throws {
         var snapshot = cardioSnapshot()
         snapshot.session.cardioBlocks[0].isCompleted = true

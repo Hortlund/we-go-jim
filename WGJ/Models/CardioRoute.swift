@@ -55,7 +55,8 @@ nonisolated struct CardioRoute: Codable, Equatable, Sendable {
     @discardableResult
     mutating func append(
         latitude: Double, longitude: Double, timestamp: Date,
-        accuracy: Double, now: Date, recordingStartedAt: Date
+        accuracy: Double, now: Date, recordingStartedAt: Date,
+        maximumSpeedMetersPerSecond: Double = 12
     ) -> Bool {
         guard isRecording,
               latitude.isFinite, longitude.isFinite,
@@ -76,7 +77,7 @@ nonisolated struct CardioRoute: Codable, Equatable, Sendable {
                     latitude, longitude, previous.latitude, previous.longitude
                 )
                 let fixGap = timestamp.timeIntervalSince(previousFixTimestamp ?? previous.timestamp)
-                if fixGap > 30 || distance / seconds > 12 {
+                if fixGap > 30 || distance / seconds > maximumSpeedMetersPerSecond {
                     // Reacquire an anchor without inventing travel through a GPS gap.
                     segment += 1
                 } else {
@@ -117,14 +118,25 @@ nonisolated enum CardioRecordingPolicy {
             catalogExerciseUUID: activity.catalogExerciseUUID,
             exerciseName: activity.exerciseNameSnapshot, hasDistance: activity.actualDistanceMeters != nil
         )
-        return profile == .walkRun || profile == .treadmill
+        return recordsGPS(activity) || profile == .walkRun || profile == .treadmill
     }
 
     static func recordsGPS(_ activity: ActiveWorkoutRuntimeCardioBlock) -> Bool {
         // Explicit outdoor identity is required: a generic/custom walk must not
         // unexpectedly collect a person's location.
-        activity.catalogExerciseUUID == "seed-outdoor-walk"
-            || activity.catalogExerciseUUID == "seed-outdoor-run"
+        recordsGPS(catalogExerciseUUID: activity.catalogExerciseUUID)
+    }
 
+    static func recordsGPS(catalogExerciseUUID: String) -> Bool {
+        ["seed-outdoor-walk", "seed-outdoor-run", "seed-outdoor-bike"].contains(catalogExerciseUUID)
+    }
+
+    static func maximumSpeedMetersPerSecond(for activity: ActiveWorkoutRuntimeCardioBlock) -> Double {
+        activity.catalogExerciseUUID == "seed-outdoor-bike" ? 35 : 12
+    }
+
+    static func symbol(for activity: ActiveWorkoutRuntimeCardioBlock) -> String {
+        if activity.catalogExerciseUUID == "seed-outdoor-bike" { return "figure.outdoor.cycle" }
+        return activity.catalogExerciseUUID.contains("run") ? "figure.run" : "figure.walk"
     }
 }

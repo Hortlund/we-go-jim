@@ -1278,12 +1278,20 @@ final class IncrementalBackupTests: XCTestCase {
     }
 
     func testRoutesTravelThroughCompressedBackupAndRestoreWithoutHistoryUploadChurn() async throws {
+        try await verifyRouteBackupAndRestore(outdoorBike: false)
+    }
+
+    func testOutdoorBikeRouteAndNotesTravelThroughBackupAndRestore() async throws {
+        try await verifyRouteBackupAndRestore(outdoorBike: true)
+    }
+
+    private func verifyRouteBackupAndRestore(outdoorBike: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let sourceFiles = CardioRouteFiles(directory: root.appendingPathComponent("source"))
         let targetFiles = CardioRouteFiles(directory: root.appendingPathComponent("target"))
         let source = try makeContainer(workouts: 2)
-        var route = try makeOutdoorRoute(in: source, files: sourceFiles)
+        var route = try makeOutdoorRoute(in: source, files: sourceFiles, outdoorBike: outdoorBike)
         let store = MemoryArchiveStore()
         let service = UserDataCloudBackupService(localContainer: source, backupStore: store, routeFiles: sourceFiles)
         _ = try await service.exportCurrentBackup()
@@ -1318,7 +1326,10 @@ final class IncrementalBackupTests: XCTestCase {
         stale.distanceMeters = 999
         try await targetStore.save(stale, generation: oldGeneration)
         XCTAssertEqual(try targetFiles.read(activityID: route.activityID), route)
-        XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).first?.id, route.activityID)
+        let restoredActivity = try XCTUnwrap(ModelContext(target).fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).first)
+        XCTAssertEqual(restoredActivity.id, route.activityID)
+        XCTAssertEqual(restoredActivity.catalogExerciseUUID, outdoorBike ? "seed-outdoor-bike" : "seed-outdoor-walk")
+        XCTAssertEqual(restoredActivity.cardioNotes, "Felt good")
         XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
         await waitForCleanup()
     }
@@ -1564,14 +1575,16 @@ final class IncrementalBackupTests: XCTestCase {
         }
     }
 
-    private func makeOutdoorRoute(in container: ModelContainer, files: CardioRouteFiles) throws -> CardioRoute {
+    private func makeOutdoorRoute(in container: ModelContainer, files: CardioRouteFiles, outdoorBike: Bool = false) throws -> CardioRoute {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         let session = try XCTUnwrap(context.fetch(FetchDescriptor<WorkoutSession>()).first)
         let block = WorkoutSessionCardioBlock(sessionID: session.id, phase: .postWorkout, role: .main,
-            catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk", categorySnapshot: "Cardio",
-            muscleSummarySnapshot: "", trackingProfile: .walkRun, goalKind: .open, targetDurationSeconds: 0,
-            actualDurationSeconds: 60, actualDistanceMeters: 11.12, isCompleted: true, session: session)
+            catalogExerciseUUID: outdoorBike ? "seed-outdoor-bike" : "seed-outdoor-walk",
+            exerciseNameSnapshot: outdoorBike ? "Outdoor Bike" : "Outdoor Walk", categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "", trackingProfile: outdoorBike ? .machineDistance : .walkRun,
+            goalKind: .open, targetDurationSeconds: 0,
+            actualDurationSeconds: 60, actualDistanceMeters: 11.12, cardioNotes: "Felt good", isCompleted: true, session: session)
         context.insert(block)
         try context.saveWithRecoveryProtection()
         var route = CardioRoute(sessionID: session.id, activityID: block.id)

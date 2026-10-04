@@ -409,6 +409,7 @@ nonisolated struct ActiveWorkoutPendingCardioResult: Identifiable, Equatable, Se
     let notes: String
     let trackingProfile: WorkoutCardioTrackingProfile?
     let isCompleted: Bool
+    let isOutdoorActivity: Bool
 
     static func make(activity: ActiveWorkoutRuntimeCardioBlock) -> Self {
         Self(
@@ -421,7 +422,8 @@ nonisolated struct ActiveWorkoutPendingCardioResult: Identifiable, Equatable, Se
             resistanceLevel: activity.resistanceLevel,
             notes: activity.cardioNotes,
             trackingProfile: activity.trackingProfile,
-            isCompleted: activity.isCompleted
+            isCompleted: activity.isCompleted,
+            isOutdoorActivity: CardioRecordingPolicy.recordsGPS(activity)
         )
     }
 }

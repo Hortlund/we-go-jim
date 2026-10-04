@@ -5,6 +5,8 @@ struct WorkoutCardioResultEditor: View {
 
     let activityName: String
     let recordedDurationSeconds: Int?
+    let recordedDistanceMeters: Double?
+    let isOutdoorActivity: Bool
     let onSave: (ValidatedWorkoutCardioResult) async throws -> Void
 
     @State private var draft: WorkoutCardioResultDraft
@@ -13,15 +15,20 @@ struct WorkoutCardioResultEditor: View {
     @State private var validationMessage: String?
     @State private var isSaving = false
     @State private var editingRecordedDuration = false
+    @State private var editingRecordedDistance = false
 
     init(
         activityName: String,
         draft: WorkoutCardioResultDraft,
         recordedDurationSeconds: Int? = nil,
+        recordedDistanceMeters: Double? = nil,
+        isOutdoorActivity: Bool = false,
         onSave: @escaping (ValidatedWorkoutCardioResult) async throws -> Void
     ) {
         self.activityName = activityName
         self.recordedDurationSeconds = recordedDurationSeconds
+        self.recordedDistanceMeters = recordedDistanceMeters
+        self.isOutdoorActivity = isOutdoorActivity
         self.onSave = onSave
         self._draft = State(initialValue: draft)
         self._durationMinutesText = State(
@@ -42,7 +49,7 @@ struct WorkoutCardioResultEditor: View {
                 VStack(alignment: .leading, spacing: 16) {
                     resultInputs
                     derivedMetrics
-                    details
+                    if isOutdoorActivity { notesInputs } else { details }
 
                     if let validationMessage {
                         Label(validationMessage, systemImage: "exclamationmark.circle.fill")
@@ -56,7 +63,7 @@ struct WorkoutCardioResultEditor: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
-            .navigationTitle("Cardio Result")
+            .navigationTitle(isOutdoorActivity && recordedDurationSeconds != nil ? "Summary" : "Cardio Result")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -70,7 +77,8 @@ struct WorkoutCardioResultEditor: View {
                     Button(
                         isSaving
                             ? String(localized: "Saving…")
-                            : String(localized: "Save Result")
+                            : isOutdoorActivity && recordedDurationSeconds != nil
+                                ? String(localized: "Save Activity") : String(localized: "Save Result")
                     ) {
                         save()
                     }
@@ -87,9 +95,7 @@ struct WorkoutCardioResultEditor: View {
         VStack(alignment: .leading, spacing: 18) {
             WGJSectionHeader(
                 activityName,
-                subtitle: recordedDurationSeconds != nil
-                    ? String(localized: "Time recorded. Add your distance below.")
-                    : String(localized: "Log at least a duration or distance.")
+                subtitle: resultSubtitle
             )
 
             VStack(alignment: .leading, spacing: 8) {
@@ -123,32 +129,63 @@ struct WorkoutCardioResultEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Distance (optional)")
+                Text(recordedDistanceMeters != nil && !editingRecordedDistance ? "GPS distance" : "Distance (optional)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.textSecondary)
 
-                HStack(spacing: 10) {
-                    TextField("Distance", text: $draft.distanceText)
-                        .keyboardType(.decimalPad)
-                        .wgjPillField()
-                        .accessibilityIdentifier("cardio-result-distance-field")
-
-                    WGJActionMenuButton("Distance unit", usesPlainButtonStyle: false) {
-                        ForEach(WorkoutDistanceUnit.allCases) { unit in
-                            Button(unit.symbol) { draft.distanceUnit = unit }
-                        }
-                    } label: {
-                        Label(draft.distanceUnit.symbol, systemImage: "chevron.up.chevron.down")
+                if let recordedDistanceMeters, !editingRecordedDistance {
+                    HStack {
+                        Text("\(draft.distanceUnit.value(fromMeters: recordedDistanceMeters).formatted(.number.precision(.fractionLength(2)))) \(draft.distanceUnit.symbol)")
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                            .accessibilityIdentifier("cardio-result-recorded-distance")
+                        Spacer()
+                        Button("Edit") { editingRecordedDistance = true }
+                            .font(.subheadline)
+                            .accessibilityLabel("Edit recorded distance")
                     }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .accessibilityLabel("Distance unit")
-                    .accessibilityValue(draft.distanceUnit.symbol)
-                    .accessibilityIdentifier("cardio-result-distance-unit-picker")
+                } else {
+                    distanceInputs
                 }
             }
         }
         .padding(16)
         .wgjCardContainer(strong: true)
+    }
+
+    private var resultSubtitle: String {
+        if isOutdoorActivity, recordedDurationSeconds != nil {
+            if recordedDistanceMeters != nil, !editingRecordedDistance {
+                return String(localized: "Time and distance recorded.")
+            }
+            if !draft.distanceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingRecordedDistance {
+                return String(localized: "Time recorded. Review your distance below.")
+            }
+            return String(localized: "Time recorded. No GPS distance was recorded; add it manually if you know it.")
+        }
+        return recordedDurationSeconds != nil
+            ? String(localized: "Time recorded. Add your distance below.")
+            : String(localized: "Log at least a duration or distance.")
+    }
+
+    private var distanceInputs: some View {
+        HStack(spacing: 10) {
+            TextField("Distance", text: $draft.distanceText)
+                .keyboardType(.decimalPad)
+                .wgjPillField()
+                .accessibilityIdentifier("cardio-result-distance-field")
+
+            WGJActionMenuButton("Distance unit", usesPlainButtonStyle: false) {
+                ForEach(WorkoutDistanceUnit.allCases) { unit in
+                    Button(unit.symbol) { draft.distanceUnit = unit }
+                }
+            } label: {
+                Label(draft.distanceUnit.symbol, systemImage: "chevron.up.chevron.down")
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+            .accessibilityLabel("Distance unit")
+            .accessibilityValue(draft.distanceUnit.symbol)
+            .accessibilityIdentifier("cardio-result-distance-unit-picker")
+        }
     }
 
     @ViewBuilder
@@ -213,20 +250,29 @@ struct WorkoutCardioResultEditor: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Notes")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textSecondary)
-
-                    TextField("How did it feel?", text: $draft.notes, axis: .vertical)
-                        .lineLimit(3...6)
-                        .wgjPillField()
-                        .accessibilityIdentifier("cardio-result-notes-field")
-                }
+                noteField
             }
         }
         .padding(16)
         .wgjCardContainer(strong: true)
+    }
+
+    private var notesInputs: some View {
+        noteField
+            .padding(16)
+            .wgjCardContainer(strong: true)
+    }
+
+    private var noteField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Notes (optional)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.textSecondary)
+            TextField("How did it feel?", text: $draft.notes, axis: .vertical)
+                .lineLimit(3...6)
+                .wgjPillField()
+                .accessibilityIdentifier("cardio-result-notes-field")
+        }
     }
 
     private func detailField(
@@ -270,7 +316,9 @@ struct WorkoutCardioResultEditor: View {
     private func candidateDraft() -> WorkoutCardioResultDraft? {
         var candidate = draft
         let durationText = durationMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if durationText.isEmpty {
+        if let recordedDurationSeconds, !editingRecordedDuration {
+            candidate.actualDurationSeconds = recordedDurationSeconds
+        } else if durationText.isEmpty {
             candidate.actualDurationSeconds = nil
         } else {
             guard let seconds = WorkoutCardioResultDurationCodec.durationSeconds(

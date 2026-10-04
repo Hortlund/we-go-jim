@@ -26,6 +26,16 @@ final class CardioRecordingController {
         return recorder.route?.activityID == activityID ? recorder.route : nil
     }
 
+    /// Saved results can contain a manual correction. Only describe the current
+    /// value as GPS distance when it still matches this activity's route journal.
+    var recordedDistanceForResultReview: Double? {
+        guard let activity, activity.isCompleted, CardioRecordingPolicy.recordsGPS(activity),
+              let route, route.sessionID == coordinator.storedSnapshot?.session.id,
+              route.activityID == activityID, route.distanceMeters.isFinite, route.distanceMeters > 0,
+              activity.actualDistanceMeters == route.distanceMeters else { return nil }
+        return route.distanceMeters
+    }
+
     var canSaveWorkout: Bool {
         guard let session = coordinator.storedSnapshot?.session else { return false }
         return session.exercises.isEmpty && !session.cardioBlocks.isEmpty
