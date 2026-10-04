@@ -18,19 +18,25 @@ nonisolated struct WorkoutLiveActivityProjection: Equatable, Sendable {
             let meters = activity.isCompleted ? activity.actualDistanceMeters
                 : matchingRoute?.distanceMeters ?? activity.actualDistanceMeters
             let unit = activity.preferredDistanceUnit ?? .kilometers
-            let pace = WorkoutCardioMetricsCalculator.calculate(durationSeconds: elapsed, distanceMeters: meters,
-                displayUnit: unit, profile: .walkRun).paceSecondsPerDisplayUnit
+            let profile = WorkoutCardioTrackingProfileResolver.resolved(storedProfile: activity.trackingProfile,
+                catalogExerciseUUID: activity.catalogExerciseUUID, exerciseName: activity.exerciseNameSnapshot,
+                hasDistance: meters != nil)
+            let metrics = WorkoutCardioMetricsCalculator.calculate(durationSeconds: elapsed, distanceMeters: meters,
+                displayUnit: unit, profile: profile)
             let running = !activity.isCompleted && activity.timerState == .running
             return Self(sessionID: session.id, state: .init(
                 title: String(activity.exerciseNameSnapshot.prefix(80)),
-                symbol: activity.catalogExerciseUUID.contains("run") ? "figure.run" : "figure.walk",
+                symbol: CardioRecordingPolicy.symbol(for: activity),
                 isCardio: true,
                 status: activity.isCompleted ? "Completed" : running ? "In progress" : activity.timerState == .idle ? "Ready to start" : "Paused",
                 timerStart: running ? activity.timerSegmentStartedAt?.addingTimeInterval(-Double(activity.timerAccumulatedSeconds)) : nil,
                 elapsedSeconds: elapsed,
                 distance: meters.map { "\(unit.value(fromMeters: $0).formatted(.number.precision(.fractionLength(2)))) \(unit.symbol)" },
-                pace: pace.map { "\(durationText(Int($0.rounded()))) /\(unit.symbol)" },
-                progress: nil, restEndsAt: nil
+                pace: metrics.paceSecondsPerDisplayUnit.map { "\(durationText(Int($0.rounded()))) /\(unit.symbol)" },
+                progress: nil, restEndsAt: nil,
+                averageSpeed: profile == .machineDistance
+                    ? metrics.averageSpeedPerHour.map { "\($0.formatted(.number.precision(.fractionLength(1)))) \(unit.symbol)/h" } ?? "—"
+                    : nil
             ))
         }
         let sets = session.exercises.flatMap(\.setDrafts)

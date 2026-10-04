@@ -14,6 +14,7 @@ nonisolated struct WorkoutActivityAttributes: ActivityAttributes {
         var pace: String?
         var progress: String?
         var restEndsAt: Date?
+        var averageSpeed: String? = nil
     }
 
     var sessionID: UUID

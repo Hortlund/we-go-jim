@@ -50,6 +50,13 @@ nonisolated struct CardioActivityQuickChoice: Identifiable, Equatable, Sendable 
             trackingProfile: .walkRun
         ),
         .init(
+            remoteUUID: "seed-outdoor-bike",
+            displayName: String(localized: "Outdoor Bike"),
+            equipmentSummary: String(localized: "Outdoor"),
+            systemImage: "figure.outdoor.cycle",
+            trackingProfile: .machineDistance
+        ),
+        .init(
             remoteUUID: "seed-bike",
             displayName: String(localized: "Bike"),
             equipmentSummary: String(localized: "Bike"),

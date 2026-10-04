@@ -14,6 +14,19 @@ final class CardioRouteTests: XCTestCase {
         XCTAssertEqual(route.points.count, 2)
     }
 
+    func testCyclingMeasuresFastTravelButStillBreaksImpossibleJumps() {
+        var route = CardioRoute(sessionID: UUID(), activityID: UUID())
+        route.beginSegment()
+        for (latitude, seconds) in [(59.0, 0.0), (59.0009, 5.0), (60.0, 10.0)] {
+            let date = start.addingTimeInterval(seconds)
+            XCTAssertTrue(route.append(latitude: latitude, longitude: 18, timestamp: date,
+                accuracy: 5, now: date, recordingStartedAt: start, maximumSpeedMetersPerSecond: 35))
+        }
+        XCTAssertEqual(route.distanceMeters, 100.08, accuracy: 0.02)
+        XCTAssertEqual(route.points[0].segment, route.points[1].segment)
+        XCTAssertNotEqual(route.points[1].segment, route.points[2].segment)
+    }
+
     func testPauseAndResumeNeverConnectUnrecordedTravel() {
         var route = CardioRoute(sessionID: UUID(), activityID: UUID())
         route.beginSegment()

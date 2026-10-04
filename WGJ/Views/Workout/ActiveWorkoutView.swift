@@ -70,6 +70,7 @@ struct ActiveWorkoutView: View {
     @State private var shouldFinishAfterCardioResultDismissal = false
     @State private var didSaveRecordingResult = false
     @State private var prefersRecordedCardioDuration = false
+    @State private var recordedCardioDistanceMeters: Double?
     @State private var pendingFinishedCardioID: UUID?
     @State private var pendingFinishedCardioResult: ActiveWorkoutPendingCardioResult?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
@@ -228,9 +229,10 @@ struct ActiveWorkoutView: View {
             }) { request in
                 CardioRecordingView(activityID: request.id, coordinator: activeWorkoutCoordinator, onSaveWorkout: {
                     shouldFinishAfterRecordingDismissal = true
-                }) { finishesWorkout in
+                }) { finishesWorkout, recordedDistance in
                     didSaveRecordingResult = false
                     prefersRecordedCardioDuration = true
+                    recordedCardioDistanceMeters = recordedDistance
                     shouldFinishAfterCardioResultDismissal = finishesWorkout
                     pendingRecordingResultID = request.id
                 }
@@ -241,6 +243,7 @@ struct ActiveWorkoutView: View {
                 shouldFinishAfterCardioResultDismissal = false
                 didSaveRecordingResult = false
                 prefersRecordedCardioDuration = false
+                recordedCardioDistanceMeters = nil
                 if finishesWorkout { finishWorkout() }
             }) { result in
                 let trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
@@ -260,7 +263,9 @@ struct ActiveWorkoutView: View {
                         notes: result.notes,
                         trackingProfile: trackingProfile
                     ),
-                    recordedDurationSeconds: prefersRecordedCardioDuration ? result.actualDurationSeconds : nil
+                    recordedDurationSeconds: prefersRecordedCardioDuration ? result.actualDurationSeconds : nil,
+                    recordedDistanceMeters: recordedCardioDistanceMeters,
+                    isOutdoorActivity: result.isOutdoorActivity
                 ) { validatedResult in
                     try saveCardioResult(
                         activityID: result.id,
@@ -1620,12 +1625,13 @@ struct ActiveWorkoutView: View {
                 }
                 finishWorkout()
             },
-            onEditResult: { finishesWorkout in
+            onEditResult: { finishesWorkout, recordedDistance in
                 if let current = activeWorkoutCoordinator.storedSnapshot?.session, current.id == sessionID {
                     applyRuntimeSessionState(current)
                 }
                 didSaveRecordingResult = false
                 prefersRecordedCardioDuration = true
+                recordedCardioDistanceMeters = recordedDistance
                 shouldFinishAfterCardioResultDismissal = finishesWorkout
                 presentCardioResult(activityID: activityID)
             }

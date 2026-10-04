@@ -31,6 +31,7 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
     @ObservationIgnored private var generation: UUID?
     @ObservationIgnored private var recordingStartedAt = Date.distantFuture
     @ObservationIgnored private var wantsUpdates = false
+    @ObservationIgnored private var maximumSpeedMetersPerSecond: Double = 12
     @ObservationIgnored private var pendingSave: Task<Void, Never>?
     @ObservationIgnored private var lastSavedAt = Date.distantPast
     @ObservationIgnored private var preparationToken = UUID()
@@ -96,6 +97,7 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
             stop()
             return
         }
+        maximumSpeedMetersPerSecond = CardioRecordingPolicy.maximumSpeedMetersPerSecond(for: activity)
         if activity.timerState == .running {
             if wantsUpdates {
                 // Restore waits for existing authorization without prompting.
@@ -236,7 +238,8 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
             if route?.append(
                 latitude: location.coordinate.latitude, longitude: location.coordinate.longitude,
                 timestamp: location.timestamp, accuracy: location.horizontalAccuracy,
-                now: .now, recordingStartedAt: recordingStartedAt
+                now: .now, recordingStartedAt: recordingStartedAt,
+                maximumSpeedMetersPerSecond: maximumSpeedMetersPerSecond
             ) == true { changed = true }
         }
         if changed {

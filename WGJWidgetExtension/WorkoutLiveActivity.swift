@@ -98,7 +98,11 @@ private struct WorkoutActivityDetails: View {
         HStack(spacing: 20) {
             if state.isCardio {
                 metric("Distance", value: state.distance ?? "—")
-                metric("Avg. pace", value: state.pace ?? "—")
+                if let speed = state.averageSpeed {
+                    metric("Avg. speed", value: speed)
+                } else {
+                    metric("Avg. pace", value: state.pace ?? "—")
+                }
             } else {
                 if let progress = state.progress {
                     Label(progress, systemImage: "checkmark.circle")

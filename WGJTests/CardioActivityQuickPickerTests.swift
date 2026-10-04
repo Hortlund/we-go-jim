@@ -157,6 +157,8 @@ final class CardioActivityQuickPickerTests: XCTestCase {
             WorkoutCardioTrackingProfile.walkRun.rawValue,
         ])
         XCTAssertNotNil(seedsByUUID["seed-incline-treadmill-walk"])
+        XCTAssertEqual(seedsByUUID["seed-outdoor-bike"]?.cardioTrackingProfileRaw,
+                       WorkoutCardioTrackingProfile.machineDistance.rawValue)
         XCTAssertFalse(CardioActivityQuickChoice.all.contains {
             $0.remoteUUID == "seed-incline-treadmill-walk"
         })
@@ -164,14 +166,14 @@ final class CardioActivityQuickPickerTests: XCTestCase {
 
     func testQuickChoicesUseStablePromotedOrder() {
         XCTAssertEqual(CardioActivityQuickChoice.all.map(\.remoteUUID), [
-            "seed-treadmill-walk", "seed-treadmill-run", "seed-outdoor-walk", "seed-outdoor-run",
+            "seed-treadmill-walk", "seed-treadmill-run", "seed-outdoor-walk", "seed-outdoor-run", "seed-outdoor-bike",
             "seed-bike", "seed-crosstrainer", "seed-row-machine", "seed-stair-climber",
         ])
     }
 
     func testQuickChoicesCarryExpectedTrackingProfiles() {
         XCTAssertEqual(CardioActivityQuickChoice.all.map(\.trackingProfile), [
-            .treadmill, .treadmill, .walkRun, .walkRun,
+            .treadmill, .treadmill, .walkRun, .walkRun, .machineDistance,
             .machineDistance, .machineDistance, .rower, .stairClimber,
         ])
     }

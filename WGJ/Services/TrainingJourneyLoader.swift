@@ -29,7 +29,7 @@ nonisolated enum TrainingJourneyLoader {
                         name: activity.exerciseNameSnapshot, distanceMeters: activity.actualDistanceMeters ?? 0,
                         durationSeconds: max(0, activity.actualDurationSeconds ?? 0),
                         isWalkRun: profile == .walkRun || profile == .treadmill,
-                        isOutdoor: activity.catalogExerciseUUID == "seed-outdoor-walk" || activity.catalogExerciseUUID == "seed-outdoor-run")
+                        isOutdoor: CardioRecordingPolicy.recordsGPS(catalogExerciseUUID: activity.catalogExerciseUUID))
                 })
         }
         var exercises: [JourneyExercise] = []

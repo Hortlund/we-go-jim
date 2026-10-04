@@ -281,6 +281,9 @@ nonisolated enum WorkoutCardioTrackingProfileResolver {
         if normalizedIdentity.contains("stair") {
             return .stairClimber
         }
+        if normalizedIdentity.contains("bike") || normalizedIdentity.contains("cycl") {
+            return .machineDistance
+        }
         if normalizedIdentity.contains("outdoor")
             || normalizedIdentity.contains("walk")
             || normalizedIdentity.contains("run") {

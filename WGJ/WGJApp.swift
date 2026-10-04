@@ -102,6 +102,7 @@ struct WGJApp: App {
     nonisolated private static func makeUITestContainer() throws -> ModelContainer {
 #if DEBUG
         resetActiveWorkoutSnapshotForUITestsIfRequested()
+        try CardioRecordingUITestScenario.seedIfRequested()
 #endif
         let appSchema = AppSchema.makeFull()
         let inMemory = ModelConfiguration(

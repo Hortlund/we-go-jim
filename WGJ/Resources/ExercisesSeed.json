@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "generatedAt": "2026-08-14T00:00:00Z",
   "muscles": [
     {
@@ -5119,6 +5119,32 @@
       "secondary_muscles": [
         5,
         7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1248,
+      "uuid": "seed-outdoor-bike",
+      "name": "Outdoor Bike",
+      "aliases": [
+        "Outdoor Cycling",
+        "Bike Ride"
+      ],
+      "category": "Cardio",
+      "equipment": "Outdoor,Bike",
+      "cardio_tracking_profile": "machineDistance",
+      "instructions": "Choose a safe route, stay aware of traffic and your surroundings, and ride at an effort you can sustain.",
+      "primary_muscles": [
+        5
+      ],
+      "secondary_muscles": [
+        7,
+        9
       ],
       "image_url": "",
       "source_url": "",

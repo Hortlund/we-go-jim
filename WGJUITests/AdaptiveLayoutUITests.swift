@@ -841,6 +841,93 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testOutdoorGPSFinishReviewsRecordedStatsAndNotesBeforeSaving() {
+        verifyOutdoorFinish(hasRoute: true, bike: false)
+    }
+
+    @MainActor
+    func testOutdoorBikeFinishShowsSpeedAndPreservesRouteSharing() {
+        verifyOutdoorFinish(hasRoute: true, bike: true)
+    }
+
+    @MainActor
+    func testOutdoorFinishWithoutGPSKeepsRecordedTimeAndManualDistanceFallback() {
+        verifyOutdoorFinish(hasRoute: false, bike: false)
+    }
+
+    @MainActor
+    func testReopeningManualOutdoorDistanceKeepsItEditableWithoutGPSLabel() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_PAUSED_OUTDOOR_CARDIO",
+            "UITEST_COMPLETED_MANUAL_OUTDOOR_CARDIO", "UITEST_NO_GPS_DISTANCE"])
+        let edit = app.buttons["Edit Result"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 8))
+        edit.tap()
+        let field = app.textFields["cardio-result-distance-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: ",", with: "."), "2.5")
+        XCTAssertFalse(app.staticTexts["GPS distance"].exists)
+        XCTAssertFalse(app.staticTexts["cardio-result-recorded-distance"].exists)
+        XCTAssertTrue(app.staticTexts["Time recorded. Review your distance below."].exists)
+        app.buttons["cardio-result-save-button"].tap()
+        XCTAssertTrue(edit.waitForExistence(timeout: 8))
+        edit.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: ",", with: "."), "2.5")
+        XCTAssertFalse(app.staticTexts["GPS distance"].exists)
+    }
+
+    @MainActor
+    private func verifyOutdoorFinish(hasRoute: Bool, bike: Bool) {
+        var arguments = ["UITEST_SEED_PAUSED_OUTDOOR_CARDIO"]
+        if bike { arguments.append("UITEST_OUTDOOR_BIKE") }
+        if !hasRoute { arguments.append("UITEST_NO_GPS_DISTANCE") }
+        let app = launchLocalApp(additionalArguments: arguments)
+        let resume = app.buttons["active-workout-strip"]
+        if resume.exists { resume.tap() }
+        XCTAssertTrue(app.buttons["cardio-recording-primary-button"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts[bike ? "Avg. speed" : "Avg. pace"].waitForExistence(timeout: 8))
+        app.buttons["cardio-recording-finish-button"].tap()
+        app.buttons["cardio-recording-confirm-finish-button"].firstMatch.tap()
+        let time = app.staticTexts["cardio-result-recorded-duration"]
+        XCTAssertTrue(time.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.textFields["cardio-result-duration-field"].exists)
+        XCTAssertFalse(app.buttons["cardio-result-detail-toggle"].exists)
+        let distance = app.staticTexts["cardio-result-recorded-distance"]
+        if hasRoute {
+            XCTAssertTrue(distance.exists)
+            XCTAssertTrue(distance.label.replacingOccurrences(of: ",", with: ".").contains("2.35"), distance.label)
+            XCTAssertFalse(app.textFields["cardio-result-distance-field"].exists)
+        } else {
+            XCTAssertFalse(distance.exists)
+            let field = app.textFields["cardio-result-distance-field"]
+            XCTAssertTrue(field.exists)
+            field.tap()
+            field.typeText("2.5")
+        }
+        let notes = app.textFields["cardio-result-notes-field"]
+        if !notes.isHittable { app.swipeUp() }
+        XCTAssertTrue(notes.isHittable, app.debugDescription)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = bike ? "Outdoor bike recorded result" : hasRoute ? "Outdoor GPS finish review" : "Outdoor missing GPS distance fallback"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        notes.tap()
+        notes.typeText("Felt good")
+        app.buttons["cardio-result-save-button"].tap()
+        XCTAssertTrue(app.otherElements["workout-completion-summary"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Felt good"].waitForExistence(timeout: 5))
+        let summaryScreenshot = XCTAttachment(screenshot: app.screenshot())
+        summaryScreenshot.name = "Outdoor result saved with notes"
+        summaryScreenshot.lifetime = .keepAlways
+        add(summaryScreenshot)
+        app.buttons["Share"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["workout-share-cardio-story"].waitForExistence(timeout: 8))
+        let route = app.images["workout-share-cardio-route"]
+        if hasRoute { XCTAssertTrue(route.waitForExistence(timeout: 10)) }
+        else { XCTAssertFalse(route.exists) }
+    }
+
+    @MainActor
     func testStandaloneIndoorCardioFinishesThroughDistanceEntryAndWorkoutSummary() {
         let app = launchLocalApp()
         let cardio = app.buttons["start-workout-cardio-button"]

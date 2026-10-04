@@ -4,6 +4,38 @@ import XCTest
 
 @MainActor
 final class CardioRecordingControllerTests: XCTestCase {
+    func testOutdoorBikeRecordsFastGPSDistanceAndStopsWhenFinished() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = TestCardioLocationManager()
+        manager.stubAuthorizationStatus = .authorizedWhenInUse
+        let routeStore = CardioRouteStore(directory: directory.appendingPathComponent("routes"))
+        let recorder = CardioRouteRecorder(store: routeStore, manager: manager)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: ActiveWorkoutSnapshotStore(baseDirectory: directory.appendingPathComponent("draft")),
+            persistence: CardioTestPersistence(), routeRecorder: recorder)
+        let choice = try XCTUnwrap(CardioActivityQuickChoice.all.first { $0.remoteUUID == "seed-outdoor-bike" })
+        let session = CardioSessionStarter.configuredSession(from: ActiveWorkoutRuntimeSession(name: "Bike"),
+            selection: choice.selection, distanceUnit: .kilometers)
+        let activity = try XCTUnwrap(session.cardioBlocks.first)
+        coordinator.send(.start(session))
+        let controller = CardioRecordingController(activityID: activity.id, coordinator: coordinator, recorder: recorder)
+        await controller.startOrResume()
+        XCTAssertEqual(manager.updateStarts, 1)
+        let start = Date.now.addingTimeInterval(0.1)
+        let fixes = [(59.0, start), (59.0006, start.addingTimeInterval(3))].map { latitude, date in
+            CLLocation(coordinate: .init(latitude: latitude, longitude: 18), altitude: 0,
+                horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: date)
+        }
+        recorder.locationManager(manager, didUpdateLocations: fixes)
+        XCTAssertEqual(try XCTUnwrap(recorder.route?.distanceMeters), 66.72, accuracy: 0.02)
+        let finished = await controller.finish()
+        XCTAssertTrue(finished)
+        XCTAssertEqual(try XCTUnwrap(controller.activity?.actualDistanceMeters), 66.72, accuracy: 0.02)
+        XCTAssertFalse(manager.allowsBackgroundLocationUpdates)
+        let route = try await routeStore.load(activityID: activity.id)
+        XCTAssertEqual(route?.isRecording, false)
+    }
+
     func testCancelledStartCannotChangeTimerOrTakeOverGPS() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -279,6 +311,7 @@ final class CardioRecordingControllerTests: XCTestCase {
         await controller.prepare()
         XCTAssertNil(controller.errorMessage)
         XCTAssertEqual(controller.route, savedRoute)
+        XCTAssertEqual(controller.recordedDistanceForResultReview, 1_250)
         XCTAssertEqual(recorder.route, liveRoute)
         XCTAssertEqual(recorder.gpsState, gpsState)
         XCTAssertEqual(coordinator.storedSnapshot?.revision, revision)
@@ -309,10 +342,34 @@ final class CardioRecordingControllerTests: XCTestCase {
             let receipt = coordinator.send(.synchronize(session: session, restTimer: nil,
                 presentationMode: .presented, scrollTarget: nil, expandedExerciseIDs: []))
             XCTAssertEqual(receipt.session.cardioBlocks[0].actualDistanceMeters, distance)
+            let controller = CardioRecordingController(activityID: completed.id, coordinator: coordinator, recorder: recorder)
+            await controller.prepare()
+            XCTAssertNil(controller.recordedDistanceForResultReview)
+            XCTAssertEqual(controller.activity?.actualDistanceMeters, distance)
             _ = try await coordinator.complete(notes: nil)
             let saved = await persistence.completedSession
             XCTAssertEqual(saved?.cardioBlocks[0].actualDistanceMeters, distance)
         }
+    }
+
+    func testReopeningManualDistanceWithoutGPSDoesNotDescribeItAsRecorded() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = TestCardioLocationManager()
+        let recorder = CardioRouteRecorder(store: CardioRouteStore(directory: directory.appendingPathComponent("routes")), manager: manager)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: ActiveWorkoutSnapshotStore(baseDirectory: directory.appendingPathComponent("draft")),
+            persistence: CardioTestPersistence(), routeRecorder: recorder)
+        var activity = makeActivity(outdoor: true)
+        activity.isCompleted = true
+        activity.actualDurationSeconds = 600
+        activity.actualDistanceMeters = 2_500
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Manual distance", cardioBlocks: [activity])))
+        let controller = CardioRecordingController(activityID: activity.id, coordinator: coordinator, recorder: recorder)
+        await controller.prepare()
+        XCTAssertNil(controller.recordedDistanceForResultReview)
+        XCTAssertEqual(controller.activity?.actualDistanceMeters, 2_500)
+        XCTAssertEqual(manager.permissionRequests, 0)
+        XCTAssertEqual(manager.updateStarts, 0)
     }
 
     private func temporaryDirectory() -> URL {
@@ -331,7 +388,8 @@ final class CardioRecordingControllerTests: XCTestCase {
 
 final class CardioSessionStarterTests: XCTestCase {
     func testQuickStartUsesOpenGoalPreferredUnitsAndExplicitOutdoorIdentity() throws {
-        for choice in CardioActivityQuickChoice.all where [.walkRun, .treadmill].contains(choice.trackingProfile) {
+        for choice in CardioActivityQuickChoice.all where [.walkRun, .treadmill].contains(choice.trackingProfile)
+            || CardioRecordingPolicy.recordsGPS(catalogExerciseUUID: choice.remoteUUID) {
             let empty = ActiveWorkoutRuntimeSession(name: "Empty Workout")
             let session = CardioSessionStarter.configuredSession(from: empty, selection: choice.selection, distanceUnit: .miles)
             let activity = try XCTUnwrap(session.cardioBlocks.first)
@@ -354,6 +412,17 @@ final class CardioSessionStarterTests: XCTestCase {
             trackingProfile: .walkRun, goalKind: .open, targetDurationSeconds: 0)
         XCTAssertTrue(CardioRecordingPolicy.usesSessionScreen(activity))
         XCTAssertFalse(CardioRecordingPolicy.recordsGPS(activity))
+    }
+
+    func testIndoorBikeAndCustomOutdoorBikeNeverCollectLocationFromTheirNames() {
+        for id in ["seed-bike", "custom-outdoor-bike"] {
+            let activity = ActiveWorkoutRuntimeCardioBlock(phase: .postWorkout,
+                catalogExerciseUUID: id, exerciseNameSnapshot: "Outdoor Bike",
+                categorySnapshot: "Cardio", muscleSummarySnapshot: "",
+                trackingProfile: .machineDistance, goalKind: .open, targetDurationSeconds: 0)
+            XCTAssertFalse(CardioRecordingPolicy.recordsGPS(activity))
+            XCTAssertFalse(CardioRecordingPolicy.usesSessionScreen(activity))
+        }
     }
 }
 
