@@ -205,6 +205,12 @@ Edit only `Configuration/Version.xcconfig` to set `MARKETING_VERSION` and `CURRE
 - CloudKit operations run outside interaction-critical view work and may degrade without blocking local use.
 - Widget publication uses a local snapshot in the app group and does not depend on CloudKit.
 
+## Community
+
+### Android Port
+
+[We Go Jim for Android](https://github.com/GenericD00d/we-go-jim-droid) is a community port created and maintained by [GenericD00d](https://github.com/GenericD00d). See that repository for Android features, installation instructions, and releases.
+
 ## Contributing
 
 This project is open source in spirit: issues, fixes, audits, experiments, and forks are welcome. The app direction is still intentionally personal and opinionated, so not every generic fitness-app feature belongs here.
