@@ -2,6 +2,201 @@ import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
+    func testTemplateDropsStayIndependentAndCarryIntoCompactWorkoutRows() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
+        let edit = app.buttons["start-workout-template-inline-edit-button-review-fixture"]
+        tapDropsetElement(edit, in: app)
+        let expand = app.buttons["template-editor-exercise-ui-test-bench-expand-button"]
+        tapDropsetElement(expand, in: app)
+        tapDropsetElement(app.buttons["Add Set"].firstMatch, in: app)
+
+        let addFirst = app.buttons["template-set-0-add-drop-stage-button"]
+        let addSecond = app.buttons["template-set-1-add-drop-stage-button"]
+        tapDropsetElement(addFirst, in: app)
+        let weight = app.textFields["template-set-0-drop-stage-0-weight-field"]
+        tapDropsetElement(weight, in: app)
+        weight.typeText("040")
+        XCTAssertEqual(weight.value as? String, "040", "Keep in-progress input while focused")
+        let reps = app.textFields["template-set-0-drop-stage-0-reps-field"]
+        tapDropsetElement(reps, in: app)
+        XCTAssertEqual(weight.value as? String, "40", "Normalize when switching drop fields")
+        reps.typeText("008")
+        XCTAssertEqual(reps.value as? String, "008", "Keep in-progress input while focused")
+        tapDropsetElement(weight, in: app)
+        XCTAssertEqual(reps.value as? String, "8", "Normalize when leaving the reps field")
+        // Editing an otherwise unchanged sibling must read the latest whole set list.
+        tapDropsetElement(addSecond, in: app)
+        XCTAssertTrue(weight.exists)
+        XCTAssertEqual(weight.value as? String, "40")
+        XCTAssertEqual(reps.value as? String, "8")
+        let siblingWeight = app.textFields["template-set-1-drop-stage-0-weight-field"]
+        tapDropsetElement(siblingWeight, in: app)
+        siblingWeight.typeText("025")
+        let siblingReps = app.textFields["template-set-1-drop-stage-0-reps-field"]
+        tapDropsetElement(siblingReps, in: app)
+        XCTAssertEqual(siblingWeight.value as? String, "25")
+        siblingReps.typeText("006")
+        tapDropsetElement(addFirst, in: app)
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-1-weight-field"].exists)
+        XCTAssertTrue(app.textFields["template-set-1-drop-stage-0-weight-field"].exists)
+        XCTAssertFalse(app.textFields["template-editor-name-field"].isHittable,
+            "Adding a drop should preserve the editor's scroll position")
+        let templateScreenshot = XCTAttachment(screenshot: app.screenshot())
+        templateScreenshot.name = "Compact template dropset with options"
+        templateScreenshot.lifetime = .keepAlways
+        add(templateScreenshot)
+
+        XCTAssertFalse(app.buttons["template-set-0-drop-stage-0-delete-button"].exists,
+            "Deleting a drop requires opening its options")
+        tapDropsetElement(app.buttons["template-set-0-drop-stage-0-options-button"], in: app)
+        app.buttons["template-set-0-drop-stage-0-delete-button"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-0-weight-field"].exists)
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-1-weight-field"].waitForNonExistence(timeout: 4))
+        XCTAssertTrue(app.textFields["template-set-1-drop-stage-0-weight-field"].exists)
+        tapDropsetElement(app.buttons["template-set-0-drop-stage-0-options-button"], in: app)
+        app.buttons["template-set-0-drop-stage-0-delete-button"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-0-weight-field"].waitForNonExistence(timeout: 4), app.debugDescription)
+        XCTAssertTrue(app.textFields["template-set-1-drop-stage-0-weight-field"].exists)
+        tapDropsetElement(addFirst, in: app)
+        app.buttons["template-editor-save-button"].tap()
+        XCTAssertTrue(edit.waitForExistence(timeout: 8))
+
+        // Verify the saved collection, rather than only the editor's local presentation.
+        tapDropsetElement(edit, in: app)
+        tapDropsetElement(expand, in: app)
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-0-weight-field"].exists)
+        XCTAssertTrue(app.textFields["template-set-1-drop-stage-0-weight-field"].exists)
+        XCTAssertEqual(siblingWeight.value as? String, "25")
+        XCTAssertEqual(siblingReps.value as? String, "6")
+        app.buttons["Cancel"].tap()
+        tapDropsetElement(app.buttons["start-workout-template-start-button-review-fixture"], in: app)
+        app.buttons["template-preview-start-button"].tap()
+        tapDropsetElement(app.buttons["active-workout-exercise-ui-test-bench-expand-button"], in: app)
+        let elapsedTimer = app.descendants(matching: .any)
+            .matching(identifier: "active-workout-elapsed-timer").firstMatch
+        XCTAssertTrue(elapsedTimer.waitForExistence(timeout: 4),
+            "Confirm the timer query finds the idle dock before testing focus")
+        let workoutWeight = app.textFields["workout-set-0-drop-stage-0-weight-field"]
+        tapDropsetElement(workoutWeight, in: app)
+        workoutWeight.typeText("35")
+        XCTAssertTrue(elapsedTimer.waitForNonExistence(timeout: 4),
+            "The timer dock must stay hidden while the drop weight field is focused")
+        let workoutReps = app.textFields["workout-set-0-drop-stage-0-reps-field"]
+        tapDropsetElement(workoutReps, in: app)
+        workoutReps.typeText("6")
+        let completion = app.buttons["workout-set-0-drop-stage-0-completion-button"]
+        XCTAssertEqual(workoutWeight.frame.midY, workoutReps.frame.midY, accuracy: 3)
+        XCTAssertEqual(workoutReps.frame.midY, completion.frame.midY, accuracy: 3)
+        XCTAssertFalse(completion.isEnabled, "Complete the parent set before its drops")
+        XCTAssertEqual(workoutWeight.value as? String, "35 kilograms")
+        XCTAssertEqual(workoutReps.value as? String, "6 reps")
+        XCTAssertTrue(elapsedTimer.waitForNonExistence(timeout: 4),
+            "The timer dock must stay hidden while a drop field is focused")
+
+        let mainWeight = app.textFields["workout-set-0-weight-field"]
+        tapDropsetElement(mainWeight, in: app)
+        mainWeight.typeText("50")
+        let mainReps = app.textFields["workout-set-0-reps-field"]
+        tapDropsetElement(mainReps, in: app)
+        mainReps.typeText("8")
+        let mainCompletion = app.buttons["workout-set-0-completion-button"]
+        tapDropsetElement(mainCompletion, in: app)
+        XCTAssertTrue(elapsedTimer.waitForExistence(timeout: 4),
+            "The timer dock must return after completing the main set dismisses input focus")
+        XCTAssertTrue(completion.isEnabled)
+        tapDropsetElement(completion, in: app)
+        XCTAssertEqual(completion.label, "Undo drop 1")
+        XCTAssertEqual(app.buttons["workout-set-1-drop-stage-0-completion-button"].label, "Complete drop 1")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact per-set drops in active workout"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        tapDropsetElement(mainCompletion, in: app)
+        XCTAssertEqual(completion.label, "Complete drop 1")
+        XCTAssertFalse(completion.isEnabled)
+        XCTAssertFalse(app.buttons["workout-set-0-drop-stage-0-delete-button"].exists)
+        let dropOptions = app.buttons["workout-set-0-drop-stage-0-options-button"]
+        tapDropsetElement(dropOptions, in: app)
+        XCTAssertTrue(app.buttons["workout-set-0-drop-stage-0-delete-button"].firstMatch.waitForExistence(timeout: 3))
+        // iOS 26 presents these actions in a popover that closes on an outside tap.
+        // Other dialog presentations provide the standard Cancel button.
+        if app.buttons["Cancel"].firstMatch.exists {
+            app.buttons["Cancel"].firstMatch.tap()
+        } else {
+            app.otherElements["PopoverDismissRegion"].firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.25)).tap()
+        }
+        XCTAssertTrue(app.buttons["workout-set-0-drop-stage-0-delete-button"].firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(workoutWeight.exists, "Opening or cancelling options must preserve the drop")
+        tapDropsetElement(dropOptions, in: app)
+        app.buttons["workout-set-0-drop-stage-0-delete-button"].firstMatch.tap()
+        XCTAssertTrue(workoutWeight.waitForNonExistence(timeout: 4))
+        XCTAssertTrue(app.textFields["workout-set-1-drop-stage-0-weight-field"].exists)
+    }
+
+    @MainActor
+    func testWorkoutDropsStackAtAccessibilityTextSize() {
+        let app = launchLocalApp(additionalArguments: [
+            "UITEST_SEED_TEMPLATE_REVIEW",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ])
+        tapDropsetElement(app.buttons["start-workout-template-start-button-review-fixture"], in: app)
+        let start = app.buttons["template-preview-start-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        tapDropsetElement(app.buttons["active-workout-exercise-ui-test-bench-expand-button"], in: app)
+        tapDropsetElement(app.buttons["workout-set-actions-button-0"], in: app)
+        app.buttons["Make dropset"].firstMatch.tap()
+        let weight = app.textFields["workout-set-0-drop-stage-0-weight-field"]
+        XCTAssertTrue(weight.waitForExistence(timeout: 8))
+        let reps = app.textFields["workout-set-0-drop-stage-0-reps-field"]
+        XCTAssertTrue(reps.exists)
+        XCTAssertLessThan(weight.frame.maxY, reps.frame.minY)
+        XCTAssertGreaterThan(weight.frame.width, 100)
+        XCTAssertGreaterThan(reps.frame.width, 100)
+    }
+
+    @MainActor
+    private func tapDropsetElement(_ element: XCUIElement, in app: XCUIApplication) {
+        _ = element.waitForExistence(timeout: 2)
+        for _ in 0..<12 {
+            let keyboardTop = app.keyboards.firstMatch.exists
+                ? app.keyboards.firstMatch.frame.minY : app.frame.maxY
+            var visibleBottom = min(app.frame.maxY - 100, keyboardTop - 24)
+            let timerTitle = app.staticTexts.matching(NSPredicate(
+                format: "label BEGINSWITH[c] %@ OR label BEGINSWITH[c] %@",
+                "Elapsed time", "Rest timer"
+            )).firstMatch
+            if timerTitle.exists && timerTitle.frame.minY > 220 {
+                visibleBottom = min(visibleBottom, timerTitle.frame.minY - 24)
+            }
+            if element.exists && element.isHittable && element.frame.minY > 175
+                && element.frame.maxY < visibleBottom { break }
+            // The editor sheet and home both expose scroll views. Drag inside the
+            // visible content above the keyboard, rather than scrolling the home.
+            let targetY = (175 + visibleBottom) / 2
+            let distance = element.exists
+                ? min(140, max(40, abs(element.frame.midY - targetY))) : 140
+            let upper = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: 20, dy: 220))
+            let lower = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: 20, dy: visibleBottom - 20))
+            if element.exists && element.frame.minY < 175 {
+                let end = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: 20, dy: 220 + distance))
+                upper.press(forDuration: 0.1, thenDragTo: end, withVelocity: 200, thenHoldForDuration: 0.2)
+            } else {
+                let end = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: 20, dy: visibleBottom - 20 - distance))
+                lower.press(forDuration: 0.1, thenDragTo: end, withVelocity: 200, thenHoldForDuration: 0.2)
+            }
+        }
+        XCTAssertTrue(element.exists, element.debugDescription)
+        XCTAssertTrue(element.isHittable, app.debugDescription)
+        element.tap()
+    }
+
+    @MainActor
     func testTemplateCardioPlanningOnlyOffersWarmupAndFinisher() {
         let app = launchLocalApp()
         let newTemplate = app.buttons["start-workout-new-template-button"]

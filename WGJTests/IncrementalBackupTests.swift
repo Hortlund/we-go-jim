@@ -6,6 +6,57 @@ import os
 
 @MainActor
 final class IncrementalBackupTests: XCTestCase {
+    func testDropsetsRoundTripThroughIncrementalBackupEditsAndPreviousGeneration() async throws {
+        let source = try DropsetBackupTestFixture.makeContainer()
+        let original = try UserDataCloudBackupPayload(context: ModelContext(source))
+        let store = MemoryArchiveStore()
+        let service = UserDataCloudBackupService(localContainer: source, backupStore: store)
+        _ = try await service.exportCurrentBackup()
+        let storedManifest = try await store.fetchManifest()
+        let initialManifest = try XCTUnwrap(storedManifest)
+        XCTAssertEqual(initialManifest.summary.templateDropStageCount, 3)
+        XCTAssertEqual(initialManifest.summary.workoutDropStageCount, 3)
+
+        let target = try makeContainer(workouts: 0)
+        let restoreService = UserDataCloudBackupService(localContainer: target, backupStore: store)
+        _ = try await restoreService.restoreLatestBackup()
+        try DropsetBackupTestFixture.assertRestored(original, in: target)
+
+        let context = ModelContext(source)
+        context.autosaveEnabled = false
+        let templateExercise = try XCTUnwrap(context.fetch(FetchDescriptor<TemplateExercise>()).first)
+        let templates = TemplateRepository(modelContext: context, boundaryEffects: .init(
+            postLibraryChange: {}, scheduleBackup: { _, _ in }
+        ))
+        var templateDrafts = try templates.setDrafts(for: templateExercise.id)
+        templateDrafts[0].dropStages.removeFirst()
+        templateDrafts[0].dropStages[0].targetWeight = 17.5
+        templateDrafts[0].dropStages.append(TemplateExerciseDropStageDraft(targetReps: 4, loadUnit: .bodyweight))
+        try templates.saveSetDrafts(templateExerciseID: templateExercise.id, drafts: templateDrafts)
+
+        let workoutExercise = try XCTUnwrap(context.fetch(FetchDescriptor<WorkoutSessionExercise>()).first)
+        let workouts = WorkoutSessionRepository(modelContext: context)
+        var workoutDrafts = try workouts.setDrafts(sessionExerciseID: workoutExercise.id)
+        workoutDrafts[0].dropStages.removeFirst()
+        workoutDrafts[0].dropStages[0].actualReps = 9
+        workoutDrafts[0].dropStages[0].actualWeight = 15.5
+        workoutDrafts[0].dropStages[0].actualLoadUnit = .kg
+        try workouts.saveSetDrafts(sessionExerciseID: workoutExercise.id, drafts: workoutDrafts)
+
+        _ = try await service.exportCurrentBackup()
+        let uploadedChunks = await store.lastUploadedChunkCount
+        XCTAssertEqual(uploadedChunks, 2, "Drop edits must invalidate both template and history chunks")
+        let updated = try UserDataCloudBackupPayload(context: ModelContext(source))
+        _ = try await restoreService.restoreLatestBackup(replacingLocalData: true)
+        try DropsetBackupTestFixture.assertRestored(updated, in: target)
+
+        let previousTarget = try makeContainer(workouts: 0)
+        _ = try await UserDataCloudBackupService(localContainer: previousTarget, backupStore: store)
+            .restoreLatestBackup(previousGeneration: true)
+        try DropsetBackupTestFixture.assertRestored(original, in: previousTarget)
+        await waitForCleanup()
+    }
+
     func testUnboundAutomaticRestoreRejectsBeforeReservingProgressOrWaitingForGate() async throws {
         let store = MemoryArchiveStore()
         let source = try makeContainer(workouts: 2)
@@ -1545,6 +1596,72 @@ final class IncrementalBackupTests: XCTestCase {
         for index in 0..<workouts { context.insert(WorkoutSession(name: "Workout \(index)", status: .completed, endedAt: .now)) }
         try context.save()
         return container
+    }
+}
+
+@MainActor
+enum DropsetBackupTestFixture {
+    static func makeContainer() throws -> ModelContainer {
+        let container = try AppSchema.makeInMemoryContainer(name: UUID().uuidString)
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let template = WorkoutTemplate(folderID: TemplateRepository.unfiledFolderID, name: "Dropsets")
+        let templateExercise = TemplateExercise(templateID: template.id, catalogExerciseUUID: "bench",
+            exerciseNameSnapshot: "Bench Press", categorySnapshot: "Strength", muscleSummarySnapshot: "Chest", template: template)
+        let session = WorkoutSession(name: "Dropsets", status: .completed, endedAt: .now)
+        let workoutExercise = WorkoutSessionExercise(sessionID: session.id, catalogExerciseUUID: "bench",
+            exerciseNameSnapshot: "Bench Press", categorySnapshot: "Strength", muscleSummarySnapshot: "Chest", session: session)
+        context.insert(template)
+        context.insert(templateExercise)
+        context.insert(session)
+        context.insert(workoutExercise)
+        for setIndex in 0..<2 {
+            let templateSet = TemplateExerciseSet(templateExerciseID: templateExercise.id, sortOrder: setIndex,
+                targetReps: 10, targetWeight: 60, templateExercise: templateExercise)
+            let workoutSet = WorkoutSessionSet(sessionExerciseID: workoutExercise.id, sortOrder: setIndex,
+                actualReps: 10, actualWeight: 60, isCompleted: true, sessionExercise: workoutExercise)
+            context.insert(templateSet)
+            context.insert(workoutSet)
+            for stageIndex in 0..<(setIndex == 0 ? 2 : 1) {
+                let unit: TemplateLoadUnit = setIndex == 1 ? .bodyweight : (stageIndex == 0 ? .kg : .lb)
+                let weight: Double? = unit == .bodyweight ? nil : (stageIndex == 0 ? 42.5 : 25)
+                let templateStage = TemplateExerciseDropStage(templateExerciseSetID: templateSet.id, sortOrder: stageIndex,
+                    targetReps: 8 - stageIndex, targetWeight: weight, loadUnit: unit, templateExerciseSet: templateSet)
+                let workoutStage = WorkoutSessionDropStage(sessionSetID: workoutSet.id, sortOrder: stageIndex,
+                    targetReps: 8 - stageIndex, targetWeight: weight, targetLoadUnit: unit,
+                    actualReps: setIndex == 0 ? 6 - stageIndex : nil,
+                    actualWeight: setIndex == 0 ? weight : nil, actualLoadUnit: unit,
+                    isCompleted: setIndex == 0, sessionSet: workoutSet)
+                context.insert(templateStage)
+                context.insert(workoutStage)
+            }
+        }
+        try context.saveWithRecoveryProtection()
+        return container
+    }
+
+    static func assertRestored(_ expected: UserDataCloudBackupPayload, in container: ModelContainer,
+        file: StaticString = #filePath, line: UInt = #line) throws {
+        let context = ModelContext(container)
+        let restored = try UserDataCloudBackupPayload(context: context)
+        // Compare every serialized field, including stable IDs, units, optional
+        // values, completion state, order, ownership IDs, and timestamps.
+        XCTAssertEqual(try BackupArchiveCodec.json(restored.templateDropStages.sorted { $0.id.uuidString < $1.id.uuidString }),
+            try BackupArchiveCodec.json(expected.templateDropStages.sorted { $0.id.uuidString < $1.id.uuidString }), file: file, line: line)
+        XCTAssertEqual(try BackupArchiveCodec.json(restored.workoutDropStages.sorted { $0.id.uuidString < $1.id.uuidString }),
+            try BackupArchiveCodec.json(expected.workoutDropStages.sorted { $0.id.uuidString < $1.id.uuidString }), file: file, line: line)
+        for set in try context.fetch(FetchDescriptor<TemplateExerciseSet>()) {
+            let stages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            let expectedStages = expected.templateDropStages.filter { $0.templateExerciseSetID == set.id }.sorted { $0.sortOrder < $1.sortOrder }
+            XCTAssertEqual(stages.map(\.id), expectedStages.map(\.id), file: file, line: line)
+            XCTAssertTrue(stages.allSatisfy { $0.templateExerciseSet?.id == set.id }, file: file, line: line)
+        }
+        for set in try context.fetch(FetchDescriptor<WorkoutSessionSet>()) {
+            let stages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            let expectedStages = expected.workoutDropStages.filter { $0.sessionSetID == set.id }.sorted { $0.sortOrder < $1.sortOrder }
+            XCTAssertEqual(stages.map(\.id), expectedStages.map(\.id), file: file, line: line)
+            XCTAssertTrue(stages.allSatisfy { $0.sessionSet?.id == set.id }, file: file, line: line)
+        }
     }
 }
 

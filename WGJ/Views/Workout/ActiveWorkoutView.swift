@@ -330,8 +330,8 @@ struct ActiveWorkoutView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
                 isKeyboardVisible = false
-                isMetricInputFocused = false
-                focusedMetricInputExerciseID = nil
+                // Keyboard visibility can change while a field remains focused.
+                // Let the editor's focus callbacks own metric focus state.
             }
             .onDisappear {
                 isCancelArmed = false

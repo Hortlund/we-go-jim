@@ -1517,6 +1517,15 @@ private struct TemplateExerciseSetCardView: View, Equatable {
 
             if !set.dropStages.isEmpty {
                 dropStagesSection
+            } else if !set.isWarmup {
+                Button(action: onAddDropStage) {
+                    Label("Make dropset", systemImage: "plus.circle")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(WGJTheme.accentCyan)
+                .accessibilityIdentifier("template-set-\(row.index)-add-drop-stage-button")
             }
         }
         .padding(12)
@@ -1706,26 +1715,14 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     }
 
     private var dropStagesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Dropset")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(WGJTheme.accentCyan)
-
-                Spacer()
-
-                Button {
-                    onAddDropStage()
-                } label: {
-                    Label("Add Drop", systemImage: "plus.circle")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(WGJTheme.accentBlue)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Dropset")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.accentCyan)
 
             ForEach(Array(set.dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
                 TemplateExerciseDropStageCardView(
+                    setIndex: row.index,
                     index: stageIndex,
                     stage: stage,
                     onRepsChanged: { onDropStageRepsChanged(stage.id, $0) },
@@ -1735,6 +1732,16 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                     keyboardDismissToken: keyboardDismissToken
                 )
             }
+
+            Button(action: onAddDropStage) {
+                Label("Add Drop", systemImage: "plus.circle")
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(WGJTheme.accentBlue)
+            .accessibilityIdentifier("template-set-\(row.index)-add-drop-stage-button")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1751,6 +1758,9 @@ private struct TemplateExerciseSetCardView: View, Equatable {
 }
 
 private struct TemplateExerciseDropStageCardView: View, Equatable {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    let setIndex: Int
     let index: Int
     let stage: TemplateExerciseDropStageDraft
     let onRepsChanged: (String) -> Void
@@ -1769,6 +1779,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
     }
 
     init(
+        setIndex: Int,
         index: Int,
         stage: TemplateExerciseDropStageDraft,
         onRepsChanged: @escaping (String) -> Void,
@@ -1777,6 +1788,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         onDelete: @escaping () -> Void,
         keyboardDismissToken: TemplateEditorKeyboardDismissToken = TemplateEditorKeyboardDismissToken()
     ) {
+        self.setIndex = setIndex
         self.index = index
         self.stage = stage
         self.onRepsChanged = onRepsChanged
@@ -1789,7 +1801,8 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
     }
 
     static func == (lhs: TemplateExerciseDropStageCardView, rhs: TemplateExerciseDropStageCardView) -> Bool {
-        lhs.index == rhs.index
+        lhs.setIndex == rhs.setIndex
+            && lhs.index == rhs.index
             && lhs.stage == rhs.stage
             && lhs.keyboardDismissToken == rhs.keyboardDismissToken
     }
@@ -1803,55 +1816,56 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
 
                 Spacer()
 
-                Button(role: .destructive) {
-                    onDelete()
+                WGJActionMenuButton("Drop \(index + 1) options") {
+                    Button("Delete drop", role: .destructive, action: onDelete)
+                        .accessibilityIdentifier("template-set-\(setIndex)-drop-stage-\(index)-delete-button")
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "ellipsis")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
                 .foregroundStyle(WGJTheme.textSecondary)
+                .accessibilityLabel("Set \(setIndex + 1), drop \(index + 1), options")
+                .accessibilityIdentifier("template-set-\(setIndex)-drop-stage-\(index)-options-button")
             }
 
-            HStack(spacing: 10) {
-                TextField("Weight", text: $weightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.center)
-                    .wgjPillField()
-                    .focused($focusedField, equals: .weight)
-
-                WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
-                    ForEach(TemplateLoadUnit.allCases) { unit in
-                        Button(unit.shortLabel) {
-                            commitLocalText()
-                            onLoadUnitChanged(unit)
-                        }
-                    }
-                } label: {
-                    Text(stage.loadUnit.shortLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WGJTheme.accentCyan)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    weightField
+                    repsField
                 }
-
-                TextField("Reps", text: $repsText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.center)
-                    .wgjPillField()
-                    .focused($focusedField, equals: .reps)
+            } else {
+                HStack(spacing: 10) {
+                    weightField
+                    repsField
+                }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("template-set-\(setIndex)-drop-stage-\(index)")
         .onChange(of: stage.targetReps) { _, newValue in
+            guard focusedField != .reps else { return }
             let resolved = newValue.map(String.init) ?? ""
             guard repsText != resolved else { return }
             repsText = resolved
         }
         .onChange(of: stage.targetWeight) { _, newValue in
+            guard focusedField != .weight else { return }
             let resolved = newValue.map(WGJFormatters.decimalString) ?? ""
             guard weightText != resolved else { return }
             weightText = resolved
         }
         .onChange(of: focusedField) { oldValue, newValue in
-            guard oldValue != nil, newValue == nil else { return }
+            guard let oldValue, oldValue != newValue else { return }
             commitLocalText()
+            // Live edits already update the draft. Resolve the field we just left
+            // even when its parsed target did not change (for example, "040").
+            switch oldValue {
+            case .weight:
+                weightText = stage.targetWeight.map(WGJFormatters.decimalString) ?? ""
+            case .reps:
+                repsText = stage.targetReps.map(String.init) ?? ""
+            }
         }
         .onChange(of: keyboardDismissToken) { _, _ in
             guard focusedField != nil else { return }
@@ -1861,6 +1875,55 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         .onDisappear {
             commitLocalText()
         }
+    }
+
+    private var weightField: some View {
+        HStack(spacing: 8) {
+            TextField("Weight", text: Binding(
+                get: { weightText },
+                set: { value in
+                    weightText = value
+                    onWeightChanged(value)
+                }
+            ))
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.center)
+            .focused($focusedField, equals: .weight)
+            .accessibilityLabel("Set \(setIndex + 1), drop \(index + 1), weight")
+            .accessibilityIdentifier("template-set-\(setIndex)-drop-stage-\(index)-weight-field")
+
+            WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
+                ForEach(TemplateLoadUnit.allCases) { unit in
+                    Button(unit.shortLabel) {
+                        commitLocalText()
+                        onLoadUnitChanged(unit)
+                    }
+                }
+            } label: {
+                Text(stage.loadUnit.shortLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+            }
+        }
+        .wgjPillField()
+        .frame(maxWidth: .infinity)
+    }
+
+    private var repsField: some View {
+        TextField("Reps", text: Binding(
+            get: { repsText },
+            set: { value in
+                repsText = value
+                onRepsChanged(value)
+            }
+        ))
+        .keyboardType(.numberPad)
+        .multilineTextAlignment(.center)
+        .wgjPillField()
+        .focused($focusedField, equals: .reps)
+        .accessibilityLabel("Set \(setIndex + 1), drop \(index + 1), reps")
+        .accessibilityIdentifier("template-set-\(setIndex)-drop-stage-\(index)-reps-field")
+        .frame(maxWidth: .infinity)
     }
 
     private func commitLocalText() {

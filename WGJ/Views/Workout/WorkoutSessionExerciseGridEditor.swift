@@ -71,6 +71,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var debounceCoordinator = WorkoutGridDebounceCoordinator()
     @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
+    @State private var focusedDropStageIDs: Set<UUID> = []
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -245,6 +246,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
             }
             .onDisappear {
+                focusedDropStageIDs.removeAll()
                 onInputFocusChange(false)
                 flushPendingEditorState()
                 if let flushIdentifier {
@@ -288,7 +290,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private var interactionObservedCard: some View {
         valueObservedCard
             .onChange(of: focusedInput) { previousFocus, newFocus in
-                onInputFocusChange(newFocus != nil)
+                onInputFocusChange(newFocus != nil || !focusedDropStageIDs.isEmpty)
                 handleFocusedInputChange(previousFocus, newFocus)
             }
             .onChange(of: keyboardDismissToken) { _, _ in
@@ -2436,7 +2438,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             onDelete: { removeDropStage(stage.id, from: setIndex) },
             keyboardDismissToken: keyboardDismissToken,
             onCommitPendingInput: { _ = flushPendingMetricInputForImmediateUse() },
-            onInputFocusChange: handleDropStageInputFocusChange
+            onInputFocusChange: { handleDropStageInputFocusChange($0, stageID: stage.id) }
         )
     }
 
@@ -2445,8 +2447,14 @@ struct WorkoutSessionExerciseGridEditor: View {
         requestCompletionChange(at: index, isCompleted: !setDrafts[index].isCompleted)
     }
 
-    private func handleDropStageInputFocusChange(_ isFocused: Bool) {
-        onInputFocusChange(isFocused || focusedInput != nil)
+    private func handleDropStageInputFocusChange(_ isFocused: Bool, stageID: UUID) {
+        if isFocused {
+            focusedDropStageIDs.insert(stageID)
+        } else {
+            focusedDropStageIDs.remove(stageID)
+        }
+        // An offscreen sibling's disappearance must not clear the focused drop.
+        onInputFocusChange(!focusedDropStageIDs.isEmpty || focusedInput != nil)
     }
 
     private func toggleCompletion(setID: UUID) {

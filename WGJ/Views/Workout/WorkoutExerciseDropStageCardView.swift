@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WorkoutExerciseDropStageCardView: View, Equatable {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
 
     let exerciseName: String
@@ -79,8 +79,8 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             isSetCompletionEnabled: isCompletionEnabled
         )
 
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Drop \(stageIndex + 1)")
                         .font(.caption.weight(.bold))
@@ -108,16 +108,21 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
                 }
 
                 if isEditingEnabled {
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "trash")
+                    WGJActionMenuButton("Drop \(stageIndex + 1) options") {
+                        Button("Delete drop", role: .destructive, action: onDelete)
+                            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-delete-button")
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .foregroundStyle(WGJTheme.textSecondary)
-                    .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-delete-button")
+                    .accessibilityLabel("Set \(setIndex + 1), drop \(stageIndex + 1), options")
+                    .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-options-button")
                 }
             }
 
-            if horizontalSizeClass == .compact {
+            if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     weightField
                     repsFieldWithCompletionControl(completionButton)
@@ -126,6 +131,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
                 HStack(spacing: 10) {
                     weightField
                     repsFieldWithCompletionControl(completionButton)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -141,6 +147,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
                         )
                 )
         )
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)")
         .onChange(of: stage.actualReps) { _, newValue in
             guard focusedField != .reps else { return }
@@ -193,7 +200,6 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             ))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.center)
-                .wgjPillField()
                 .focused($focusedField, equals: .weight)
                 .disabled(!isEditingEnabled)
                 .accessibilityLabel(weightAccessibility.label)
@@ -216,6 +222,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             .disabled(!isEditingEnabled)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-load-unit-button")
         }
+        .wgjPillField()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -328,4 +335,3 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
         }
     }
 }
-
