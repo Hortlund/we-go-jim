@@ -4,6 +4,43 @@ import XCTest
 
 @MainActor
 final class WorkoutPreviousPerformanceLookupTests: XCTestCase {
+    func testBatchedRepeatedSlotsKeepTheirOwnHistoryAndOrdinalGaps() throws {
+        let context = try context()
+        let template = UUID(), firstSlot = UUID(), secondSlot = UUID()
+        for index in 0..<100 {
+            let session = workout(context, at: Double(index * 2), template: template,
+                sets: [performed(20, warmup: true), performed(60), .init(), performed(50)], slot: firstSlot)
+            let repeated = WorkoutSessionExercise(sessionID: session.id, templateExerciseID: secondSlot,
+                catalogExerciseUUID: "bench", exerciseNameSnapshot: "Bench", categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Chest", session: session)
+            context.insert(repeated)
+            context.insert(WorkoutSessionSet(sessionExerciseID: repeated.id, actualReps: 12,
+                actualWeight: 30, isCompleted: true, sessionExercise: repeated))
+        }
+        try context.saveWithRecoveryProtection()
+        let drafts: [WorkoutSessionSetDraft] = [.init(isWarmup: true), .init(), .init(), .init()]
+        let requests = (0..<20).map { index in
+            WorkoutPreviousPerformanceRequest(id: UUID(), catalogExerciseUUID: "bench",
+                templateExerciseID: index.isMultiple(of: 2) ? firstSlot : secondSlot, drafts: drafts)
+        }
+        let loaded = try WorkoutPreviousPerformanceLookup(modelContext: context).load(requests: requests,
+            templateID: template, before: Date(timeIntervalSince1970: 1000), excludingSessionID: UUID())
+        for request in requests {
+            let result = try XCTUnwrap(loaded[request.id]).remapped(to: drafts)
+            if request.templateExerciseID == firstSlot {
+                XCTAssertEqual(result.previous(at: 0)?.weight, 20)
+                XCTAssertEqual(result.previous(at: 1)?.weight, 60)
+                XCTAssertNil(result.previous(at: 2))
+                XCTAssertEqual(result.previous(at: 3)?.weight, 50)
+            } else {
+                XCTAssertNil(result.previous(at: 0))
+                XCTAssertEqual(result.previous(at: 1)?.weight, 30)
+                XCTAssertNil(result.previous(at: 2))
+            }
+        }
+        XCTAssertFalse(context.hasChanges)
+    }
+
     private func context() throws -> ModelContext {
         let schema = AppSchema.makeFull()
         let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none))

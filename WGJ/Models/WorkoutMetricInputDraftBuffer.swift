@@ -254,7 +254,7 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         if normalized.isEmpty {
             updatedWeight = nil
         } else if let parsed = Self.parseLocalizedDecimal(normalized) {
-            updatedWeight = max(0, parsed)
+            updatedWeight = min(5000, max(0, parsed))
         } else {
             updatedWeight = draft.actualWeight
         }
@@ -294,8 +294,7 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         to draft: inout WorkoutSessionSetDraft,
         manualCompletionMode: Bool
     ) -> Bool {
-        let cleaned = text.filter(\.isNumber)
-        let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
+        let updatedReps = Self.parsedReps(text, fallback: draft.actualReps)
         var changed = false
 
         if draft.actualReps != updatedReps {
@@ -326,7 +325,7 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         if normalized.isEmpty {
             updatedWeight = nil
         } else if let parsed = Self.parseLocalizedDecimal(normalized) {
-            updatedWeight = max(0, parsed)
+            updatedWeight = min(5000, max(0, parsed))
         } else {
             updatedWeight = draft.actualWeight
         }
@@ -366,8 +365,7 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         to draft: inout WorkoutSessionDropStageDraft,
         manualCompletionMode: Bool
     ) -> Bool {
-        let cleaned = text.filter(\.isNumber)
-        let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
+        let updatedReps = Self.parsedReps(text, fallback: draft.actualReps)
         var changed = false
 
         if draft.actualReps != updatedReps {
@@ -384,6 +382,13 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         }
 
         return changed
+    }
+
+    private static func parsedReps(_ text: String, fallback: Int?) -> Int? {
+        let cleaned = text.filter(\.isNumber)
+        guard !cleaned.isEmpty else { return nil }
+        guard let reps = Int(cleaned) else { return fallback }
+        return min(999, reps)
     }
 
     private func resolvedWeightedLoadUnit(
@@ -431,14 +436,15 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !normalized.isEmpty else { return nil }
-        if let parsed = Double(normalized.replacingOccurrences(of: separator, with: ".")) {
+        if let parsed = Double(normalized.replacingOccurrences(of: separator, with: ".")), parsed.isFinite {
             return parsed
         }
 
         guard normalized.hasSuffix(separator) else { return nil }
         let trimmed = String(normalized.dropLast(separator.count))
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Double(trimmed.replacingOccurrences(of: separator, with: "."))
+        guard let parsed = Double(trimmed.replacingOccurrences(of: separator, with: ".")), parsed.isFinite else { return nil }
+        return parsed
     }
 
 }

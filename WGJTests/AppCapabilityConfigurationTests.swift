@@ -75,7 +75,9 @@ final class AppCapabilityConfigurationTests: XCTestCase {
             contentsOf: repository.appendingPathComponent("WGJ.xcodeproj/project.pbxproj"),
             encoding: .utf8
         )
-        XCTAssertNil(info["UIBackgroundModes"])
+        XCTAssertEqual(info["UIBackgroundModes"] as? [String], ["location"],
+                       "Only outdoor route recording needs background execution")
+        XCTAssertNotNil(info["NSLocationWhenInUseUsageDescription"])
         XCTAssertEqual(
             info["NSPhotoLibraryAddUsageDescription"] as? String,
             "Save workout images to your photo library."

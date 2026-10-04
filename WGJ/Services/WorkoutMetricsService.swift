@@ -976,6 +976,13 @@ nonisolated final class WorkoutMetricsService {
             if entry.totalWeightedVolumeInKilograms != nil { return entry.weightedVolumeUnit }
             return nil
         }.first ?? (history.contains { $0.maxReps != nil } ? .bodyweight : .kg)
+        let distanceUnit: WorkoutDistanceUnit
+        if history.contains(where: { $0.distanceMeters != nil }) {
+            distanceUnit = try ProfileRepository(modelContext: modelContext).currentProfile()?.preferredDistanceUnit
+                ?? .regionalDefault(locale: .current)
+        } else {
+            distanceUnit = .regionalDefault(locale: .current)
+        }
 
         return ExerciseProgressDataset(
             exerciseUUID: normalizedUUID,
@@ -1004,7 +1011,8 @@ nonisolated final class WorkoutMetricsService {
             },
             preferredLoadUnit: preferredUnit,
             usesAddedWeight: try addedWeightExerciseIDs([normalizedUUID]).contains(normalizedUUID),
-            usesAssistance: try assistanceExerciseIDs([normalizedUUID]).contains(normalizedUUID)
+            usesAssistance: try assistanceExerciseIDs([normalizedUUID]).contains(normalizedUUID),
+            preferredDistanceUnit: distanceUnit
         )
     }
 

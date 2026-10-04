@@ -150,7 +150,8 @@ nonisolated struct AssistanceRecordTracker {
     var repsByLoad: [Int: Int] = [:]
 
     mutating func consume(kilograms: Double, reps: Int) -> [WorkoutPersonalRecordKind] {
-        let key = Int((kilograms * 100).rounded())
+        guard kilograms.isFinite, kilograms >= 0, reps > 0,
+              let key = Int(exactly: (kilograms * 100).rounded()) else { return [] }
         var kinds: [WorkoutPersonalRecordKind] = []
         if kilograms < leastKilograms - 0.01 { kinds.append(.assistance); leastKilograms = kilograms }
         if let prior = repsByLoad[key], reps > prior { kinds.append(.assistedReps) }

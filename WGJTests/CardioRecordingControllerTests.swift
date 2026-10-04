@@ -4,6 +4,26 @@ import XCTest
 
 @MainActor
 final class CardioRecordingControllerTests: XCTestCase {
+    func testCancelledStartCannotChangeTimerOrTakeOverGPS() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = TestCardioLocationManager()
+        let recorder = CardioRouteRecorder(store: CardioRouteStore(directory: directory.appendingPathComponent("routes")), manager: manager)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: ActiveWorkoutSnapshotStore(baseDirectory: directory.appendingPathComponent("draft")),
+            persistence: CardioTestPersistence(), routeRecorder: recorder)
+        let activity = makeActivity(outdoor: true)
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Walk", cardioBlocks: [activity])))
+        let controller = CardioRecordingController(activityID: activity.id, coordinator: coordinator, recorder: recorder)
+        let task = Task { await controller.startOrResume() }
+        task.cancel()
+        await task.value
+        XCTAssertEqual(controller.activity?.timerState, .idle)
+        XCTAssertNil(recorder.route)
+        XCTAssertEqual(manager.permissionRequests, 0)
+        XCTAssertEqual(manager.updateStarts, 0)
+        XCTAssertNil(controller.errorMessage)
+    }
+
     func testOpeningRestoredRunningRouteRequestsExpiredLocationPermissionWithoutRestartingSegment() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

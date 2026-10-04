@@ -83,14 +83,18 @@ nonisolated struct WorkoutPreviousPerformanceLookup {
         })
         let exercises = try modelContext.fetch(descriptor).filter { sessionIDs.contains($0.sessionID) }
         let exercisesBySession = Dictionary(grouping: exercises, by: \.sessionID)
+            .mapValues { Dictionary(grouping: $0, by: \.catalogExerciseUUID) }
         let setsByExercise = Dictionary(grouping: try repository.sessionSets(sessionExerciseIDs: Set(exercises.map(\.id))),
                                         by: \.sessionExerciseID)
+        // Repeated slots share canonical history, but retain their own template-slot
+        // preference. Sort and normalize each historical set collection just once.
+        let snapshotsByExercise = setsByExercise.mapValues(Self.snapshots(sets:))
         var result: [UUID: WorkoutPreviousPerformanceResolution] = [:]
         for request in requests {
             var historySessions: [WorkoutPreviousPerformanceHistory.Session] = []
             for session in sessions {
-                let matching = exercisesBySession[session.id, default: []]
-                    .filter { $0.catalogExerciseUUID == request.catalogExerciseUUID }
+                let matching = exercisesBySession[session.id]?[request.catalogExerciseUUID, default: []] ?? []
+                let ordered = matching
                     .sorted {
                         let lhsMatches = request.templateExerciseID != nil && $0.templateExerciseID == request.templateExerciseID
                         let rhsMatches = request.templateExerciseID != nil && $1.templateExerciseID == request.templateExerciseID
@@ -99,9 +103,9 @@ nonisolated struct WorkoutPreviousPerformanceLookup {
                         return $0.id.uuidString < $1.id.uuidString
                     }
                 // Repeated exercise slots retain their own history when the slot still exists.
-                let candidates = matching.contains { request.templateExerciseID != nil && $0.templateExerciseID == request.templateExerciseID }
-                    ? matching.filter { $0.templateExerciseID == request.templateExerciseID } : matching
-                let snapshots = candidates.map { Self.snapshots(sets: setsByExercise[$0.id, default: []]) }
+                let candidates = ordered.contains { request.templateExerciseID != nil && $0.templateExerciseID == request.templateExerciseID }
+                    ? ordered.filter { $0.templateExerciseID == request.templateExerciseID } : ordered
+                let snapshots = candidates.compactMap { snapshotsByExercise[$0.id] }
                     .filter { !$0.warmups.isEmpty || !$0.working.isEmpty }
                 guard !snapshots.isEmpty else { continue }
                 historySessions.append(.init(id: session.id, name: session.name,

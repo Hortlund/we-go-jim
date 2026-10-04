@@ -53,7 +53,8 @@ nonisolated enum ExerciseProgressProjector {
             summary: summary,
             milestones: milestones,
             accessibilitySummary: accessibilitySummary,
-            usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance
+            usesAddedWeight: dataset.usesAddedWeight, usesAssistance: dataset.usesAssistance,
+            distanceUnit: dataset.preferredDistanceUnit
         )
     }
 

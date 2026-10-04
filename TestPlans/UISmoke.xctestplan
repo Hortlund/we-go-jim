@@ -40,6 +40,7 @@
         "AdaptiveLayoutUITests/testExerciseSearchRefocusesAfterOpeningFilter",
         "AdaptiveLayoutUITests/testActiveWorkoutStripHidesDuringExerciseSearchAndReturnsAfterDismissal",
         "AdaptiveLayoutUITests/testExerciseProgressSelectors",
+        "AdaptiveLayoutUITests/testExerciseCatalogHidesIndexRailAtAccessibilityTextSize",
         "AdaptiveLayoutUITests/testHistoryMainCardioSummaryOpensDetailWithoutHanging",
         "AdaptiveLayoutUITests/testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn",
         "AdaptiveLayoutUITests/testTemplateLibraryScrollsToOffscreenRowsAndBack",

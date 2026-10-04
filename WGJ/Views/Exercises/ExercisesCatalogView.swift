@@ -44,6 +44,7 @@ struct ExercisesCatalogView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
@@ -130,6 +131,7 @@ struct ExercisesCatalogView: View {
 
     private var shouldShowIndexRail: Bool {
         return horizontalSizeClass == .regular
+            && !dynamicTypeSize.isAccessibilitySize
             && reservesIndexRailSpace
             && !isSearchFieldFocused
             && searchState.debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
