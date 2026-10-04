@@ -11,6 +11,21 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         case artifactCleanup
     }
 
+    func testLegacyBackupPreservesIndependentTemplateAndWorkoutDropsets() async throws {
+        let source = try DropsetBackupTestFixture.makeContainer()
+        let expected = try UserDataCloudBackupPayload(context: ModelContext(source))
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(localContainer: source, backupStore: backupStore).exportCurrentBackup()
+        let target = try makeInMemoryContainer()
+        let service = UserDataCloudBackupService(localContainer: target, backupStore: backupStore)
+        _ = try await service.restoreLatestBackup()
+        try DropsetBackupTestFixture.assertRestored(expected, in: target)
+        // Merge the same IDs again: restoring must update, rather than duplicate,
+        // the stages or move them between their parent sets.
+        _ = try await service.restoreLatestBackup()
+        try DropsetBackupTestFixture.assertRestored(expected, in: target)
+    }
+
     func testBatchedCloudReadsOnlyTreatExplicitUnknownItemsAsAbsent() throws {
         let head = CKRecord(recordType: UserDataCloudBackupDescriptor.recordType,
                             recordID: CKRecord.ID(recordName: "head"))

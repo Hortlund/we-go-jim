@@ -2,6 +2,36 @@ import XCTest
 @testable import WGJ
 
 final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
+    func testIndependentDropsetsSurviveColdSnapshotLoadAndStageDeletion() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let exercise = ActiveWorkoutRuntimeExercise(catalogExerciseUUID: "bench", exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength", muscleSummarySnapshot: "Chest", setDrafts: [
+                WorkoutSessionSetDraft(isCompleted: true, dropStages: [
+                    WorkoutSessionDropStageDraft(targetReps: 8, targetWeight: 40, actualReps: 7, actualWeight: 37.5, isCompleted: true),
+                    WorkoutSessionDropStageDraft(targetReps: 6, targetWeight: 25, targetLoadUnit: .lb, actualLoadUnit: .lb),
+                ]),
+                WorkoutSessionSetDraft(dropStages: [
+                    WorkoutSessionDropStageDraft(targetReps: 5, targetLoadUnit: .bodyweight, actualLoadUnit: .bodyweight),
+                ]),
+            ])
+        var snapshot = ActiveWorkoutStoredSnapshot(revision: 1,
+            session: ActiveWorkoutRuntimeSession(name: "Dropsets", exercises: [exercise]))
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        _ = try await store.save(snapshot)
+        let coldStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let restored = try await coldStore.loadStoredSnapshot()
+        XCTAssertEqual(restored?.session.exercises.first?.setDrafts, exercise.setDrafts)
+
+        snapshot.revision += 1
+        snapshot.session.exercises[0].setDrafts[0].dropStages.removeFirst()
+        _ = try await coldStore.save(snapshot)
+        let reopenedStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let afterDeletion = try await reopenedStore.loadStoredSnapshot()
+        XCTAssertEqual(afterDeletion?.session.exercises.first?.setDrafts, snapshot.session.exercises[0].setDrafts)
+        XCTAssertEqual(afterDeletion?.session.exercises.first?.setDrafts[1].dropStages, exercise.setDrafts[1].dropStages)
+    }
+
     func testInvalidationRejectsDelayedOldWriteAndPreservesNewMutationAfterReopen() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

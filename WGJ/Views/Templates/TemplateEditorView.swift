@@ -1148,12 +1148,59 @@ private struct TemplateEditorExerciseRow: View {
                 supersetPresentation: supersetPresentation,
                 setDrafts: localSetDrafts
             ),
-            notes: localNotes,
-            targetRepMin: localTargetRepMin,
-            targetRepMax: localTargetRepMax,
-            restSeconds: localRestSeconds,
-            setDrafts: localSetDrafts,
-            isExpanded: draftStore.isExpanded,
+            notes: Binding(
+                get: { localNotes },
+                set: { value in
+                    localNotes = value
+                    editingCoordinator.scheduleNotesCommit(value)
+                }
+            ),
+            targetRepMin: Binding(
+                get: { localTargetRepMin },
+                set: { value in
+                    localTargetRepMin = value
+                    editingCoordinator.requestImmediateCommit(
+                        notes: localNotes,
+                        targetRepMin: value,
+                        targetRepMax: localTargetRepMax,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
+                    )
+                }
+            ),
+            targetRepMax: Binding(
+                get: { localTargetRepMax },
+                set: { value in
+                    localTargetRepMax = value
+                    editingCoordinator.requestImmediateCommit(
+                        notes: localNotes,
+                        targetRepMin: localTargetRepMin,
+                        targetRepMax: value,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
+                    )
+                }
+            ),
+            restSeconds: Binding(
+                get: { localRestSeconds },
+                set: { value in
+                    localRestSeconds = value
+                    editingCoordinator.scheduleRestCommit(value)
+                }
+            ),
+            // Read current state even from a retained, unchanged set card's actions.
+            // A binding to a copied array can overwrite another set's new drops.
+            setDrafts: Binding(
+                get: { localSetDrafts },
+                set: { value in
+                    localSetDrafts = value
+                    editingCoordinator.scheduleSetDraftCommit(value)
+                }
+            ),
+            isExpanded: Binding(
+                get: { draftStore.isExpanded },
+                set: updateExpanded
+            ),
             keyboardDismissToken: keyboardDismissToken,
             onCommitRequest: {
                 editingCoordinator.requestImmediateCommit(
@@ -1163,39 +1210,6 @@ private struct TemplateEditorExerciseRow: View {
                     restSeconds: localRestSeconds,
                     setDrafts: localSetDrafts
                 )
-            },
-            onExpandedChanged: updateExpanded,
-            onNotesChanged: { value in
-                localNotes = value
-                editingCoordinator.scheduleNotesCommit(value)
-            },
-            onTargetRepMinChanged: { value in
-                localTargetRepMin = value
-                editingCoordinator.requestImmediateCommit(
-                    notes: localNotes,
-                    targetRepMin: value,
-                    targetRepMax: localTargetRepMax,
-                    restSeconds: localRestSeconds,
-                    setDrafts: localSetDrafts
-                )
-            },
-            onTargetRepMaxChanged: { value in
-                localTargetRepMax = value
-                editingCoordinator.requestImmediateCommit(
-                    notes: localNotes,
-                    targetRepMin: localTargetRepMin,
-                    targetRepMax: value,
-                    restSeconds: localRestSeconds,
-                    setDrafts: localSetDrafts
-                )
-            },
-            onRestChanged: { value in
-                localRestSeconds = value
-                editingCoordinator.scheduleRestCommit(value)
-            },
-            onSetDraftsChanged: { value in
-                localSetDrafts = value
-                editingCoordinator.scheduleSetDraftCommit(value)
             },
             onMoveUp: onMoveUp,
             onMoveDown: onMoveDown,
@@ -1221,7 +1235,6 @@ private struct TemplateEditorExerciseRow: View {
                 )
             }
         )
-        .equatable()
         .onChange(of: draftStore.targetRepMin) { _, newValue in
             editingCoordinator.syncCommittedState(
                 notes: draftStore.notes,
@@ -1299,7 +1312,7 @@ private struct TemplateEditorExerciseRow: View {
     }
 }
 
-private struct TemplateEditorExerciseCardView: View, Equatable {
+private struct TemplateEditorExerciseCardView: View {
     let exerciseName: String
     let muscleSummary: String
     let category: String
@@ -1312,21 +1325,15 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let supersetPresentation: TemplateEditorSupersetPresentation?
     let canMakeSupersetWithNext: Bool
     let structureSummaries: [String]
-    let notes: String
-    let targetRepMin: Int?
-    let targetRepMax: Int?
-    let restSeconds: Int
-    let setDrafts: [TemplateExerciseSetDraft]
-    let isExpanded: Bool
+    @Binding var notes: String
+    @Binding var targetRepMin: Int?
+    @Binding var targetRepMax: Int?
+    @Binding var restSeconds: Int
+    @Binding var setDrafts: [TemplateExerciseSetDraft]
+    @Binding var isExpanded: Bool
     let keyboardDismissToken: TemplateEditorKeyboardDismissToken
 
     let onCommitRequest: () -> Void
-    let onExpandedChanged: (Bool) -> Void
-    let onNotesChanged: (String) -> Void
-    let onTargetRepMinChanged: (Int?) -> Void
-    let onTargetRepMaxChanged: (Int?) -> Void
-    let onRestChanged: (Int) -> Void
-    let onSetDraftsChanged: ([TemplateExerciseSetDraft]) -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onMakeSuperset: () -> Void
@@ -1342,29 +1349,6 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onMoveComponentDown: (Int) -> Void
     let onDeleteComponent: (UUID) -> Void
     let shouldCommitOnDisappear: () -> Bool
-
-    static func == (lhs: TemplateEditorExerciseCardView, rhs: TemplateEditorExerciseCardView) -> Bool {
-        lhs.exerciseName == rhs.exerciseName
-            && lhs.muscleSummary == rhs.muscleSummary
-            && lhs.category == rhs.category
-            && lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
-            && lhs.recommendation == rhs.recommendation
-            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
-            && lhs.canMoveUp == rhs.canMoveUp
-            && lhs.canMoveDown == rhs.canMoveDown
-            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
-            && lhs.supersetPresentation == rhs.supersetPresentation
-            && lhs.canMakeSupersetWithNext == rhs.canMakeSupersetWithNext
-            && lhs.structureSummaries == rhs.structureSummaries
-            && lhs.notes == rhs.notes
-            && lhs.targetRepMin == rhs.targetRepMin
-            && lhs.targetRepMax == rhs.targetRepMax
-            && lhs.restSeconds == rhs.restSeconds
-            && lhs.setDrafts == rhs.setDrafts
-            && lhs.isExpanded == rhs.isExpanded
-            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
-            && lhs.components == rhs.components
-    }
 
     var body: some View {
         TemplateExercisePrescriptionEditor(
@@ -1387,10 +1371,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
                     WGJExerciseNotesEditor(
                         placeholder: "Add notes for this exercise",
                         accessibilityIdentifier: "\(exerciseAccessibilityIdentifier)-notes-field",
-                        notes: Binding(
-                            get: { notes },
-                            set: { onNotesChanged($0) }
-                        )
+                        notes: $notes
                     )
 
                     TemplateExerciseComponentsSection(
@@ -1404,31 +1385,16 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
                 }
             ),
             initiallyExpanded: false,
-            isExpanded: Binding(
-                get: { isExpanded },
-                set: { onExpandedChanged($0) }
-            ),
+            isExpanded: $isExpanded,
             exerciseIndexTitle: exerciseIndexTitle,
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
             preferredLoadUnit: preferredLoadUnit,
             keyboardDismissToken: keyboardDismissToken,
-            targetRepMin: Binding(
-                get: { targetRepMin },
-                set: { onTargetRepMinChanged($0) }
-            ),
-            targetRepMax: Binding(
-                get: { targetRepMax },
-                set: { onTargetRepMaxChanged($0) }
-            ),
-            restSeconds: Binding(
-                get: { restSeconds },
-                set: { onRestChanged($0) }
-            ),
-            setDrafts: Binding(
-                get: { setDrafts },
-                set: { onSetDraftsChanged($0) }
-            ),
+            targetRepMin: $targetRepMin,
+            targetRepMax: $targetRepMax,
+            restSeconds: $restSeconds,
+            setDrafts: $setDrafts,
             onCommitRequest: onCommitRequest,
             shouldCommitOnDisappear: shouldCommitOnDisappear,
             onMoveUp: onMoveUp,
