@@ -788,6 +788,7 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
     case cardio(role: WorkoutCardioRole, activityID: UUID?)
     case exercise(UUID)
     case superset(UUID)
+    case set(UUID)
     case cancelSection
 
     private enum CodingKeys: String, CodingKey {
@@ -795,6 +796,7 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
         case cardio
         case exercise
         case superset
+        case set
         case cancelSection
         case preWorkoutCardio
         case postWorkoutCardio
@@ -831,6 +833,11 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
                 forKey: .exercise
             )
             self = .exercise(try values.decode(UUID.self, forKey: .value))
+            return
+        }
+        if container.contains(.set) {
+            let values = try container.nestedContainer(keyedBy: AssociatedValueCodingKeys.self, forKey: .set)
+            self = .set(try values.decode(UUID.self, forKey: .value))
             return
         }
         if container.contains(.superset) {
@@ -883,6 +890,9 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
                 forKey: .exercise
             )
             try values.encode(exerciseID, forKey: .value)
+        case .set(let setID):
+            var values = container.nestedContainer(keyedBy: AssociatedValueCodingKeys.self, forKey: .set)
+            try values.encode(setID, forKey: .value)
         case .superset(let groupID):
             var values = container.nestedContainer(
                 keyedBy: AssociatedValueCodingKeys.self,

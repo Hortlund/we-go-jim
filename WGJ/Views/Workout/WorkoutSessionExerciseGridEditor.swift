@@ -26,6 +26,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
+    let supersetCue: WorkoutSupersetSetCue?
     let usesAddedWeight: Bool
     let usesAssistance: Bool
     let usesBarbell: Bool
@@ -100,6 +101,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
+        supersetCue: WorkoutSupersetSetCue? = nil,
         usesAddedWeight: Bool = false, usesAssistance: Bool = false, usesBarbell: Bool = false,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
@@ -144,6 +146,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
+        self.supersetCue = supersetCue
         self.usesAddedWeight = usesAddedWeight
         self.usesAssistance = usesAssistance
         self.usesBarbell = usesBarbell
@@ -712,6 +715,17 @@ struct WorkoutSessionExerciseGridEditor: View {
             let completionPresentation = completionControlPresentation(for: row)
 
             VStack(alignment: .leading, spacing: 12) {
+                if let supersetCue, supersetCue.setID == row.id {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .accessibilityHidden(true)
+                        Text(supersetCue.text)
+                            .accessibilityIdentifier("workout-superset-next-set-cue")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(alignment: .top, spacing: 10) {
                     setBadge(for: row)
 
@@ -800,6 +814,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                     completionSupplementalRow(supplementalRow, for: row)
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(exerciseAccessibilityIdentifier.map { "\($0)-set-\(row.index)" } ?? "workout-set-\(row.index)")
+            .id(ActiveWorkoutScrollTarget.set(row.id))
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(

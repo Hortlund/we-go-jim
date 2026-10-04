@@ -31,6 +31,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
+    let supersetCue: WorkoutSupersetSetCue?
     let usesAddedWeight: Bool
     let usesAssistance: Bool
     let usesBarbell: Bool
@@ -85,6 +86,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
+        supersetCue: WorkoutSupersetSetCue? = nil,
         usesAddedWeight: Bool = false, usesAssistance: Bool = false, usesBarbell: Bool = false,
         preferredLoadUnit: TemplateLoadUnit,
         componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
@@ -134,6 +136,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
+        self.supersetCue = supersetCue
         self.usesAddedWeight = usesAddedWeight
         self.usesAssistance = usesAssistance
         self.usesBarbell = usesBarbell
@@ -197,6 +200,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             personalRecordSummaryKinds: personalRecordSummaryKinds,
             personalRecordKindsBySetID: personalRecordKindsBySetID,
             guidance: guidance,
+            supersetCue: supersetCue,
             usesAddedWeight: usesAddedWeight, usesAssistance: usesAssistance, usesBarbell: usesBarbell,
             preferredLoadUnit: preferredLoadUnit,
             componentSummaryResolution: componentSummaryResolution,
@@ -316,6 +320,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.personalRecordSummaryKinds == rhs.personalRecordSummaryKinds
             && lhs.personalRecordKindsBySetID == rhs.personalRecordKindsBySetID
             && lhs.guidance == rhs.guidance
+            && lhs.supersetCue == rhs.supersetCue
             && lhs.usesAddedWeight == rhs.usesAddedWeight
             && lhs.usesBarbell == rhs.usesBarbell
             && lhs.usesAssistance == rhs.usesAssistance

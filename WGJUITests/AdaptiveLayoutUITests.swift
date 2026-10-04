@@ -2,6 +2,118 @@ import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
+    func testSupersetGuidesMatchingRoundsAndRestsAfterBothExercises() {
+        verifySupersetFlow(includesWarmups: false)
+    }
+
+    @MainActor
+    func testSupersetWarmupsMoveToPartnerBeforeResting() {
+        verifySupersetFlow(includesWarmups: true)
+    }
+
+    @MainActor
+    private func verifySupersetFlow(includesWarmups: Bool) {
+        var arguments = ["UITEST_SEED_TEMPLATE_REVIEW", "UITEST_SEED_SUPERSET", "UITEST_SUPERSET_SHORT_REST"]
+        if includesWarmups { arguments.append("UITEST_SUPERSET_WARMUPS") }
+        let app = launchLocalApp(additionalArguments: arguments)
+        tapDropsetElement(app.buttons["start-workout-template-start-button-review-fixture"], in: app)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Rest after A2")).firstMatch.exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Superset")).count, 1)
+        app.buttons["template-preview-start-button"].tap()
+        tapDropsetElement(app.buttons["workout-superset-go-to-next-set"], in: app)
+
+        func row(_ exercise: String, _ index: Int) -> XCUIElement {
+            app.otherElements["active-workout-exercise-\(exercise)-set-\(index)"].firstMatch
+        }
+        func complete(_ exercise: String, _ index: Int, scroll: Bool) {
+            let card = row(exercise, index)
+            let weight = card.textFields["workout-set-\(index)-weight-field"]
+            if scroll {
+                tapDropsetElement(weight, in: app)
+            } else {
+                XCTAssertTrue(weight.waitForExistence(timeout: 4))
+                XCTAssertTrue(weight.isHittable, "Automatically show the next exercise's matching set")
+                XCTAssertGreaterThan(weight.frame.minY, 90)
+                XCTAssertLessThan(weight.frame.maxY, app.frame.maxY - 100)
+                weight.tap()
+            }
+            weight.typeText("40")
+            let reps = card.textFields["workout-set-\(index)-reps-field"]
+            tapDropsetElement(reps, in: app)
+            reps.typeText("8")
+            tapDropsetElement(card.buttons["workout-set-\(index)-completion-button"], in: app)
+        }
+        func assertCue(_ text: String) {
+            let exerciseName = text.contains("A1") ? "Bench Press" : "Dumbbell Row"
+            let cue = app.staticTexts.matching(identifier: "workout-superset-next-set-cue")
+                .matching(NSPredicate(format: "label == %@", "\(text) · \(exerciseName)")).firstMatch
+            XCTAssertTrue(cue.waitForExistence(timeout: 4), app.debugDescription)
+            XCTAssertFalse(app.staticTexts["workout-superset-follow-up-cue"].exists)
+        }
+        let restTimer = app.descendants(matching: .any).matching(identifier: "active-workout-rest-timer").firstMatch
+        if includesWarmups {
+            complete("ui-test-bench", 0, scroll: false)
+            assertCue("Do now: A2 · Warmup Set")
+            XCTAssertFalse(restTimer.exists, "A1 warmup moves straight to A2 warmup")
+            let warmupScreenshot = XCTAttachment(screenshot: app.screenshot())
+            warmupScreenshot.name = "A2 warmup guidance without premature rest"
+            warmupScreenshot.lifetime = .keepAlways
+            add(warmupScreenshot)
+            complete("ui-test-row", 0, scroll: false)
+            XCTAssertTrue(restTimer.waitForExistence(timeout: 4), "Rest only after both warmups")
+            assertCue("After rest: A1 · Working Set 1")
+            app.buttons["active-workout-dismiss-rest-button"].tap()
+            XCTAssertTrue(restTimer.waitForNonExistence(timeout: 4))
+        }
+        let firstWorkingIndex = includesWarmups ? 1 : 0
+        complete("ui-test-bench", firstWorkingIndex, scroll: false)
+        assertCue("Do now: A2 · Working Set 1")
+        XCTAssertFalse(restTimer.exists, "No rest between A1 and A2")
+        complete("ui-test-row", firstWorkingIndex, scroll: false)
+        assertCue("After rest: A1 · Working Set 2")
+        XCTAssertTrue(restTimer.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bench Press · Next: A1 · Working Set 2")).firstMatch.exists, app.debugDescription)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Superset round rest and next set guidance"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(restTimer.waitForNonExistence(timeout: 20), "The round rest should finish naturally")
+        assertCue("Do now: A1 · Working Set 2")
+
+        // The destination and logged round survive minimizing and reopening the workout.
+        app.buttons["active-workout-minimize-button"].tap()
+        let resume = app.buttons["active-workout-strip"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 4))
+        resume.tap()
+        assertCue("Do now: A1 · Working Set 2")
+        complete("ui-test-bench", firstWorkingIndex + 1, scroll: false)
+        assertCue("Do now: A2 · Working Set 2")
+        XCTAssertFalse(restTimer.exists)
+        complete("ui-test-row", firstWorkingIndex + 1, scroll: false)
+        XCTAssertTrue(restTimer.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Superset complete")).firstMatch.exists)
+        func assertBothClosed() {
+            for exercise in ["ui-test-bench", "ui-test-row"] {
+                let expand = app.buttons["active-workout-exercise-\(exercise)-expand-button"]
+                let closed = NSPredicate(format: "value == %@", "Collapsed")
+                XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: expand)], timeout: 4) == .completed,
+                              "Close both completed superset exercises when auto-close is enabled: \(exercise)")
+            }
+        }
+        assertBothClosed()
+        let completedScreenshot = XCTAttachment(screenshot: app.screenshot())
+        completedScreenshot.name = "Both completed superset exercises closed"
+        completedScreenshot.lifetime = .keepAlways
+        add(completedScreenshot)
+        app.buttons["active-workout-dismiss-rest-button"].tap()
+        XCTAssertTrue(restTimer.waitForNonExistence(timeout: 4))
+        app.buttons["active-workout-minimize-button"].tap()
+        XCTAssertTrue(resume.waitForExistence(timeout: 4))
+        resume.tap()
+        assertBothClosed()
+    }
+
+    @MainActor
     func testTemplateDropsStayIndependentAndCarryIntoCompactWorkoutRows() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_REVIEW"])
         let edit = app.buttons["start-workout-template-inline-edit-button-review-fixture"]

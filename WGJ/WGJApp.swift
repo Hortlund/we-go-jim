@@ -156,6 +156,31 @@ struct WGJApp: App {
                 }
             }
             template.exercises = [exercise]
+            if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_SUPERSET") {
+                context.autosaveEnabled = false
+                let roundRest = ProcessInfo.processInfo.arguments.contains("UITEST_SUPERSET_SHORT_REST") ? 15 : 75
+                let group = TemplateSupersetGroup(templateID: template.id, roundRestSeconds: roundRest, template: template)
+                let second = TemplateExercise(templateID: template.id, catalogExerciseUUID: "ui-test-row",
+                    exerciseNameSnapshot: "Dumbbell Row", categorySnapshot: "Strength", muscleSummarySnapshot: "Back",
+                    supersetGroupID: group.id, supersetPosition: .second, sortOrder: 1,
+                    template: template, supersetGroup: group)
+                exercise.supersetGroupID = group.id
+                exercise.supersetPosition = .first
+                exercise.supersetGroup = group
+                let includesWarmup = ProcessInfo.processInfo.arguments.contains("UITEST_SUPERSET_WARMUPS")
+                for member in [exercise, second] {
+                    member.prescribedSets = (0..<(includesWarmup ? 3 : 2)).map { index in
+                        TemplateExerciseSet(templateExerciseID: member.id, sortOrder: index,
+                            targetReps: 8, targetWeight: 40,
+                            isWarmup: includesWarmup && index == 0, templateExercise: member)
+                    }
+                }
+                group.exercises = [exercise, second]
+                template.supersetGroups = [group]
+                template.exercises = [exercise, second]
+                context.insert(ExerciseCatalogItem(remoteUUID: "ui-test-row", displayName: "Dumbbell Row",
+                    categoryName: "Strength", equipmentSummary: "Dumbbell", sourceName: "custom"))
+            }
             context.insert(template)
             if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_PREVIOUS") {
                 let alternateOnly = ProcessInfo.processInfo.arguments.contains("UITEST_TEMPLATE_PREVIOUS_ALTERNATE_ONLY")

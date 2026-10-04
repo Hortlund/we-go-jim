@@ -808,6 +808,7 @@ struct ActiveWorkoutView: View {
                     targetRepMax: exercise.targetRepMax,
                     previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
                     guidance: nil,
+                    supersetCue: supersetSetCue(for: exercise),
                     usesAddedWeight: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAddedWeight ?? false,
                     usesAssistance: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.usesAssistance ?? false,
                     usesBarbell: catalogMatchesByUUID[exercise.catalogExerciseUUID]?.equipmentSummary.localizedCaseInsensitiveContains("barbell") ?? false,
@@ -851,6 +852,10 @@ struct ActiveWorkoutView: View {
                                 exercise: exercise
                             )
                         } else {
+                            if let progression = supersetProgression(for: exerciseID),
+                               progression.contains(sourceID: restTimerState.restTimerSourceSetID) {
+                                clearRestTimerAndPersist()
+                            }
                             startRestTimer(
                                 seconds: 0,
                                 exerciseName: exercise.exerciseNameSnapshot,
@@ -915,9 +920,18 @@ struct ActiveWorkoutView: View {
                 index: index
             )
         case .superset(let superset):
+            let progression = supersetProgression(for: superset.first.id)
+            let next = progression?.nextStep
+            let nextExercise = sessionExercises.first { $0.id == next?.exerciseID }
             VStack(alignment: .leading, spacing: 12) {
                 ActiveWorkoutSupersetHeader(
-                    roundRestSeconds: superset.roundRestSeconds
+                    nextStepLabel: next?.label,
+                    nextExerciseName: nextExercise?.exerciseNameSnapshot,
+                    isResting: progression?.contains(sourceID: restTimerState.restTimerSourceSetID) == true
+                        && restTimerState.restTimerEndsAt != nil,
+                    onShowNextSet: {
+                        if let next { advanceSuperset(to: next) }
+                    }
                 )
 
                 exerciseRow(
@@ -941,6 +955,7 @@ struct ActiveWorkoutView: View {
                             .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
                     )
             )
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("active-workout-superset-group-\(superset.groupID.uuidString.lowercased())")
             .id(ActiveWorkoutScrollTarget.superset(superset.groupID))
             .transition(exerciseCardTransition)
@@ -2077,21 +2092,23 @@ struct ActiveWorkoutView: View {
             for: exercise.id,
             refreshProjectionImmediately: refreshesProjectionImmediately
         )
+        if previouslyCompleted != isCompleted {
+            cardStateController.updateCompletion(
+                for: exercise.id,
+                isCompleted: isCompleted
+            )
+            if isCompleted {
+                WorkoutFeedbackCenter.shared.exerciseCompleted()
+                collapseCompletedExerciseCard(exercise.id)
+            }
+        }
+        // Persist the resulting card state. Staging expanded IDs before auto-close
+        // lets the snapshot refresh restore the completed card as expanded again.
         persistCommittedUserEditSnapshot(
             writeDurableSnapshot: ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(
                 for: changeSummary
             )
         )
-
-        guard previouslyCompleted != isCompleted else { return }
-        cardStateController.updateCompletion(
-            for: exercise.id,
-            isCompleted: isCompleted
-        )
-        if isCompleted {
-            WorkoutFeedbackCenter.shared.exerciseCompleted()
-            collapseCompletedExerciseCard(exercise.id)
-        }
     }
 
     @MainActor
@@ -2147,25 +2164,80 @@ struct ActiveWorkoutView: View {
             return
         }
 
+        if let progression = supersetProgression(for: exercise.id) {
+            guard drafts[source.setIndex].isCycleCompleted else {
+                clearRestTimerAndPersist()
+                return
+            }
+            let seconds = progression.restSeconds(
+                afterCompletingSetAt: source.setIndex,
+                exerciseID: exercise.id
+            )
+            let next = progression.nextStep
+            let nextExercise = sessionExercises.first { $0.id == next?.exerciseID }
+            if seconds > 0 {
+                startRestTimer(seconds: seconds,
+                               exerciseName: nextExercise?.exerciseNameSnapshot ?? "Superset complete",
+                               setLabel: next.map { "Next: \($0.label)" }, sourceSetID: sourceID)
+            } else {
+                clearRestTimerAndPersist()
+            }
+            if let next {
+                advanceSuperset(to: next)
+            }
+            return
+        }
+
         guard source.completesSetCycle else {
             clearRestTimerAndPersist(sourceSetID: sourceID)
             return
         }
-
-        let resolvedRestSeconds: Int
-        if let supersetContext = supersetContextByExerciseID[exercise.id],
-           supersetContext.position == .second {
-            resolvedRestSeconds = supersetContext.roundRestSeconds
-        } else {
-            resolvedRestSeconds = restSeconds
-        }
-
         startRestTimer(
-            seconds: resolvedRestSeconds,
+            seconds: restSeconds,
             exerciseName: exercise.exerciseNameSnapshot,
             setLabel: setLabel,
             sourceSetID: sourceID
         )
+    }
+
+    @MainActor
+    private func supersetProgression(for exerciseID: UUID) -> WorkoutSupersetProgression? {
+        guard let context = supersetContextByExerciseID[exerciseID],
+              let exercise = sessionExercises.first(where: { $0.id == exerciseID }),
+              let paired = sessionExercises.first(where: { $0.id == context.pairedExerciseID }) else { return nil }
+        let first = context.position == .first ? exercise : paired
+        let second = context.position == .second ? exercise : paired
+        return WorkoutSupersetProgression(
+            firstExerciseID: first.id, secondExerciseID: second.id,
+            firstDrafts: resolvedDrafts(for: first), secondDrafts: resolvedDrafts(for: second),
+            roundRestSeconds: context.roundRestSeconds
+        )
+    }
+
+    @MainActor
+    private func supersetSetCue(for exercise: ActiveWorkoutRuntimeExercise) -> WorkoutSupersetSetCue? {
+        guard let progression = supersetProgression(for: exercise.id),
+              let next = progression.nextStep, next.exerciseID == exercise.id else { return nil }
+        let isResting = progression.contains(sourceID: restTimerState.restTimerSourceSetID)
+            && restTimerState.restTimerEndsAt != nil
+        return WorkoutSupersetSetCue(setID: next.setID,
+                                    text: "\(isResting ? "After rest:" : "Do now:") \(next.label) · \(exercise.exerciseNameSnapshot)")
+    }
+
+    @MainActor
+    private func advanceSuperset(to step: WorkoutSupersetProgression.Step) {
+        dismissKeyboard()
+        cardStateController.setExpanded(true, for: step.exerciseID)
+        scheduleExpandedExerciseHydrationIfNeeded()
+        // Wait for expansion/collapse layout before targeting the specific round's set.
+        Task { @MainActor in
+            await Task.yield()
+            guard canMutateActiveSession,
+                  supersetProgression(for: step.exerciseID)?.nextStep?.setID == step.setID else { return }
+            let target = ActiveWorkoutScrollTarget.set(step.setID)
+            scrollPositionTracker.currentTarget = target
+            scrollToTarget(target, animation: WGJMotion.cardAnimation(reduceMotion: reduceMotion))
+        }
     }
 
     @MainActor
@@ -2181,10 +2253,10 @@ struct ActiveWorkoutView: View {
                 )
             }
 
-            if let dropStageIndex = draft.dropStages.firstIndex(where: { $0.id == sourceID }) {
+            if draft.dropStages.contains(where: { $0.id == sourceID }) {
                 return ActiveWorkoutCompletionSourceContext(
                     setIndex: setIndex,
-                    completesSetCycle: dropStageIndex == draft.dropStages.count - 1
+                    completesSetCycle: draft.isCycleCompleted
                 )
             }
         }
@@ -2561,6 +2633,10 @@ struct ActiveWorkoutView: View {
             return cardioBlocks(for: role).contains { $0.id == activityID }
         case .exercise(let exerciseID):
             return sessionExercises.contains { $0.id == exerciseID }
+        case .set(let setID):
+            return sessionExercises.contains { exercise in
+                resolvedDrafts(for: exercise).contains { $0.id == setID }
+            }
         case .superset(let groupID):
             return exerciseDisplayGroups.contains { group in
                 guard case .superset(let superset) = group else { return false }

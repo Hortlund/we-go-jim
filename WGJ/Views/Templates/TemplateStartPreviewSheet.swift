@@ -290,10 +290,7 @@ struct TemplateStartPreviewSheet: View {
                 .padding(.vertical, 12)
         case .superset(let superset):
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    structureBadge("Superset", tint: WGJTheme.accentBlue)
-                    structureBadge("Rest after A2 \(formattedRest(superset.roundRestSeconds))", tint: WGJTheme.accentCyan)
-                }
+                structureBadge("Superset", tint: WGJTheme.accentBlue)
 
                 previewExerciseRow(superset.first, title: SupersetExercisePosition.first.label)
                 previewExerciseRow(superset.second, title: SupersetExercisePosition.second.label)
@@ -460,23 +457,8 @@ struct TemplateStartPreviewSheet: View {
 
     @ViewBuilder
     private func structureBadgeRow(for exercise: StartWorkoutTemplatePreview.Exercise) -> some View {
-        let presentation = WorkoutExerciseStructurePresentation(
-            supersetMembership: exercise.supersetMembership,
-            hasDropset: exercise.hasDropset
-        )
-
-        if presentation.isSuperset || presentation.hasDropset {
-            HStack(spacing: 8) {
-                if presentation.isSuperset {
-                    structureBadge("Superset", tint: WGJTheme.accentBlue)
-                }
-                if let position = presentation.supersetPosition {
-                    structureBadge(position.label, tint: WGJTheme.accentCyan)
-                }
-                if presentation.hasDropset {
-                    structureBadge("Dropset", tint: WGJTheme.accentGold)
-                }
-            }
+        if exercise.hasDropset {
+            structureBadge("Dropset", tint: WGJTheme.accentGold)
         }
     }
 

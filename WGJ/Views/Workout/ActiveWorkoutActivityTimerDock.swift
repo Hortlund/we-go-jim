@@ -39,7 +39,9 @@ struct ActiveWorkoutActivityTimerDock: View {
                         Text(secondaryText)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.84)
+                            .lineLimit(isResting ? 2 : 1)
+                            .minimumScaleFactor(0.84)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 12)
                     if canReveal {
@@ -67,9 +69,11 @@ struct ActiveWorkoutActivityTimerDock: View {
                             )
                         )
                         .accessibilityLabel("Dismiss rest timer")
+                        .accessibilityIdentifier("active-workout-dismiss-rest-button")
                     }
                 }
                 .frame(minHeight: 44)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel(accessibilityLabel(isResting: isResting, primaryValue: primaryValue, secondaryText: secondaryText))
                 if canReveal, let revealedRestID, revealedRestID == restTimerState.lastCompletedRest?.sourceSetID {
                     Text(GymEasterEggPolicy.restMessage)
