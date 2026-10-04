@@ -3,6 +3,15 @@ import XCTest
 @testable import WGJ
 
 final class LocalizationFormattingTests: XCTestCase {
+    @MainActor
+    func testDecimalParsingRejectsOverflowAndPreservesLocalizedInput() {
+        XCTAssertNil(WGJFormatters.parseLocalizedDecimal(String(repeating: "9", count: 400)))
+        XCTAssertNil(WGJFormatters.parseLocalizedDecimal("NaN"))
+        XCTAssertEqual(WGJFormatters.parseLocalizedDecimal("82,5"), 82.5)
+        XCTAssertEqual(WGJFormatters.parseLocalizedDecimal("82.5"), 82.5)
+        XCTAssertEqual(WGJFormatters.parseLocalizedDecimal("82."), 82)
+    }
+
     func testCoreEnglishFormatting() {
         XCTAssertEqual(L10n.restTimerTitle, "Rest complete")
         XCTAssertEqual(L10n.restTimerBody, "Time for your next set.")

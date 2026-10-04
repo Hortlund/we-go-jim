@@ -45,6 +45,7 @@ nonisolated struct WorkoutProgressSetInput: Equatable, Sendable {
     let weight: Double?
     let loadUnit: TemplateLoadUnit
     let isCompleted: Bool
+    var completedDropVolumeKg: Double = 0
 }
 
 nonisolated struct WorkoutProgressExerciseInput: Equatable, Sendable {
@@ -699,11 +700,10 @@ nonisolated private struct SessionMetrics: Equatable, Sendable {
         durationSeconds = session.durationSeconds
         prHitsCount = session.prHitsCount
 
-        let exerciseMetrics = session.exercises
-            .map(ExerciseMetrics.init(exercise:))
-            .filter { $0.completedSetCount > 0 }
+        let allExerciseMetrics = session.exercises.map(ExerciseMetrics.init(exercise:))
+        let exerciseMetrics = allExerciseMetrics.filter { $0.completedSetCount > 0 }
 
-        totalVolumeKg = exerciseMetrics.reduce(0) { $0 + $1.totalVolumeKg }
+        totalVolumeKg = allExerciseMetrics.reduce(0) { $0 + $1.totalVolumeKg }
         completedSetCount = exerciseMetrics.reduce(0) { $0 + $1.completedSetCount }
         completedExerciseCount = exerciseMetrics.count
         exercisesByCatalogUUID = Dictionary(
@@ -765,15 +765,16 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
             }
 
         completedSetCount = workingSets.count
-        totalVolumeKg = exercise.usesAssistance ? 0 : workingSets.reduce(0) { total, set in
-            guard let reps = set.reps,
+        totalVolumeKg = exercise.usesAssistance ? 0 : exercise.sets.filter { !$0.isWarmup }.reduce(0) { total, set in
+            let includingDrops = total + set.completedDropVolumeKg
+            guard set.isCompleted, let reps = set.reps, reps > 0,
                   let weight = set.weight,
                   weight > 0,
                   set.loadUnit != .bodyweight
             else {
-                return total
+                return includingDrops
             }
-            return total + WorkoutPerformanceMath.weightedVolumeInKilograms(
+            return includingDrops + WorkoutPerformanceMath.weightedVolumeInKilograms(
                 weight: weight,
                 reps: reps,
                 unit: set.loadUnit
@@ -932,7 +933,9 @@ extension WorkoutProgressSessionInput {
                     catalogExerciseUUID: row.exercise.catalogExerciseUUID,
                     exerciseName: row.exercise.exerciseNameSnapshot,
                     sortOrder: row.exercise.sortOrder,
-                    sets: row.sets.map(WorkoutProgressSetInput.init(set:))
+                    sets: row.sets.map { set in
+                        WorkoutProgressSetInput(set: set, dropStages: source.dropStagesBySetID.map { $0[set.id, default: []] })
+                    }
                 )
             }
         )
@@ -963,7 +966,7 @@ extension WorkoutProgressExerciseInput {
             exerciseName: exercise.exerciseNameSnapshot,
             sortOrder: exercise.sortOrder,
             sets: try repository.sessionSets(sessionExerciseID: exercise.id)
-                .map(WorkoutProgressSetInput.init(set:))
+                .map { WorkoutProgressSetInput(set: $0) }
         )
     }
 
@@ -975,13 +978,13 @@ extension WorkoutProgressExerciseInput {
             sortOrder: exercise.sortOrder,
             sets: (exercise.sets ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
-                .map(WorkoutProgressSetInput.init(set:))
+                .map { WorkoutProgressSetInput(set: $0) }
         )
     }
 }
 
 extension WorkoutProgressSetInput {
-    nonisolated init(set: WorkoutSessionSet) {
+    nonisolated init(set: WorkoutSessionSet, dropStages: [WorkoutSessionDropStage]? = nil) {
         let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
             actualWeight: set.actualWeight,
             actualLoadUnit: set.actualLoadUnit,
@@ -994,7 +997,14 @@ extension WorkoutProgressSetInput {
             reps: set.actualReps,
             weight: normalizedActualLoad.weight,
             loadUnit: normalizedActualLoad.unit,
-            isCompleted: set.isCompleted
+            isCompleted: set.isCompleted,
+            completedDropVolumeKg: (dropStages ?? set.dropStages ?? []).reduce(0) { total, stage in
+                guard stage.isCompleted, let reps = stage.actualReps, reps > 0 else { return total }
+                let load = WorkoutLoggedLoadNormalization.resolved(actualWeight: stage.actualWeight,
+                    actualLoadUnit: stage.actualLoadUnit, targetLoadUnit: stage.targetLoadUnit)
+                guard let weight = load.weight, weight.isFinite, weight > 0 else { return total }
+                return total + WorkoutPerformanceMath.weightedVolumeInKilograms(weight: weight, reps: reps, unit: load.unit)
+            }
         )
     }
 }

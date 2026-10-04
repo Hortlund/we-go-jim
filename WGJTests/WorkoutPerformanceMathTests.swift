@@ -2,6 +2,17 @@ import XCTest
 @testable import WGJ
 
 final class WorkoutPerformanceMathTests: XCTestCase {
+    func testInvalidAssistanceLoadsDoNotCrashOrChangeRecordBaseline() {
+        var tracker = AssistanceRecordTracker()
+        XCTAssertEqual(tracker.consume(kilograms: 50, reps: 5), [.assistance])
+        for weight in [Double.nan, .infinity, -.infinity, .greatestFiniteMagnitude, -1] {
+            XCTAssertTrue(tracker.consume(kilograms: weight, reps: 100).isEmpty)
+        }
+        XCTAssertTrue(tracker.consume(kilograms: 0, reps: 0).isEmpty)
+        XCTAssertEqual(tracker.consume(kilograms: 50, reps: 6), [.assistedReps])
+        XCTAssertEqual(tracker.consume(kilograms: 40, reps: 5), [.assistance])
+    }
+
     func testEstimatedOneRepMaxUsesEpleyFormula() {
         XCTAssertEqual(
             WorkoutPerformanceMath.estimatedOneRepMax(weight: 100, reps: 5),

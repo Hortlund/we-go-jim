@@ -329,7 +329,9 @@ private struct ExerciseProgressChartCard: View {
                     AxisGridLine().foregroundStyle(WGJTheme.outlineStrong.opacity(0.25))
                     AxisValueLabel {
                         if let number = value.as(Double.self) {
-                            Text(WGJFormatters.decimalString(number)).foregroundStyle(WGJTheme.textSecondary)
+                            Text(projection.metric == .distance || projection.metric == .duration
+                                 ? projection.formattedValue(number) : WGJFormatters.decimalString(number))
+                                .foregroundStyle(WGJTheme.textSecondary)
                         }
                     }
                 }

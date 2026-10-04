@@ -72,13 +72,15 @@ nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
     let preferredLoadUnit: TemplateLoadUnit
     let usesAddedWeight: Bool
     let usesAssistance: Bool
+    let preferredDistanceUnit: WorkoutDistanceUnit
 
     init(
         exerciseUUID: String,
         exerciseName: String,
         sessions: [ExerciseProgressSession],
         preferredLoadUnit: TemplateLoadUnit,
-        usesAddedWeight: Bool = false, usesAssistance: Bool = false
+        usesAddedWeight: Bool = false, usesAssistance: Bool = false,
+        preferredDistanceUnit: WorkoutDistanceUnit = .kilometers
     ) {
         self.exerciseUUID = exerciseUUID
         self.exerciseName = exerciseName
@@ -89,6 +91,7 @@ nonisolated struct ExerciseProgressDataset: Hashable, Sendable {
         self.preferredLoadUnit = preferredLoadUnit
         self.usesAddedWeight = usesAddedWeight
         self.usesAssistance = usesAssistance
+        self.preferredDistanceUnit = preferredDistanceUnit
     }
 }
 
@@ -144,6 +147,7 @@ nonisolated struct ExerciseProgressProjection: Equatable, Sendable {
     let accessibilitySummary: String
     var usesAddedWeight: Bool = false
     var usesAssistance: Bool = false
+    var distanceUnit: WorkoutDistanceUnit = .kilometers
 }
 
 extension ExerciseProgressDataset {
@@ -201,7 +205,7 @@ extension ExerciseProgressProjection {
         case .duration:
             return "\(WGJFormatters.oneDecimalString(value / 60)) min"
         case .distance:
-            return "\(WGJFormatters.oneDecimalString(value / 1000)) km"
+            return "\(WGJFormatters.oneDecimalString(distanceUnit.value(fromMeters: value))) \(distanceUnit.symbol)"
         case .workoutFrequency:
             let count = Int(value.rounded())
             return "\(count) workout" + (count == 1 ? "" : "s") + "/week"

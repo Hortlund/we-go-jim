@@ -33,7 +33,7 @@ final class CardioRecordingController {
     }
 
     func prepare() async {
-        guard let snapshot = coordinator.storedSnapshot, let activity,
+        guard !Task.isCancelled, let snapshot = coordinator.storedSnapshot, let activity,
               CardioRecordingPolicy.recordsGPS(activity) else { return }
         if activity.isCompleted {
             isPreparing = true
@@ -59,16 +59,22 @@ final class CardioRecordingController {
         defer { isPreparing = false }
         do {
             try await recorder.prepare(sessionID: snapshot.session.id, activityID: activityID)
-            recorder.synchronize(with: snapshot.session)
+            guard !Task.isCancelled, let current = coordinator.storedSnapshot?.session,
+                  current.id == snapshot.session.id else { return }
+            recorder.synchronize(with: current)
         } catch {
+            guard !Task.isCancelled else { return }
             errorMessage = String(localized: "Your saved route could not be opened. Please try again.")
         }
     }
 
     func startOrResume() async {
+        guard !Task.isCancelled else { return }
+        let sessionID = coordinator.storedSnapshot?.session.id
         errorMessage = nil
         await prepare()
-        guard errorMessage == nil else { return }
+        guard !Task.isCancelled, errorMessage == nil,
+              coordinator.storedSnapshot?.session.id == sessionID else { return }
         transition { activityID, blocks, date in
             if blocks.first(where: { $0.id == activityID })?.timerState == .paused {
                 try WorkoutCardioTimerCoordinator.resume(activityID: activityID, blocks: &blocks, at: date)

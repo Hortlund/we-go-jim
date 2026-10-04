@@ -784,6 +784,56 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(drafts[0].dropStages[0].actualLoadUnit, .kg)
     }
 
+    func testNonFinitePastedWeightsPreserveEncodableWorkoutDrafts() throws {
+        for text in ["nan", "inf", "-inf", "1e309"] {
+            let setID = UUID()
+            let stageID = UUID()
+            var drafts = [WorkoutSessionSetDraft(id: setID, actualWeight: 100,
+                dropStages: [WorkoutSessionDropStageDraft(id: stageID, actualWeight: 60)])]
+            var buffer = WorkoutMetricInputDraftBuffer()
+            buffer.stage(text, for: setID, metric: .weight)
+            buffer.stage(text, forDropStage: stageID, metric: .weight)
+            _ = buffer.commitAll(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+            _ = buffer.commitAllDropStages(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+            XCTAssertEqual(drafts[0].actualWeight, 100, text)
+            XCTAssertEqual(drafts[0].dropStages[0].actualWeight, 60, text)
+            XCTAssertNoThrow(try JSONEncoder().encode(drafts), text)
+        }
+    }
+
+    func testPastedWeightsRespectPersistentStoreLimitForBaseAndDropSets() {
+        let setID = UUID()
+        let stageID = UUID()
+        var drafts = [WorkoutSessionSetDraft(id: setID,
+            dropStages: [WorkoutSessionDropStageDraft(id: stageID)])]
+        var buffer = WorkoutMetricInputDraftBuffer()
+        buffer.stage("1e100", for: setID, metric: .weight)
+        buffer.stage("999999", forDropStage: stageID, metric: .weight)
+        _ = buffer.commitAll(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+        _ = buffer.commitAllDropStages(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+        XCTAssertEqual(drafts[0].actualWeight, 5000)
+        XCTAssertEqual(drafts[0].dropStages[0].actualWeight, 5000)
+    }
+
+    func testPastedRepCountsRespectStoreLimitAndOverflowCannotClearLoggedReps() {
+        let setID = UUID(), stageID = UUID()
+        var drafts = [WorkoutSessionSetDraft(id: setID, actualReps: 8,
+            dropStages: [WorkoutSessionDropStageDraft(id: stageID, actualReps: 6)])]
+        var buffer = WorkoutMetricInputDraftBuffer()
+        for (text, baseReps, dropReps) in [
+            (String(repeating: "9", count: 400), Optional(8), Optional(6)),
+            (String(Int.max), Optional(999), Optional(999)),
+            ("", nil, nil)
+        ] {
+            buffer.stage(text, for: setID, metric: .reps)
+            buffer.stage(text, forDropStage: stageID, metric: .reps)
+            _ = buffer.commitAll(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+            _ = buffer.commitAllDropStages(drafts: &drafts, preferredLoadUnit: .kg, manualCompletionMode: true)
+            XCTAssertEqual(drafts[0].actualReps, baseReps)
+            XCTAssertEqual(drafts[0].dropStages[0].actualReps, dropReps)
+        }
+    }
+
     func testFillLastOnlyUpdatesRequestedSet() {
         let firstSetID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let secondSetID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!

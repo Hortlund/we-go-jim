@@ -1,7 +1,53 @@
 import XCTest
+import SwiftData
 @testable import WGJ
 
 final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
+    @MainActor
+    func testPersistedComparisonVolumeIncludesCompletedDropsAndExcludesWarmups() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: UUID().uuidString)
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let workout = WorkoutSession(name: "Drops", status: .completed, endedAt: .now)
+        context.insert(workout)
+        let exercise = WorkoutSessionExercise(sessionID: workout.id, catalogExerciseUUID: "bench",
+            exerciseNameSnapshot: "Bench", categorySnapshot: "Chest", muscleSummarySnapshot: "Chest", session: workout)
+        context.insert(exercise)
+        let base = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: 5, actualWeight: 100,
+                                     isCompleted: true, sessionExercise: exercise)
+        let unfinished = WorkoutSessionSet(sessionExerciseID: exercise.id, actualReps: 5, actualWeight: 100,
+                                           isCompleted: false, sessionExercise: exercise)
+        let warmup = WorkoutSessionSet(sessionExerciseID: exercise.id, isWarmup: true,
+                                       actualReps: 5, actualWeight: 100, isCompleted: true, sessionExercise: exercise)
+        for set in [base, unfinished, warmup] { context.insert(set) }
+        for (set, completed, reps, weight, unit) in [
+            (base, true, 8, 60.0, TemplateLoadUnit.kg),
+            (base, false, 8, 60.0, .kg),
+            (unfinished, true, 2, 220.46226218487757, .lb),
+            (warmup, true, 8, 60.0, .kg)
+        ] {
+            context.insert(WorkoutSessionDropStage(sessionSetID: set.id, actualReps: reps,
+                actualWeight: weight, actualLoadUnit: unit, isCompleted: completed, sessionSet: set))
+        }
+        try context.saveWithRecoveryProtection()
+        let input = try WorkoutProgressSessionInput(session: workout, repository: WorkoutSessionRepository(modelContext: context))
+        let row = try XCTUnwrap(input.exercises.first)
+        let result = comparison(previousExercises: [], currentExercises: [row])
+        XCTAssertEqual(result.currentWorkout.totalVolumeKg, 1180, accuracy: 0.001)
+        XCTAssertEqual(result.currentWorkout.completedSetCount, 1)
+        var assisted = row
+        assisted.usesAssistance = true
+        XCTAssertEqual(comparison(previousExercises: [], currentExercises: [assisted]).currentWorkout.totalVolumeKg, 0)
+    }
+
+    func testCompletedDropVolumeRemainsWhenParentSetIsIncomplete() {
+        var parent = set(reps: 5, weight: 100, isCompleted: false)
+        parent.completedDropVolumeKg = 480
+        let result = comparison(previousExercises: [], currentExercises: [exercise(catalogExerciseUUID: "bench", name: "Bench", sets: [parent])])
+        XCTAssertEqual(result.currentWorkout.totalVolumeKg, 480)
+        XCTAssertEqual(result.currentWorkout.completedSetCount, 0)
+    }
+
     func testSelectionMatchesReferenceAcrossLargeMixedHistoryAndTimestampTies() {
         let templates = (0..<31).map { _ in UUID() }
         let sessions = (0..<2_000).map { index in

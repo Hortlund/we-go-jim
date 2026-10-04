@@ -49,13 +49,16 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
     }
 
     func prepare(sessionID: UUID, activityID: UUID) async throws {
+        try Task.checkCancellation()
         if route?.activityID == activityID && route?.sessionID == sessionID { return }
         let token = UUID()
         preparationToken = token
         stopUpdates()
         await flush()
+        try Task.checkCancellation()
         guard preparationToken == token else { return }
         let prepared = try await store.prepareRecording(activityID: activityID)
+        try Task.checkCancellation()
         let loaded = prepared.route
         let writeGeneration = prepared.generation
         guard preparationToken == token else { return }

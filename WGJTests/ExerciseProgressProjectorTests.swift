@@ -2,6 +2,22 @@ import XCTest
 @testable import WGJ
 
 final class ExerciseProgressProjectorTests: XCTestCase {
+    @MainActor
+    func testCardioDistanceFormattingUsesPreferredUnitWithoutChangingStoredMeters() throws {
+        var run = session(day: date(2026, 8, 14))
+        run.distanceMeters = 1609.344
+        run.durationSeconds = 600
+        for (unit, value) in [(WorkoutDistanceUnit.miles, 1.0), (.kilometers, 1.609344), (.meters, 1609.344)] {
+            let dataset = ExerciseProgressDataset(exerciseUUID: "run", exerciseName: "Run",
+                sessions: [run], preferredLoadUnit: .kg, preferredDistanceUnit: unit)
+            let projection = ExerciseProgressProjector.project(dataset: dataset, metric: .distance,
+                range: .allTime, now: date(2026, 8, 14), calendar: calendar)
+            XCTAssertEqual(projection.points.first?.value, 1609.344)
+            XCTAssertEqual(projection.formattedValue(try XCTUnwrap(projection.points.first?.value)),
+                           "\(WGJFormatters.oneDecimalString(value)) \(unit.symbol)")
+        }
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

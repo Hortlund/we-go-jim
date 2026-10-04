@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class ExerciseDetailProgressServiceTests: XCTestCase {
+    func testCardioProgressReadsDistancePreferenceWithoutCreatingProfileOrWriting() throws {
+        let context = try makeContext()
+        let session = WorkoutSession(name: "Run", status: .completed, endedAt: .now)
+        context.insert(session)
+        context.insert(WorkoutSessionCardioBlock(sessionID: session.id, phase: .postWorkout,
+            catalogExerciseUUID: "seed-outdoor-run", exerciseNameSnapshot: "Outdoor Run", categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs", targetDurationSeconds: 0, actualDurationSeconds: 600,
+            actualDistanceMeters: 1609.344, isCompleted: true, session: session))
+        let profile = UserProfile(displayName: "Athlete")
+        profile.preferredDistanceUnit = .miles
+        context.insert(profile)
+        try context.saveWithRecoveryProtection()
+        let service = WorkoutMetricsService(modelContext: context)
+        let miles = try XCTUnwrap(service.exerciseProgressDataset(for: "seed-outdoor-run"))
+        XCTAssertEqual(miles.preferredDistanceUnit, .miles)
+        XCTAssertEqual(miles.sessions.first?.distanceMeters, 1609.344)
+        XCTAssertFalse(context.hasChanges)
+        context.delete(profile)
+        try context.saveWithRecoveryProtection()
+        let fallback = try XCTUnwrap(service.exerciseProgressDataset(for: "seed-outdoor-run"))
+        XCTAssertEqual(fallback.preferredDistanceUnit, .regionalDefault(locale: .current))
+        XCTAssertNil(try ProfileRepository(modelContext: context).currentProfile())
+        XCTAssertFalse(context.hasChanges)
+    }
+
     func testDatasetIncludesCompleteWorkingSetTotalsAndNormalizedLoads() throws {
         let context = try makeContext()
         let completedAt = Date(timeIntervalSince1970: 10_000)

@@ -27,7 +27,7 @@ enum WGJFormatters {
         let normalized = normalizedLocalizedDecimalText(text, separator: separator)
 
         guard !normalized.isEmpty else { return nil }
-        if let parsed = decimalFormatter.number(from: normalized)?.doubleValue {
+        if let parsed = decimalFormatter.number(from: normalized)?.doubleValue, parsed.isFinite {
             return parsed
         }
 
@@ -35,7 +35,8 @@ enum WGJFormatters {
         let trimmed = String(normalized.dropLast(separator.count))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return decimalFormatter.number(from: trimmed)?.doubleValue
+        guard let parsed = decimalFormatter.number(from: trimmed)?.doubleValue, parsed.isFinite else { return nil }
+        return parsed
     }
 
     private static func normalizedLocalizedDecimalText(_ text: String, separator: String) -> String {

@@ -59,10 +59,17 @@ struct SavedCardioRouteView: View {
             }
         }
         .task(id: activityID) {
+            route = nil
+            loadFailed = false
             do {
-                route = try await CardioRouteStore.shared.load(activityID: activityID)
+                let saved = try await CardioRouteStore.shared.load(activityID: activityID)
+                try Task.checkCancellation()
+                route = saved
                 loadFailed = false
-            } catch { loadFailed = true }
+            } catch {
+                guard !Task.isCancelled else { return }
+                loadFailed = true
+            }
         }
     }
 }

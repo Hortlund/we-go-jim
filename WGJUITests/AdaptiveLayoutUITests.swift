@@ -47,7 +47,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(recap.isHittable)
         recap.tap()
         XCTAssertTrue(app.images["training-year-recap-image"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["training-year-recap-picker"].isHittable)
+        XCTAssertTrue(app.buttons["training-year-recap-picker"].exists, app.debugDescription)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "My Year in Training preview"
         attachment.lifetime = .keepAlways
@@ -63,8 +63,13 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let picker = app.buttons["training-year-recap-picker"]
         let pickerFrame = picker.frame
         app.scrollViews.firstMatch.swipeUp()
-        XCTAssertTrue(picker.isHittable)
+        XCTAssertTrue(picker.exists)
         XCTAssertEqual(picker.frame.minY, pickerFrame.minY, accuracy: 2)
+        // Menu's isHittable result is unreliable on iOS 18. Verify a real selection
+        // after scrolling instead of only checking the accessibility wrapper.
+        picker.tap()
+        XCTAssertTrue(app.buttons[previousYear].firstMatch.waitForExistence(timeout: 4))
+        app.buttons[previousYear].firstMatch.tap()
         app.scrollViews.firstMatch.swipeDown()
         let previousYearAttachment = XCTAttachment(screenshot: app.screenshot())
         previousYearAttachment.name = "Previous year recap"
@@ -84,7 +89,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     func testYearInTrainingRecapSupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        app.buttons["Progress"].firstMatch.tap()
+        openProgressTab(in: app)
         let journey = app.buttons["training-journey-entry"]
         XCTAssertTrue(journey.waitForExistence(timeout: 8))
         journey.tap()
@@ -153,7 +158,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     func testTrainingJourneySupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        app.buttons["Progress"].firstMatch.tap()
+        openProgressTab(in: app)
         let entry = app.buttons["training-journey-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 8))
         entry.tap()
@@ -569,7 +574,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(share.isEnabled)
         share.tap()
         XCTAssertTrue(app.cells["Copy"].firstMatch.waitForExistence(timeout: 8))
-        app.buttons["header.closeButton"].tap()
+        activityShareCloseButton(in: app).tap()
         XCTAssertTrue(share.waitForExistence(timeout: 8))
     }
 
@@ -1603,7 +1608,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
         app.activate()
         XCTAssertTrue(copy.waitForExistence(timeout: 8), app.debugDescription)
-        app.buttons["header.closeButton"].tap()
+        activityShareCloseButton(in: app).tap()
         XCTAssertTrue(share.waitForExistence(timeout: 8))
         XCTAssertTrue(share.isHittable, app.debugDescription)
         share.tap()
@@ -1625,7 +1630,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         cancel.tap()
         XCTAssertTrue(filePicker.waitForNonExistence(timeout: 8))
         // A destination may return to the activity list instead of ending it.
-        let activityClose = app.buttons["header.closeButton"]
+        let activityClose = activityShareCloseButton(in: app)
         if activityClose.waitForExistence(timeout: 2) {
             activityClose.tap()
         }
@@ -1637,6 +1642,13 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(share.waitForExistence(timeout: 8))
         XCTAssertTrue(share.isHittable, app.debugDescription)
         app.buttons["Close"].firstMatch.tap()
+    }
+
+    @MainActor
+    private func activityShareCloseButton(in app: XCUIApplication) -> XCUIElement {
+        // The system share sheet uses a label on iOS 18 and an identifier on iOS 26.
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@",
+            "header.closeButton", "close")).firstMatch
     }
 
     @MainActor
@@ -1749,6 +1761,31 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(continueLocally.waitForExistence(timeout: 8))
         continueLocally.tap()
         return app
+    }
+
+    @MainActor
+    func testExerciseCatalogHidesIndexRailAtAccessibilityTextSize() {
+        let app = launchLocalApp(additionalArguments: [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        openExercisesTab(in: app)
+        XCTAssertTrue(app.textFields["exercises-search-field"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "exercises-index-rail-")).count, 0)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Accessible exercise catalog without overlapping index letters"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
+    private func openProgressTab(in app: XCUIApplication) {
+        // iPad's native tab bar pages its labels at large text sizes. The hidden
+        // Progress tab can otherwise share a frame with the visible search tab.
+        let nextPage = app.buttons["Next Page"].firstMatch
+        if nextPage.exists { nextPage.tap() }
+        let tab = app.buttons["Progress"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 8))
+        tab.tap()
     }
 
     @MainActor
