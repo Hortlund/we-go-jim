@@ -2,7 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct ActiveWorkoutSupersetHeader: View {
-    let roundRestSeconds: Int
+    let nextStepLabel: String?
+    let nextExerciseName: String?
+    let isResting: Bool
+    let onShowNextSet: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -12,12 +15,34 @@ struct ActiveWorkoutSupersetHeader: View {
                 structureChip(SupersetExercisePosition.second.label, tint: WGJTheme.accentCyan)
             }
 
-            Text("Complete A1, move straight into A2, then rest \(formattedRest(roundRestSeconds)).")
-                .font(.caption)
-                .foregroundStyle(WGJTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let nextStepLabel {
+                Button(action: onShowNextSet) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(isResting ? "Rest, then" : "Go to") \(nextStepLabel)")
+                                .font(.subheadline.weight(.semibold))
+                            if let nextExerciseName {
+                                Text(nextExerciseName)
+                                    .font(.caption)
+                                    .foregroundStyle(WGJTheme.textPrimary)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.down.circle")
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(WGJTheme.accentCyan)
+                .accessibilityIdentifier("workout-superset-go-to-next-set")
+            } else {
+                Text("Superset complete")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private func structureChip(_ title: String, tint: Color) -> some View {
@@ -34,11 +59,5 @@ struct ActiveWorkoutSupersetHeader: View {
                             .stroke(tint.opacity(0.24), lineWidth: 1)
                     )
             )
-    }
-
-    private func formattedRest(_ seconds: Int) -> String {
-        let mins = max(0, seconds) / 60
-        let secs = max(0, seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
     }
 }

@@ -23,6 +23,8 @@
       "parallelizable": false,
       "selectedTests": [
         "AdaptiveLayoutUITests/testTemplateCardioPlanningOnlyOffersWarmupAndFinisher",
+        "AdaptiveLayoutUITests/testSupersetGuidesMatchingRoundsAndRestsAfterBothExercises",
+        "AdaptiveLayoutUITests/testSupersetWarmupsMoveToPartnerBeforeResting",
         "AdaptiveLayoutUITests/testTemplateDropsStayIndependentAndCarryIntoCompactWorkoutRows",
         "AdaptiveLayoutUITests/testWorkoutDropsStackAtAccessibilityTextSize",
         "AdaptiveLayoutUITests/testBackgroundRestNotificationAppearsNearTheTimerDeadline",
