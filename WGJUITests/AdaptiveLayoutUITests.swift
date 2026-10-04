@@ -345,10 +345,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     func testYearInTrainingRecapPreviewsAndSharesAnImage() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE", "UITEST_PROGRESS_PRIOR_YEAR"])
-        app.buttons["Progress"].firstMatch.tap()
-        let journey = app.buttons["training-journey-entry"]
-        XCTAssertTrue(journey.waitForExistence(timeout: 8))
-        journey.tap()
+        openTrainingJourneyFromProfile(in: app)
         let recap = app.buttons["training-year-recap-entry"]
         for _ in 0..<3 where !recap.isHittable { app.swipeUp() }
         XCTAssertTrue(recap.isHittable)
@@ -396,10 +393,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     func testYearInTrainingRecapSupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        openProgressTab(in: app)
-        let journey = app.buttons["training-journey-entry"]
-        XCTAssertTrue(journey.waitForExistence(timeout: 8))
-        journey.tap()
+        openTrainingJourneyFromProfile(in: app)
         let recap = app.buttons["training-year-recap-entry"]
         for _ in 0..<5 where !recap.isHittable { app.swipeUp() }
         XCTAssertTrue(recap.isHittable)
@@ -411,30 +405,20 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    func testTrainingJourneyEmptyHistoryAndProfileEntry() {
+    func testTrainingJourneyIsOnlyAvailableFromProfile() {
         let app = launchLocalApp()
-        app.buttons["Progress"].firstMatch.tap()
-        let entry = app.buttons["training-journey-entry"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        entry.tap()
+        openProgressTab(in: app)
+        XCTAssertTrue(app.staticTexts["Log two workouts to compare progress"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["training-journey-entry"].exists)
+        openTrainingJourneyFromProfile(in: app)
         XCTAssertTrue(app.staticTexts["Your story starts here"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["training-year-recap-entry"].exists)
-        app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["Profile"].firstMatch.tap()
-        let profileEntry = app.buttons["training-journey-entry"]
-        for _ in 0..<4 where !profileEntry.isHittable { app.swipeUp() }
-        XCTAssertTrue(profileEntry.isHittable)
-        profileEntry.tap()
-        XCTAssertTrue(app.staticTexts["Your story starts here"].waitForExistence(timeout: 8))
     }
 
     @MainActor
     func testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE"])
-        app.buttons["Progress"].firstMatch.tap()
-        let entry = app.buttons["training-journey-entry"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        entry.tap()
+        openTrainingJourneyFromProfile(in: app)
         XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
         let fixtureDate = Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         let fixtureYear = Calendar.current.component(.year, from: fixtureDate)
@@ -465,10 +449,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     func testTrainingJourneySupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        openProgressTab(in: app)
-        let entry = app.buttons["training-journey-entry"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        entry.tap()
+        openTrainingJourneyFromProfile(in: app)
         XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
         let month = app.buttons["journey-month-2"]
         for _ in 0..<5 where !month.isHittable { app.swipeUp() }
@@ -2169,6 +2150,20 @@ final class AdaptiveLayoutUITests: XCTestCase {
         screenshot.name = "Accessible exercise catalog without overlapping index letters"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    @MainActor
+    private func openTrainingJourneyFromProfile(in app: XCUIApplication) {
+        let nextPage = app.buttons["Next Page"].firstMatch
+        if nextPage.exists { nextPage.tap() }
+        let profile = app.buttons["Profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 8))
+        profile.tap()
+        let entry = app.buttons["training-journey-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8))
+        for _ in 0..<8 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        entry.tap()
     }
 
     @MainActor
