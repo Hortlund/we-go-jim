@@ -1544,7 +1544,7 @@ final class IncrementalBackupTests: XCTestCase {
         }
     }
 
-    func testCommittedRouteRestoreRetainsFilesAndIntentUntilActiveSnapshotCanBeRead() async throws {
+    func testCommittedRouteRestoreRetainsFilesAndIntentOnSnapshotReadFailure() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let source = try makeContainer(workouts: 1)
@@ -1582,24 +1582,16 @@ final class IncrementalBackupTests: XCTestCase {
             mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
             relinkRelationships: { try payload.relinkRelationships(in: $0) })
 
-        // Neither a decoding failure nor a filesystem read failure means that
-        // there is no active draft. Both must leave cleanup pending.
-        try Data("invalid snapshot".utf8).write(to: snapshotURL, options: .atomic)
-        var restoreGeneration: UUID?
-        for unreadable in [false, true] {
-            if unreadable {
-                try FileManager.default.removeItem(at: snapshotURL)
-                try FileManager.default.createDirectory(at: snapshotURL, withIntermediateDirectories: true)
-            }
-            XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
-            XCTAssertEqual(try files.read(activityID: live.activityID), live)
-            XCTAssertNil(try files.read(activityID: incoming.activityID))
-            XCTAssertNotEqual(files.generation(), generation)
-            if let restoreGeneration { XCTAssertEqual(files.generation(), restoreGeneration) }
-            restoreGeneration = files.generation()
-            XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), request.ticket)
-            XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
-        }
+        // Filesystem errors may be transient and must still retain the receipt.
+        try FileManager.default.removeItem(at: snapshotURL)
+        try FileManager.default.createDirectory(at: snapshotURL, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
+        XCTAssertEqual(try files.read(activityID: live.activityID), live)
+        XCTAssertNil(try files.read(activityID: incoming.activityID))
+        let restoreGeneration = files.generation()
+        XCTAssertNotEqual(restoreGeneration, generation)
+        XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), request.ticket)
+        XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
 
         try FileManager.default.removeItem(at: snapshotURL)
         try savedSnapshot.write(to: snapshotURL, options: .atomic)
@@ -1609,6 +1601,79 @@ final class IncrementalBackupTests: XCTestCase {
         XCTAssertEqual(files.generation(), restoreGeneration)
         XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
         XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+    }
+
+    func testCommittedRouteRestoreRecoversCorruptDraftWithoutLosingOriginalRoutes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try makeContainer(workouts: 1)
+        let incoming = try makeOutdoorRoute(in: source, files: CardioRouteFiles(directory: root.appendingPathComponent("source")))
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(source))
+        payload.cardioRoutes = [incoming]
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+        let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let files = CardioRouteFiles(directory: root.appendingPathComponent("routes"))
+        let local = try makeContainer(workouts: 1)
+        let live = try makeOutdoorRoute(in: local, files: files)
+        // A local file can have the same activity ID as an incoming route but
+        // different bytes. Preserve those original bytes even across replay.
+        let collision = Data("original route bytes".utf8)
+        try collision.write(to: files.url(for: incoming.activityID))
+        let snapshotURL = root.appendingPathComponent("active-workout-snapshot.json")
+        let corruptDraft = Data("invalid snapshot".utf8)
+        try corruptDraft.write(to: snapshotURL)
+        var request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        request.stateAfterCommit = .init(account: "account-a")
+        request.hasRouteRestore = true
+        try BackupLocalJournal.saveRestore(request, for: target)
+        let restoration = CardioRouteRestoration(ticket: request.ticket, files: files, payload: payload,
+            cleanupBefore: request.cleanupBefore, activeWorkoutSnapshotURL: snapshotURL)
+        try BackupLocalJournal.stageRouteRestore(restoration, for: target)
+        try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true,
+            restoreTicket: request.ticket, replacementPayload: payload,
+            mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+            relinkRelationships: { try payload.relinkRelationships(in: $0) })
+        // A failed preservation write must not change routes or acknowledge the receipt.
+        let recoveryRoot = files.directory.appendingPathComponent("restore-recovery")
+        try Data("blocked".utf8).write(to: recoveryRoot)
+        XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
+        XCTAssertEqual(try files.read(activityID: live.activityID), live)
+        XCTAssertEqual(try Data(contentsOf: files.url(for: incoming.activityID)), collision)
+        XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), request.ticket)
+        try FileManager.default.removeItem(at: recoveryRoot)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotURL.path))
+        // The already-running app must be able to clean up and save its next
+        // workout immediately, without startup's corrupt-draft handling.
+        let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: root)
+        try await snapshotStore.invalidateSnapshotsSavedBefore(request.cleanupBefore)
+        let nextSession = ActiveWorkoutRuntimeSession(name: "Workout after recovery")
+        let nextSnapshot = ActiveWorkoutStoredSnapshot(session: nextSession,
+            mutationDate: request.cleanupBefore.addingTimeInterval(1))
+        let writeResult = try await snapshotStore.save(nextSnapshot)
+        XCTAssertEqual(writeResult, .written)
+        // Simulate a crash after file installation but before receipt acknowledgment.
+        try files.restore(restoration)
+        let savedNextSession = try await snapshotStore.loadStoredSnapshot()?.session
+        XCTAssertEqual(savedNextSession?.id, nextSession.id)
+        let recovery = recoveryRoot.appendingPathComponent(request.ticket.uuidString)
+        XCTAssertEqual(try Data(contentsOf: recovery.appendingPathComponent(snapshotURL.lastPathComponent)), corruptDraft)
+        XCTAssertEqual(try Data(contentsOf: recovery.appendingPathComponent(incoming.activityID.uuidString + ".json")), collision)
+        let recoveredLive = try JSONDecoder().decode(CardioRoute.self,
+            from: Data(contentsOf: recovery.appendingPathComponent(live.activityID.uuidString + ".json")))
+        XCTAssertEqual(recoveredLive, live)
+        XCTAssertEqual(try files.read(activityID: incoming.activityID), incoming)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+        let context = ModelContext(target)
+        context.insert(UserProfile(displayName: "Writes work after corrupt draft recovery"))
+        try context.saveWithRecoveryProtection()
+        // No repair of the corrupt draft is needed to reopen durable storage.
+        let reopened = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: reopened) }
+        try PersistentRestoreRecovery.requireHealthyStore(reopened)
+        XCTAssertEqual(try ModelContext(reopened).fetchCount(FetchDescriptor<WorkoutSession>()), 1)
     }
 
     func testRestoreServiceRetainsCommittedIntentWhenRouteInstallationFails() async throws {

@@ -87,31 +87,69 @@ nonisolated struct CardioRouteFiles: Sendable {
     /// durable restore intent remains and must finish before normal local writes.
     func restore(_ restoration: CardioRouteRestoration) throws {
         try withAccess {
-            advanceGeneration(forRestoreTicket: restoration.ticket)
-            for route in restoration.routes ?? [] { try route.validateForBackup() }
-            // A failed read cannot establish which newer routes are safe to remove.
-            // Leave the files intact until replay can read it.
-            let preserved = try restoration.activeWorkoutSnapshotURL.map {
+            try ActiveWorkoutSnapshotStore.withFileAccess {
+                try restoreFiles(restoration)
+            }
+        }
+    }
+
+    private func restoreFiles(_ restoration: CardioRouteRestoration) throws {
+        advanceGeneration(forRestoreTicket: restoration.ticket)
+        for route in restoration.routes ?? [] { try route.validateForBackup() }
+        let preserved: Set<UUID>
+        do {
+            preserved = try restoration.activeWorkoutSnapshotURL.map {
                 try ActiveWorkoutSnapshotStore.routeActivitiesSaved(after: restoration.cleanupBefore, at: $0)
             } ?? []
-            let parents = Dictionary(uniqueKeysWithValues: restoration.activities.map { ($0.activityID, $0.sessionID) })
-            let incoming = Set((restoration.routes ?? []).map(\.activityID))
-            for route in restoration.routes ?? [] {
-                guard parents[route.activityID] == route.sessionID else { throw BackupArchiveError.corruptChunk }
-                if preserved.contains(route.activityID) { continue }
-                try write(route)
-            }
-            guard FileManager.default.fileExists(atPath: directory.path) else { return }
-            for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                where file.pathExtension == "json" {
-                let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent)
-                if let id, incoming.contains(id) || preserved.contains(id) { continue }
-                // Old backups didn't contain routes. Preserve an existing route
-                // only if both identities still belong to the restored history.
-                if restoration.routes == nil, let id, let route = try? read(activityID: id),
-                   parents[id] == route.sessionID { continue }
-                try FileManager.default.removeItem(at: file)
-            }
+        } catch is DecodingError {
+            // Retrying permanently malformed JSON cannot recover a draft. Keep
+            // its bytes and every existing route before removing the active copy,
+            // so the next workout can save without requiring an app restart.
+            try preserveCorruptDraftRecovery(restoration)
+            preserved = []
+        }
+        let parents = Dictionary(uniqueKeysWithValues: restoration.activities.map { ($0.activityID, $0.sessionID) })
+        let incoming = Set((restoration.routes ?? []).map(\.activityID))
+        for route in restoration.routes ?? [] {
+            guard parents[route.activityID] == route.sessionID else { throw BackupArchiveError.corruptChunk }
+            if preserved.contains(route.activityID) { continue }
+            try write(route)
+        }
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            where file.pathExtension == "json" {
+            let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent)
+            if let id, incoming.contains(id) || preserved.contains(id) { continue }
+            // Old backups didn't contain routes. Preserve an existing route
+            // only if both identities still belong to the restored history.
+            if restoration.routes == nil, let id, let route = try? read(activityID: id),
+               parents[id] == route.sessionID { continue }
+            try FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private func preserveCorruptDraftRecovery(_ restoration: CardioRouteRestoration) throws {
+        let recovery = directory.appendingPathComponent("restore-recovery", isDirectory: true)
+            .appendingPathComponent(restoration.ticket.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true)
+        try Self.protect(directory)
+        try Self.protect(recovery)
+        func preserve(_ source: URL) throws {
+            let destination = recovery.appendingPathComponent(source.lastPathComponent)
+            // A replay must never replace the original with a partly installed backup.
+            guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+            try Data(contentsOf: source).write(to: destination,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+        if let snapshot = restoration.activeWorkoutSnapshotURL { try preserve(snapshot) }
+        for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            where file.pathExtension == "json" {
+            try preserve(file)
+        }
+        // All recovery copies are durable before the corrupt active file is removed.
+        // The shared snapshot lock prevents a concurrent save from replacing it.
+        if let snapshot = restoration.activeWorkoutSnapshotURL {
+            try FileManager.default.removeItem(at: snapshot)
         }
     }
 

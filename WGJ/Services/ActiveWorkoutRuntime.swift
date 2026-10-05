@@ -727,6 +727,16 @@ nonisolated extension ExerciseComponentSnapshot {
 actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     static let shared = ActiveWorkoutSnapshotStore()
 
+    // Restore runs synchronously outside this actor. Serialize its read/quarantine
+    // boundary with snapshot writes so it cannot remove a newer atomic snapshot.
+    private static let snapshotFileLock = NSRecursiveLock()
+
+    nonisolated static func withFileAccess<T>(_ operation: () throws -> T) rethrows -> T {
+        snapshotFileLock.lock()
+        defer { snapshotFileLock.unlock() }
+        return try operation()
+    }
+
     private static let defaultFileName = "active-workout-snapshot.json"
     private static let invalidationFileName = "active-workout-invalidated-before.json"
     private static let deletedSessionsFileName = "active-workout-deleted-sessions.json"
@@ -762,6 +772,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
 
 #if DEBUG
     nonisolated static func deleteDefaultSnapshotFileForUITests() {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         let url = defaultBaseDirectory().appendingPathComponent(defaultFileName, isDirectory: false)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         try? FileManager.default.removeItem(at: url)
@@ -784,6 +796,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     }
 
     func loadStoredSnapshot() throws -> ActiveWorkoutStoredSnapshot? {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         try Task.checkCancellation()
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -844,6 +858,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     func save(
         _ snapshot: ActiveWorkoutStoredSnapshot
     ) throws -> ActiveWorkoutSnapshotWriteResult {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         try Task.checkCancellation()
         guard try !isSessionDeleted(snapshot.session.id) else { return .rejectedInvalidated }
         try FileManager.default.createDirectory(
@@ -957,6 +973,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     }
 
     func delete() throws {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             cachedSnapshotData = nil
@@ -967,6 +985,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     }
 
     func invalidateSnapshotsSavedBefore(_ cutoff: Date) throws {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         try FileManager.default.createDirectory(
             at: baseDirectory,
             withIntermediateDirectories: true
@@ -989,6 +1009,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
 
     /// A committed user deletion also rejects late writes for that workout after clock changes.
     func invalidateSession(_ sessionID: UUID) throws {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
         try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
         var deleted = try deletedSessionIDs()
         if deleted.insert(sessionID).inserted {

@@ -52,10 +52,14 @@ nonisolated extension UserDataCloudBackupPayload {
             LegacyOwnerIdentity(owner: $0[keyPath: owner], id: $0[keyPath: id])
         }
         for (key, copies) in scoped {
-            guard Set(copies.map { $0[keyPath: rest] }).count == 1 else {
+            var row = copies.max { $0[keyPath: updated] < $1[keyPath: updated] }!
+            // The old writer could leave an unused group row behind and later
+            // change only the live group's rest setting. Keep the latest edit,
+            // but never break a tie between conflicting latest values by order.
+            let latest = copies.filter { $0[keyPath: updated] == row[keyPath: updated] }
+            guard Set(latest.map { $0[keyPath: rest] }).count == 1 else {
                 throw UserDataCloudRestoreValidationError.duplicateIdentifier(entity: entity, identifier: key.id.uuidString)
             }
-            var row = copies.max { $0[keyPath: updated] < $1[keyPath: updated] }!
             let replacement = legacyIdentity(entity: entity, owner: key.owner, id: key.id)
             row[keyPath: id] = replacement
             identities[key] = replacement

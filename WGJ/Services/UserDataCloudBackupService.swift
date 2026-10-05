@@ -771,9 +771,7 @@ nonisolated final class UserDataCloudBackupService {
                 return nil
             }
             progress(.validating)
-            var payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
-            try payload.repairLegacyCopiedIdentities()
-            try payload.validate()
+            let payload = try UserDataCloudBackupPayload.decodeForRestore(record.payloadData)
             if !request.replacingLocalData {
                 guard try Self.isLocalUserDataEmpty(context: ModelContext(localContainer)) else {
                     try clearRestore(request.ticket)
