@@ -395,7 +395,11 @@ nonisolated struct BackupHistoryBatch {
     static func make(_ sessions: [WorkoutSession]) throws -> [Self] {
         let entries = sessions.map { Entry(id: $0.id, updatedAt: $0.updatedAt) }
             .sorted { $0.id.uuidString < $1.id.uuidString }
-        guard Set(entries.map(\.id)).count == entries.count else { throw BackupArchiveError.invalidManifest }
+        var seen: Set<UUID> = []
+        for entry in entries where !seen.insert(entry.id).inserted {
+            throw UserDataCloudRestoreValidationError.duplicateIdentifier(
+                entity: "WorkoutSession", identifier: entry.id.uuidString)
+        }
         var result: [Self] = []
         func partition(_ rows: [Entry], prefix: String, bit: Int) throws {
             guard !rows.isEmpty else { return }

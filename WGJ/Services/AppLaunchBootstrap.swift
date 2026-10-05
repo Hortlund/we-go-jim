@@ -80,6 +80,7 @@ final class AppLaunchBootstrapState {
                         backupStore: CloudKitUserDataCloudBackupStore()).finishRestoreCleanup()
                 }
                 try PersistentRestoreRecovery.requireHealthyStore(bootstrap.container)
+                try LocalCopiedIdentityRepair.repair(in: bootstrap.container)
                 guard !Task.isCancelled else { return }
 
                 guard let self else { return }

@@ -343,6 +343,7 @@ nonisolated final class WorkoutSessionRepository {
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         var createdExercises: [WorkoutSessionExercise] = []
         var supersetMembershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft] = [:]
+        var supersetIDs: [UUID: UUID] = [:]
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
             let selectedComponent = try componentRotationResolver
                 .resolution(
@@ -424,7 +425,7 @@ nonisolated final class WorkoutSessionRepository {
             updateExerciseSetSummary(exercise, sets: createdSets)
             createdExercises.append(exercise)
             if let membership = templateExercise.supersetMembership {
-                supersetMembershipsByExerciseID[exercise.id] = membership
+                supersetMembershipsByExerciseID[exercise.id] = membership.copied(using: &supersetIDs)
             }
         }
 
@@ -1612,7 +1613,7 @@ nonisolated final class WorkoutSessionRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(
+        var existingGroupsByID = Dictionary(
             existingGroups.map { ($0.id, $0) },
             uniquingKeysWith: { existing, _ in existing }
         )
@@ -1647,6 +1648,7 @@ nonisolated final class WorkoutSessionRepository {
             if group.modelContext == nil {
                 modelContext.insert(group)
             }
+            existingGroupsByID[membership.groupID] = group
 
             group.sessionID = session.id
             group.session = session

@@ -109,6 +109,13 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
             throw UserDataCloudRestoreValidationError.unsupportedSchemaVersion(schemaVersion)
         }
 
+        try validateUniqueIdentifiers()
+        try validateRelationships()
+    }
+
+    /// Chunks may reference parents in other chunks, but must never contain
+    /// duplicate identities. Check newly encoded chunks before any upload.
+    func validateUniqueIdentifiers() throws {
         try validateUnique(profiles.map(\.id), entity: "UserProfile", render: \.uuidString)
         try validateUnique(profileWidgets.map(\.id), entity: "ProfileWidgetConfig", render: \.uuidString)
         try validateUnique(customExercises.map(\.remoteUUID), entity: "ExerciseCatalogItem") { $0 }
@@ -127,6 +134,9 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
         try validateUnique(workoutSets.map(\.id), entity: "WorkoutSessionSet", render: \.uuidString)
         try validateUnique(workoutDropStages.map(\.id), entity: "WorkoutSessionDropStage", render: \.uuidString)
         try validateUnique((cardioRoutes ?? []).map(\.activityID), entity: "CardioRoute", render: \.uuidString)
+    }
+
+    private func validateRelationships() throws {
         let routeParents = Dictionary(uniqueKeysWithValues: workoutCardioBlocks.map { ($0.id, $0.sessionID) })
         for route in cardioRoutes ?? [] {
             try route.validateForBackup()
@@ -1688,6 +1698,7 @@ nonisolated enum UserDataBackupPayloadCodec {
     }
 
     private static func encodeChunk(_ input: UserDataCloudBackupPayload) throws -> (Data, UserDataCloudBackupContentSummary) {
+        try input.validateUniqueIdentifiers()
         var payload = input
         payload.generatedAt = .distantPast
         // Only the final representation needs sorted keys. Sorting both encodings

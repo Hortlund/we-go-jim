@@ -6,6 +6,77 @@ import os
 
 @MainActor
 final class IncrementalBackupTests: XCTestCase {
+    func testDuplicateArchiveRecordsReportDetailsBeforeReplacingLocalData() async throws {
+        for conflicting in [false, true] {
+            let source = try makeContainer(workouts: 1)
+            let store = MemoryArchiveStore()
+            _ = try await UserDataCloudBackupService(localContainer: source, backupStore: store).exportCurrentBackup()
+            let sessionID = try XCTUnwrap(ModelContext(source).fetch(FetchDescriptor<WorkoutSession>()).first?.id)
+            await waitForCleanup()
+            try await store.duplicateCurrentHistoryChunk(conflicting: conflicting)
+            let originalManifest = try await store.fetchManifest()
+            try XCTUnwrap(originalManifest).validate()
+            let target = try makeContainer(workouts: 1)
+            let originalIDs = try ModelContext(target).fetch(FetchDescriptor<WorkoutSession>()).map(\.id)
+            let center = CloudBackupProgressCenter()
+            let expected = UserDataCloudRestoreValidationError.duplicateIdentifier(
+                entity: "WorkoutSession", identifier: sessionID.uuidString)
+            do {
+                _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store,
+                    progressCenter: center).restoreLatestBackup(replacingLocalData: true)
+                XCTFail("Overlapping chunks must not silently choose a record")
+            } catch {
+                XCTAssertEqual(error as? UserDataCloudRestoreValidationError, expected)
+            }
+            XCTAssertEqual(center.presentedOperation?.outcome, .failure(expected.localizedDescription))
+            XCTAssertTrue(expected.localizedDescription.contains(sessionID.uuidString))
+            XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<WorkoutSession>()).map(\.id), originalIDs)
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+            let unchanged = try await store.fetchManifest()
+            XCTAssertEqual(unchanged, originalManifest)
+        }
+    }
+
+    func testIncrementalExportRejectsDuplicateRecordsWithoutPublishing() async throws {
+        let source = try makeContainer(workouts: 1)
+        let context = ModelContext(source)
+        let profile = UserProfile(displayName: "Original")
+        context.insert(profile)
+        try context.saveWithRecoveryProtection()
+        let store = MemoryArchiveStore()
+        let service = UserDataCloudBackupService(localContainer: source, backupStore: store)
+        _ = try await service.exportCurrentBackup()
+        await waitForCleanup()
+        let original = try await store.fetchManifest()
+        let publications = await store.publicationCount
+        let duplicate = UserProfile(displayName: "Duplicate")
+        duplicate.id = profile.id
+        context.insert(duplicate)
+        try context.saveWithRecoveryProtection()
+        do {
+            _ = try await service.exportCurrentBackup()
+            XCTFail("Invalid chunks must be rejected before publication")
+        } catch {
+            XCTAssertEqual(error as? UserDataCloudRestoreValidationError,
+                .duplicateIdentifier(entity: "UserProfile", identifier: profile.id.uuidString))
+        }
+        let unchanged = try await store.fetchManifest()
+        let publicationsAfter = await store.publicationCount
+        XCTAssertEqual(unchanged, original)
+        XCTAssertEqual(publicationsAfter, publications)
+        XCTAssertEqual(try ModelContext(source).fetchCount(FetchDescriptor<UserProfile>()), 2)
+        await waitForCleanup()
+    }
+
+    func testHistoryBatchDuplicateReportsWorkoutID() {
+        let session = WorkoutSession(name: "Original", status: .completed, endedAt: .now)
+        let duplicate = WorkoutSession(id: session.id, name: "Conflicting", status: .completed, endedAt: .now)
+        XCTAssertThrowsError(try BackupHistoryBatch.make([session, duplicate])) { error in
+            XCTAssertEqual(error as? UserDataCloudRestoreValidationError,
+                .duplicateIdentifier(entity: "WorkoutSession", identifier: session.id.uuidString))
+        }
+    }
+
     func testDropsetsRoundTripThroughIncrementalBackupEditsAndPreviousGeneration() async throws {
         let source = try DropsetBackupTestFixture.makeContainer()
         let original = try UserDataCloudBackupPayload(context: ModelContext(source))
@@ -1421,6 +1492,125 @@ final class IncrementalBackupTests: XCTestCase {
         XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
     }
 
+    func testCommittedRouteRestoreAcceptsLegacyDraftAndHonorsItsFileDate() async throws {
+        for newer in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let source = try makeContainer(workouts: 1)
+            let incoming = try makeOutdoorRoute(in: source, files: CardioRouteFiles(directory: root.appendingPathComponent("source")))
+            var payload = try UserDataCloudBackupPayload(context: ModelContext(source))
+            payload.cardioRoutes = [incoming]
+            let schema = AppSchema.makeFull()
+            let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+            let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+            let files = CardioRouteFiles(directory: root.appendingPathComponent("routes"))
+            let local = try makeContainer(workouts: 1)
+            let live = try makeOutdoorRoute(in: local, files: files)
+            let cutoff = Date(timeIntervalSince1970: 1_700_000_000)
+            let activity = ActiveWorkoutRuntimeCardioBlock(id: live.activityID, phase: .postWorkout,
+                role: .main, catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk",
+                categorySnapshot: "Cardio", muscleSummarySnapshot: "", trackingProfile: .walkRun,
+                goalKind: .open, targetDurationSeconds: 0, timerState: .paused, timerAccumulatedSeconds: 60)
+            var session = ActiveWorkoutRuntimeSession(id: live.sessionID, name: "Legacy draft", cardioBlocks: [activity])
+            session.updatedAt = cutoff.addingTimeInterval(-20)
+            let file = root.appendingPathComponent("active-workout-snapshot.json")
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(session).write(to: file)
+            let fileDate = cutoff.addingTimeInterval(newer ? 10 : -10)
+            try FileManager.default.setAttributes([.modificationDate: fileDate], ofItemAtPath: file.path)
+            let loaded = try await ActiveWorkoutSnapshotStore(baseDirectory: root).loadStoredSnapshot()
+            XCTAssertEqual(loaded?.mutationDate, fileDate)
+
+            var request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+            request.cleanupBefore = cutoff
+            request.stateAfterCommit = .init(account: "account-a")
+            request.hasRouteRestore = true
+            try BackupLocalJournal.saveRestore(request, for: target)
+            try BackupLocalJournal.stageRouteRestore(.init(ticket: request.ticket, files: files, payload: payload,
+                cleanupBefore: cutoff, activeWorkoutSnapshotURL: file), for: target)
+            try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true,
+                restoreTicket: request.ticket, replacementPayload: payload,
+                mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+                relinkRelationships: { try payload.relinkRelationships(in: $0) })
+            try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) }
+            XCTAssertEqual(try files.read(activityID: incoming.activityID), incoming)
+            XCTAssertEqual(try files.read(activityID: live.activityID), newer ? live : nil)
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+            XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+            let context = ModelContext(target)
+            context.insert(UserProfile(displayName: "Local writes work after restore"))
+            try context.saveWithRecoveryProtection()
+        }
+    }
+
+    func testCommittedRouteRestoreRetainsFilesAndIntentUntilActiveSnapshotCanBeRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try makeContainer(workouts: 1)
+        let incoming = try makeOutdoorRoute(in: source, files: CardioRouteFiles(directory: root.appendingPathComponent("source")))
+        var payload = try UserDataCloudBackupPayload(context: ModelContext(source))
+        payload.cardioRoutes = [incoming]
+        let schema = AppSchema.makeFull()
+        let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("restore.store"), cloudKitDatabase: .none)
+        let target = try ModelContainer(for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: configuration)
+        let files = CardioRouteFiles(directory: root.appendingPathComponent("routes"))
+        let local = try makeContainer(workouts: 1)
+        let live = try makeOutdoorRoute(in: local, files: files)
+        let cutoff = Date.now.addingTimeInterval(-10)
+        let activity = ActiveWorkoutRuntimeCardioBlock(id: live.activityID, phase: .postWorkout,
+            role: .main, catalogExerciseUUID: "seed-outdoor-walk", exerciseNameSnapshot: "Outdoor Walk",
+            categorySnapshot: "Cardio", muscleSummarySnapshot: "", trackingProfile: .walkRun,
+            goalKind: .open, targetDurationSeconds: 0, timerState: .paused, timerAccumulatedSeconds: 60)
+        let session = ActiveWorkoutRuntimeSession(id: live.sessionID, name: "Newer walk", cardioBlocks: [activity])
+        let draftDirectory = root.appendingPathComponent("draft")
+        let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: draftDirectory)
+        _ = try await snapshotStore.save(ActiveWorkoutStoredSnapshot(session: session))
+        let snapshotURL = draftDirectory.appendingPathComponent("active-workout-snapshot.json")
+        let savedSnapshot = try Data(contentsOf: snapshotURL)
+        let generation = files.generation()
+
+        var request = BackupLocalJournal.RestoreRequest(account: "account-a", replacingLocalData: true, previousGeneration: false)
+        request.cleanupBefore = cutoff
+        request.stateAfterCommit = .init(account: "account-a")
+        request.hasRouteRestore = true
+        try BackupLocalJournal.saveRestore(request, for: target)
+        try BackupLocalJournal.stageRouteRestore(.init(ticket: request.ticket, files: files, payload: payload,
+            cleanupBefore: cutoff, activeWorkoutSnapshotURL: snapshotURL), for: target)
+        try UserDataCloudRestoreTransaction(container: target).commit(replacingLocalData: true,
+            restoreTicket: request.ticket, replacementPayload: payload,
+            mergeDatabaseGraph: { try payload.mergeDatabaseGraph(into: $0) },
+            relinkRelationships: { try payload.relinkRelationships(in: $0) })
+
+        // Neither a decoding failure nor a filesystem read failure means that
+        // there is no active draft. Both must leave cleanup pending.
+        try Data("invalid snapshot".utf8).write(to: snapshotURL, options: .atomic)
+        var restoreGeneration: UUID?
+        for unreadable in [false, true] {
+            if unreadable {
+                try FileManager.default.removeItem(at: snapshotURL)
+                try FileManager.default.createDirectory(at: snapshotURL, withIntermediateDirectories: true)
+            }
+            XCTAssertThrowsError(try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) })
+            XCTAssertEqual(try files.read(activityID: live.activityID), live)
+            XCTAssertNil(try files.read(activityID: incoming.activityID))
+            XCTAssertNotEqual(files.generation(), generation)
+            if let restoreGeneration { XCTAssertEqual(files.generation(), restoreGeneration) }
+            restoreGeneration = files.generation()
+            XCTAssertEqual(try PersistentRestoreRecovery.committedTicket(container: target), request.ticket)
+            XCTAssertEqual(try BackupLocalJournal.restoreRequest(for: target)?.ticket, request.ticket)
+        }
+
+        try FileManager.default.removeItem(at: snapshotURL)
+        try savedSnapshot.write(to: snapshotURL, options: .atomic)
+        try LocalStoreWriteBarrier.exclusively { try BackupLocalJournal.reconcileRestore(for: target) }
+        XCTAssertEqual(try files.read(activityID: live.activityID), live)
+        XCTAssertEqual(try files.read(activityID: incoming.activityID), incoming)
+        XCTAssertEqual(files.generation(), restoreGeneration)
+        XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+        XCTAssertNil(try PersistentRestoreRecovery.committedTicket(container: target))
+    }
+
     func testRestoreServiceRetainsCommittedIntentWhenRouteInstallationFails() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -1508,7 +1698,7 @@ final class IncrementalBackupTests: XCTestCase {
         // retained recorder must still be able to persist resumed recording.
         try WorkoutCardioTimerCoordinator.resume(activityID: activity.id, blocks: &session.cardioBlocks, at: .now)
         recorder.synchronize(with: session, requestPermission: false)
-        await recorder.flush()
+        try await recorder.flush()
         let recorded = try XCTUnwrap(recorder.route)
         XCTAssertTrue(recorded.isRecording)
         XCTAssertEqual(try files.read(activityID: activity.id), recorded)
@@ -1523,7 +1713,7 @@ final class IncrementalBackupTests: XCTestCase {
         try await routeStore.save(live, generation: originalGeneration)
         XCTAssertEqual(try files.read(activityID: activity.id), recorded)
         recorder.stop()
-        await recorder.flush()
+        try await recorder.flush()
         try files.restore(.init(ticket: UUID(), files: files, payload: payload,
             cleanupBefore: requestCutoff, activeWorkoutSnapshotURL: draftDirectory.appendingPathComponent("active-workout-snapshot.json")))
         XCTAssertNotEqual(files.generation(), reboundGeneration)
@@ -1758,6 +1948,26 @@ private actor MemoryArchiveStore: IncrementalBackupStoring {
     func damageCurrentChunk(removing: Bool) {
         guard let name = current?.chunks.first?.recordName else { return }
         chunks[name] = removing ? nil : Data("{}".utf8)
+    }
+    // Simulate an old archive with overlapping chunks and valid integrity hashes.
+    func duplicateCurrentHistoryChunk(conflicting: Bool) throws {
+        var manifest = try XCTUnwrap(current)
+        var reference = try XCTUnwrap(manifest.chunks.first { $0.key.hasPrefix("history-") })
+        let raw = try BackupArchiveCodec.decode(XCTUnwrap(chunks[reference.recordName]))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: raw) as? [String: Any])
+        if conflicting {
+            var sessions = try XCTUnwrap(object["workoutSessions"] as? [[String: Any]])
+            sessions[0]["name"] = "Conflicting workout"
+            object["workoutSessions"] = sessions
+        }
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        reference.key = "overlapping-history"
+        reference.storageID = UUID().uuidString
+        reference.digest = BackupArchiveCodec.digest(data)
+        chunks[reference.recordName] = try BackupArchiveCodec.encode(data)
+        manifest.chunks.append(reference)
+        current = manifest
+        generations[manifest.generation] = manifest
     }
     func failNextPublication() { failPublication = true }
     func fetchManifest() async throws -> BackupManifest? { current }

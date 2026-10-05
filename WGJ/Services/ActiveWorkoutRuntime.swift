@@ -739,13 +739,8 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     /// Match the same mutation boundary used by snapshot cleanup and presentation.
     nonisolated static func routeActivitiesSaved(after cutoff: Date, at url: URL) throws -> Set<UUID> {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let snapshot = try decoder.decode(ActiveWorkoutStoredSnapshot.self, from: Data(contentsOf: url))
-        let mutationDate = snapshot.mutationTimestamp == nil
-            ? max(snapshot.session.updatedAt, try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date ?? .distantPast)
-            : snapshot.mutationDate
-        guard mutationDate > cutoff else { return [] }
+        let snapshot = try decodeSnapshot(Data(contentsOf: url), at: url)
+        guard snapshot.mutationDate > cutoff else { return [] }
         return Set(snapshot.session.cardioBlocks.filter(CardioRecordingPolicy.recordsGPS).map(\.id))
     }
 
@@ -796,7 +791,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             return nil
         }
         let data = try Data(contentsOf: url)
-        let snapshot = try decodeSnapshot(data, at: url)
+        let snapshot = try Self.decodeSnapshot(data, at: url)
         if try isSessionDeleted(snapshot.session.id) {
             cachedSnapshotData = nil
             try? FileManager.default.removeItem(at: url)
@@ -811,7 +806,9 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         return snapshot
     }
 
-    private func decodeSnapshot(_ data: Data, at url: URL) throws -> ActiveWorkoutStoredSnapshot {
+    nonisolated private static func decodeSnapshot(_ data: Data, at url: URL) throws -> ActiveWorkoutStoredSnapshot {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
@@ -833,12 +830,12 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         return ActiveWorkoutStoredSnapshot(session: session, mutationDate: max(session.updatedAt, try legacySnapshotDate(at: url)))
     }
 
-    private func snapshotMutationDate(_ snapshot: ActiveWorkoutStoredSnapshot, at url: URL) throws -> Date {
+    nonisolated private static func snapshotMutationDate(_ snapshot: ActiveWorkoutStoredSnapshot, at url: URL) throws -> Date {
         guard snapshot.mutationTimestamp == nil else { return snapshot.mutationDate }
         return max(snapshot.session.updatedAt, try legacySnapshotDate(at: url))
     }
 
-    private func legacySnapshotDate(at url: URL) throws -> Date {
+    nonisolated private static func legacySnapshotDate(at url: URL) throws -> Date {
         // Older versions did not persist presentation/rest-timer mutation times.
         // Preserve their original file boundary when migrating, never a retry's write time.
         try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date ?? .distantPast
@@ -1000,7 +997,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
         }
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let snapshot = try decodeSnapshot(Data(contentsOf: url), at: url)
+        let snapshot = try Self.decodeSnapshot(Data(contentsOf: url), at: url)
         guard snapshot.session.id == sessionID else { return }
         try FileManager.default.removeItem(at: url)
         cachedSnapshotData = nil
@@ -1041,7 +1038,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
 
     private func isSnapshotInvalidated(_ url: URL) throws -> Bool {
         guard let cutoff = try invalidationCutoff() else { return false }
-        return try decodeSnapshot(Data(contentsOf: url), at: url).mutationDate <= cutoff
+        return try Self.decodeSnapshot(Data(contentsOf: url), at: url).mutationDate <= cutoff
     }
 
     nonisolated private static func defaultBaseDirectory() -> URL {
@@ -1126,6 +1123,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
             .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
 
         let componentResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+        var supersetIDs: [UUID: UUID] = [:]
         session.exercises = try templateExercises(templateID: template.id)
             .enumerated()
             .map { index, templateExercise in
@@ -1190,7 +1188,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
                     sortOrder: index,
                     components: components,
                     setDrafts: setDrafts,
-                    superset: templateExercise.supersetMembership,
+                    superset: templateExercise.supersetMembership?.copied(using: &supersetIDs),
                     createdAt: now,
                     updatedAt: now
                 )

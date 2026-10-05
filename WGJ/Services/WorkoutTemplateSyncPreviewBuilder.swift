@@ -73,6 +73,28 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             uniquingKeysWith: { first, _ in first }
         )
 
+        // Workout groups have independent identities. Match the paired template slots,
+        // preserving the template identity only when the same two slots remain paired.
+        var sessionSupersets: [UUID: ExerciseSupersetMembershipDraft] = [:]
+        let sessionGroups = Dictionary(grouping: orderedSessionExercises.filter { $0.supersetGroupID != nil },
+            by: { $0.supersetGroupID! })
+        for members in sessionGroups.values {
+            let templates = members.compactMap {
+                matchedTemplateExercise(for: $0, templateExercisesByID: templateExercisesByID,
+                    templateExercisesByUUID: templateExercisesByUUID)
+            }
+            let ids = Set(templates.compactMap(\.supersetGroupID))
+            let samePair = members.count == 2 && templates.count == 2 && ids.count == 1
+                && Set(orderedTemplateExercises.filter { $0.supersetGroupID == ids.first }.map(\.id)) == Set(templates.map(\.id))
+            let destinationID = samePair ? ids.first! : UUID()
+            for member in members {
+                if var membership = member.supersetMembership {
+                    membership.groupID = destinationID
+                    sessionSupersets[member.id] = membership
+                }
+            }
+        }
+
         let addedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncAddedCardioBlock? in
             guard matchedTemplateCardioBySessionID[cardioBlock.id] == nil else {
                 return nil
@@ -185,7 +207,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
             let changes = editedChangeSummaries(
                 templateExercise: templateExercise,
-                sessionExercise: sessionExercise
+                sessionExercise: sessionExercise,
+                sessionSuperset: sessionSupersets[sessionExercise.id]
             )
             guard !changes.isEmpty else {
                 continue
@@ -236,7 +259,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
                             for: sessionExercise,
                             templateExercisesByID: templateExercisesByID,
                             templateExercisesByUUID: templateExercisesByUUID
-                        )
+                        ),
+                        superset: sessionSupersets[sessionExercise.id]
                     )
                 }
             )
@@ -245,7 +269,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
     nonisolated private static func makeMutation(
         from sessionExercise: WorkoutSessionExercise,
-        templateExercise: TemplateExercise?
+        templateExercise: TemplateExercise?,
+        superset: ExerciseSupersetMembershipDraft?
     ) -> WorkoutTemplateSyncExerciseMutation {
         let componentDrafts = templateExercise.map(templateComponentDrafts(for:)) ?? [
             TemplateExerciseComponentDraft(
@@ -268,7 +293,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             restSeconds: normalizedRest(sessionExercise.restSeconds),
             setDrafts: mappedSetDrafts(from: sessionExercise, templateExercise: templateExercise),
             components: componentDrafts,
-            superset: sessionExercise.supersetMembership
+            superset: superset
         )
     }
 
@@ -380,7 +405,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
     private static func editedChangeSummaries(
         templateExercise: TemplateExercise,
-        sessionExercise: WorkoutSessionExercise
+        sessionExercise: WorkoutSessionExercise,
+        sessionSuperset: ExerciseSupersetMembershipDraft?
     ) -> [String] {
         var changes: [String] = []
         let normalizedSessionRest = normalizedRest(sessionExercise.restSeconds)
@@ -396,8 +422,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             changes.append("Rest \(formattedRest(templateExercise.restSeconds)) -> \(formattedRest(normalizedSessionRest))")
         }
 
-        if templateExercise.supersetMembership != sessionExercise.supersetMembership {
-            switch (templateExercise.supersetMembership, sessionExercise.supersetMembership) {
+        if templateExercise.supersetMembership != sessionSuperset {
+            switch (templateExercise.supersetMembership, sessionSuperset) {
             case (nil, .some):
                 changes.append("Superset pairing added")
             case (.some, nil):

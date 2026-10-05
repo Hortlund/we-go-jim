@@ -21,7 +21,65 @@ final class HealthWorkoutExportTests: XCTestCase {
     func testMixedWorkoutIsOneCrossTrainingExport() throws {
         let session = strengthSession()
         session.cardioBlocks = [cardio(session: session, name: "Running", completed: true)]
-        XCTAssertEqual(HealthWorkoutExport.snapshot(from: session)?.activity, .crossTraining)
+        let export = try XCTUnwrap(HealthWorkoutExport.snapshot(from: session))
+        XCTAssertEqual(export.activity, .crossTraining)
+        XCTAssertEqual(export.start, session.startedAt)
+        XCTAssertEqual(export.end, session.endedAt)
+    }
+
+    func testCardioExportExcludesPausesAndResultReviewTime() throws {
+        let session = strengthSession()
+        session.exercises = []
+        session.endedAt = session.startedAt.addingTimeInterval(3_300)
+        let walk = cardio(session: session, name: "Outdoor Walk", completed: true)
+        walk.actualDurationSeconds = 1_200
+        session.cardioBlocks = [walk]
+
+        let export = try XCTUnwrap(HealthWorkoutExport.snapshot(from: session))
+        XCTAssertEqual(export.end, session.endedAt)
+        XCTAssertEqual(export.end.timeIntervalSince(export.start), 1_200)
+        XCTAssertEqual(export.activity, .walking)
+        // Pending exports retain the corrected interval across a retry/relaunch.
+        let restored = try JSONDecoder().decode(HealthWorkoutExport.self, from: JSONEncoder().encode(export))
+        XCTAssertEqual(restored, export)
+    }
+
+    func testCardioExportSumsOnlyCompletedActivityDurations() throws {
+        let session = strengthSession()
+        session.exercises = []
+        let run = cardio(session: session, name: "Running", completed: true)
+        let walk = cardio(session: session, name: "Walking", completed: true)
+        walk.actualDurationSeconds = 300
+        session.cardioBlocks = [run, walk, cardio(session: session, name: "Running", completed: false)]
+
+        let export = try XCTUnwrap(HealthWorkoutExport.snapshot(from: session))
+        XCTAssertEqual(export.end.timeIntervalSince(export.start), 900)
+        XCTAssertEqual(export.activity, .crossTraining)
+    }
+
+    func testManuallyLoggedCardioCanExceedTimeSpentInTheEditor() throws {
+        let session = strengthSession()
+        session.exercises = []
+        session.endedAt = session.startedAt.addingTimeInterval(30)
+        session.cardioBlocks = [cardio(session: session, name: "Running", completed: true)]
+        let export = try XCTUnwrap(HealthWorkoutExport.snapshot(from: session))
+        XCTAssertEqual(export.end.timeIntervalSince(export.start), 600)
+        XCTAssertEqual(export.end, session.endedAt)
+    }
+
+    func testCardioDurationLimitAppliesToRecordedTimeRatherThanLongPauses() throws {
+        let session = strengthSession()
+        session.exercises = []
+        session.endedAt = session.startedAt.addingTimeInterval(2 * 24 * 60 * 60)
+        let run = cardio(session: session, name: "Running", completed: true)
+        session.cardioBlocks = [run]
+        let export = try XCTUnwrap(HealthWorkoutExport.snapshot(from: session))
+        XCTAssertEqual(export.end.timeIntervalSince(export.start), 600)
+        run.actualDurationSeconds = 24 * 60 * 60 + 1
+        XCTAssertNil(HealthWorkoutExport.snapshot(from: session))
+        run.actualDurationSeconds = Int.max
+        session.cardioBlocks?.append(cardio(session: session, name: "Walking", completed: true))
+        XCTAssertNil(HealthWorkoutExport.snapshot(from: session))
     }
 
     func testCardioOnlyWorkoutMapsRecordedActivityWithoutGuessingFromEquipment() {

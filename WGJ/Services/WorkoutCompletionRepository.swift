@@ -179,6 +179,7 @@ nonisolated private final class WorkoutCompletionMaterializer {
         let orderedRuntimeExercises = runtimeSession.exercises.sorted { $0.sortOrder < $1.sortOrder }
         var completedExercises: [WorkoutSessionExercise] = []
         var membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft] = [:]
+        var supersetIDs: [UUID: UUID] = [:]
         completedExercises.reserveCapacity(orderedRuntimeExercises.count)
 
         for (exerciseIndex, runtimeExercise) in orderedRuntimeExercises.enumerated() {
@@ -218,7 +219,7 @@ nonisolated private final class WorkoutCompletionMaterializer {
             completedExercises.append(completedExercise)
 
             if let superset = runtimeExercise.superset {
-                membershipsByExerciseID[completedExercise.id] = superset
+                membershipsByExerciseID[completedExercise.id] = superset.copied(using: &supersetIDs)
             }
         }
 

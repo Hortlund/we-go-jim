@@ -373,15 +373,10 @@ actor BoundaryCloudBackupExportQueue {
                 AppRuntimeState.shared.recordSuccessfulCloudBackup(exportedSnapshot, sessionRevision: sessionRevision)
             }
         } catch {
-            if let pending = try? BackupLocalJournal.pending(for: container) {
-                let isConflict = error is UserDataCloudBackupSafetyError || error is PersistentRestoreRecovery.RecoveryRequired
-                let delay = max((error as? CKError)?.retryAfterSeconds ?? 0, min(3600, 30 * pow(2, Double(min(pending.attempt, 7)))))
-                try? BackupLocalJournal.finish(pending, for: container, retryAfter: isConflict ? .distantFuture : Date().addingTimeInterval(delay))
-                if !isConflict {
-                    Task.detached(priority: .utility) {
-                        try? await Task.sleep(for: .seconds(delay))
-                        BoundaryCloudBackupScheduler.resumePending(container: container)
-                    }
+            if let delay = try? recordFailure(error, container: container) {
+                Task.detached(priority: .utility) {
+                    try? await Task.sleep(for: .seconds(delay))
+                    BoundaryCloudBackupScheduler.resumePending(container: container)
                 }
             }
             await MainActor.run {
@@ -389,6 +384,24 @@ actor BoundaryCloudBackupExportQueue {
                 AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.failureDescription): \(error.localizedDescription)"))
             }
         }
+    }
+
+    /// A nil delay leaves retries paused until an explicit save or manual backup
+    /// creates a fresh pending ticket. Re-reading invalid data cannot repair it.
+    nonisolated static func recordFailure(
+        _ error: Error, container: ModelContainer, now: Date = .now
+    ) throws -> TimeInterval? {
+        guard let pending = try BackupLocalJournal.pending(for: container) else { return nil }
+        if error is UserDataCloudBackupSafetyError
+            || error is PersistentRestoreRecovery.RecoveryRequired
+            || error is UserDataCloudRestoreValidationError {
+            try BackupLocalJournal.finish(pending, for: container, retryAfter: .distantFuture)
+            return nil
+        }
+        let delay = max((error as? CKError)?.retryAfterSeconds ?? 0,
+            min(3600, 30 * pow(2, Double(min(pending.attempt, 7)))))
+        try BackupLocalJournal.finish(pending, for: container, retryAfter: now.addingTimeInterval(delay))
+        return delay
     }
 }
 
@@ -631,6 +644,7 @@ nonisolated final class UserDataCloudBackupService {
         try TemplateRepository(modelContext: context, autoSaveChanges: false).pruneOrphanedTemplateGraphs()
         var payload = try UserDataCloudBackupPayload(context: context)
         payload.cardioRoutes = try routeFiles.completedRoutes(for: payload.workoutCardioBlocks)
+        try payload.validate()
         let summary = payload.contentSummary
         return (
             UserDataCloudBackupRemoteRecord(
@@ -757,7 +771,8 @@ nonisolated final class UserDataCloudBackupService {
                 return nil
             }
             progress(.validating)
-            let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+            var payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+            try payload.repairLegacyCopiedIdentities()
             try payload.validate()
             if !request.replacingLocalData {
                 guard try Self.isLocalUserDataEmpty(context: ModelContext(localContainer)) else {

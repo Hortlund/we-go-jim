@@ -49,7 +49,7 @@
         "AdaptiveLayoutUITests/testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn",
         "AdaptiveLayoutUITests/testTemplateLibraryScrollsToOffscreenRowsAndBack",
         "DeepLinkAccessibilityUITests",
-        "AdaptiveLayoutUITests/testTrainingJourneyEmptyHistoryAndProfileEntry",
+        "AdaptiveLayoutUITests/testTrainingJourneyIsOnlyAvailableFromProfile",
         "AdaptiveLayoutUITests/testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts",
         "AdaptiveLayoutUITests/testTrainingJourneySupportsAccessibilityTextSize",
         "AdaptiveLayoutUITests/testYearInTrainingRecapPreviewsAndSharesAnImage",
