@@ -1366,7 +1366,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(
+        var existingGroupsByID = Dictionary(
             existingGroups.map { ($0.id, $0) },
             uniquingKeysWith: { existing, _ in existing }
         )
@@ -1401,6 +1401,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             if group.modelContext == nil {
                 modelContext.insert(group)
             }
+            existingGroupsByID[membership.groupID] = group
 
             group.sessionID = session.id
             group.session = session

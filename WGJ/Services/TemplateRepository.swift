@@ -574,6 +574,7 @@ nonisolated final class TemplateRepository {
         )
 
         let sessionExercises = try workoutSessionExercises(sessionID: sessionID)
+        var supersetIDs: [UUID: UUID] = [:]
         let drafts: [TemplateExerciseDraft] = try sessionExercises.map { exercise in
             let orderedSets = try workoutSessionSets(sessionExerciseID: exercise.id)
             let setDrafts = try orderedSets.map { set in
@@ -620,7 +621,7 @@ nonisolated final class TemplateRepository {
                         muscleSummarySnapshot: exercise.muscleSummarySnapshot
                     ),
                 ],
-                superset: exercise.supersetMembership
+                superset: exercise.supersetMembership?.copied(using: &supersetIDs)
             )
         }
 
@@ -2361,7 +2362,7 @@ nonisolated final class TemplateRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (template.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(
+        var existingGroupsByID = Dictionary(
             existingGroups.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
@@ -2396,6 +2397,7 @@ nonisolated final class TemplateRepository {
             if group.modelContext == nil {
                 modelContext.insert(group)
             }
+            existingGroupsByID[membership.groupID] = group
 
             group.templateID = template.id
             group.template = template

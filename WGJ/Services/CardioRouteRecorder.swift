@@ -32,7 +32,7 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
     @ObservationIgnored private var recordingStartedAt = Date.distantFuture
     @ObservationIgnored private var wantsUpdates = false
     @ObservationIgnored private var maximumSpeedMetersPerSecond: Double = 12
-    @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    @ObservationIgnored private var pendingSave: Task<Result<Void, Error>, Never>?
     @ObservationIgnored private var lastSavedAt = Date.distantPast
     @ObservationIgnored private var preparationToken = UUID()
     @ObservationIgnored var onProgress: (() -> Void)?
@@ -55,7 +55,7 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
         let token = UUID()
         preparationToken = token
         stopUpdates()
-        await flush()
+        try await flush()
         try Task.checkCancellation()
         guard preparationToken == token else { return }
         let prepared = try await store.prepareRecording(activityID: activityID)
@@ -154,15 +154,28 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
         if gpsState == .recording || gpsState == .locating { gpsState = .inactive }
     }
 
-    func flush() async {
+    /// Completion must wait only for the workout whose route it is saving.
+    func flush(sessionID: UUID) async throws {
+        guard route?.sessionID == sessionID else { return }
+        try await flush()
+    }
+
+    func flush() async throws {
+        // An explicitly removed or restored route has nothing left to persist.
+        // Drain its queued write without carrying that route's failure forward.
+        guard route != nil else {
+            _ = await pendingSave?.value
+            return
+        }
         save(force: true)
-        await pendingSave?.value
+        let result = await pendingSave?.value
+        try result?.get()
     }
 
     func reset() async throws {
         preparationToken = UUID()
         stop()
-        await pendingSave?.value
+        _ = await pendingSave?.value
         route = nil
         generation = nil
         gpsState = .inactive
@@ -185,7 +198,7 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
         if route?.activityID == activityID {
             preparationToken = UUID()
             stop()
-            await pendingSave?.value
+            _ = await pendingSave?.value
             route = nil
             generation = nil
         }
@@ -262,12 +275,14 @@ final class CardioRouteRecorder: NSObject, CLLocationManagerDelegate {
         onProgress?()
         let priorSave = pendingSave
         pendingSave = Task { [weak self, store] in
-            await priorSave?.value
+            _ = await priorSave?.value
             do {
                 try await store.save(route, generation: generation)
                 self?.persistenceError = nil
+                return .success(())
             } catch {
                 self?.persistenceError = String(localized: "Your route could not be saved. Try again before closing WGJ.")
+                return .failure(error)
             }
         }
     }

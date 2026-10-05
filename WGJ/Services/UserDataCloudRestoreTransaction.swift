@@ -1,13 +1,32 @@
 import Foundation
 import SwiftData
 
-nonisolated enum UserDataCloudRestoreValidationError: Error, Equatable, Sendable {
+nonisolated enum UserDataCloudRestoreValidationError: LocalizedError, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case duplicateIdentifier(entity: String, identifier: String)
     case missingParent(childEntity: String, childIdentifier: String, parentIdentifier: String)
     case missingCatalogMuscle(exerciseIdentifier: String, muscleIdentifier: Int)
     case invalidCompletedWorkoutStatus(UUID)
     case invalidSupersetMembership(UUID)
+
+    var errorDescription: String? {
+        let detail: String
+        switch self {
+        case .unsupportedSchemaVersion(let version):
+            detail = "The backup uses an unsupported data format (version \(version)). Update WGJ before trying again."
+        case .duplicateIdentifier(let entity, let identifier):
+            detail = "The backup contains duplicate \(entity) records.\nRecord ID: \(identifier)"
+        case .missingParent(let entity, let identifier, let parentIdentifier):
+            detail = "A \(entity) record in the backup refers to a missing parent.\nRecord ID: \(identifier)\nParent ID: \(parentIdentifier)"
+        case .missingCatalogMuscle(let exerciseIdentifier, let muscleIdentifier):
+            detail = "A custom exercise in the backup refers to a missing catalog muscle.\nExercise ID: \(exerciseIdentifier)\nMuscle ID: \(muscleIdentifier)"
+        case .invalidCompletedWorkoutStatus(let identifier):
+            detail = "The backup contains a workout that is not completed.\nWorkout ID: \(identifier.uuidString)"
+        case .invalidSupersetMembership(let identifier):
+            detail = "An exercise in the backup has an invalid superset relationship.\nExercise ID: \(identifier.uuidString)"
+        }
+        return "\(detail)\n\nYour existing data has not been replaced."
+    }
 }
 
 nonisolated enum UserDataCloudRestoreCheckpoint: CaseIterable, Equatable, Sendable {

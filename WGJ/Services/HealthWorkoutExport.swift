@@ -33,8 +33,9 @@ nonisolated struct HealthWorkoutExport: Codable, Equatable, Sendable, Identifiab
 
     static func snapshot(from session: WorkoutSession) -> Self? {
         guard session.status == .completed, let end = session.endedAt,
-              end > session.startedAt,
-              end.timeIntervalSince(session.startedAt) <= 24 * 60 * 60 else { return nil }
+              end.timeIntervalSinceReferenceDate.isFinite,
+              session.startedAt.timeIntervalSinceReferenceDate.isFinite,
+              end > session.startedAt else { return nil }
         let hasStrength = (session.exercises ?? []).contains { exercise in
             (exercise.sets ?? []).contains { WorkoutSessionSetDraft(model: $0).isCycleCompleted }
         }
@@ -42,6 +43,14 @@ nonisolated struct HealthWorkoutExport: Codable, Equatable, Sendable, Identifiab
             $0.isCompleted && ($0.actualDurationSeconds ?? 0) > 0
         }
         guard hasStrength || !cardio.isEmpty else { return nil }
+        // Cardio timers exclude pauses and may also contain manually logged time.
+        // We retain totals, not a complete pause timeline, so represent cardio-only
+        // time as one interval ending at completion. Strength/mixed sessions keep
+        // their session clock, including rest between sets.
+        let duration = hasStrength ? end.timeIntervalSince(session.startedAt)
+            : cardio.reduce(0.0) { $0 + Double($1.actualDurationSeconds ?? 0) }
+        guard duration.isFinite, duration > 0, duration <= 24 * 60 * 60 else { return nil }
+        let start = hasStrength ? session.startedAt : end.addingTimeInterval(-duration)
         let activity: Activity
         if hasStrength {
             activity = cardio.isEmpty ? .strength : .crossTraining
@@ -49,7 +58,7 @@ nonisolated struct HealthWorkoutExport: Codable, Equatable, Sendable, Identifiab
             let activities = Set(cardio.map { activityType(name: $0.exerciseNameSnapshot, profile: $0.trackingProfile) })
             activity = activities.count == 1 ? activities.first! : .crossTraining
         }
-        return Self(id: session.id, name: session.name, start: session.startedAt, end: end,
+        return Self(id: session.id, name: session.name, start: start, end: end,
                     activity: activity, estimatedActiveCalories: session.estimatedActiveCalories,
                     calorieEstimateVersion: session.calorieEstimateVersion)
     }

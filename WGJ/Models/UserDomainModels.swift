@@ -381,6 +381,12 @@ nonisolated enum SupersetExercisePosition: String, Codable, CaseIterable, Equata
 }
 
 nonisolated struct ExerciseSupersetMembershipDraft: Equatable, Codable, Sendable {
+    /// Copies share a new identity within their destination, never with their source.
+    func copied(using identities: inout [UUID: UUID]) -> Self {
+        let id = identities[groupID] ?? UUID()
+        identities[groupID] = id
+        return Self(groupID: id, position: position, roundRestSeconds: roundRestSeconds)
+    }
     var groupID: UUID
     var position: SupersetExercisePosition
     var roundRestSeconds: Int

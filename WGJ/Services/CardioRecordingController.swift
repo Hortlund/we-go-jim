@@ -97,7 +97,12 @@ final class CardioRecordingController {
 
     func pause() async {
         transition(WorkoutCardioTimerCoordinator.pause)
-        await recorder.flush()
+        do {
+            if let sessionID = coordinator.storedSnapshot?.session.id {
+                try await recorder.flush(sessionID: sessionID)
+            }
+        }
+        catch { errorMessage = recorder.persistenceError ?? error.localizedDescription }
         await coordinator.flushSnapshot()
     }
 
@@ -110,9 +115,14 @@ final class CardioRecordingController {
             }
             try WorkoutCardioTimerCoordinator.finish(activityID: activityID, blocks: &blocks, at: date)
         }
-        await recorder.flush()
+        do {
+            if let sessionID = coordinator.storedSnapshot?.session.id {
+                try await recorder.flush(sessionID: sessionID)
+            }
+        }
+        catch { errorMessage = recorder.persistenceError ?? error.localizedDescription }
         await coordinator.flushSnapshot()
-        return activity?.isCompleted == true
+        return errorMessage == nil && activity?.isCompleted == true
     }
 
     private func transition(

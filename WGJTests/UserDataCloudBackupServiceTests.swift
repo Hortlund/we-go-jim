@@ -11,6 +11,128 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         case artifactCleanup
     }
 
+    func testExportValidationFailuresPauseRetryJournalUntilANewSave() throws {
+        let container = try makeInMemoryContainer()
+        let id = UUID()
+        let errors: [UserDataCloudRestoreValidationError] = [
+            .duplicateIdentifier(entity: "UserProfile", identifier: id.uuidString),
+            .unsupportedSchemaVersion(999),
+            .missingParent(childEntity: "WorkoutSessionSet", childIdentifier: id.uuidString, parentIdentifier: "missing"),
+            .missingCatalogMuscle(exerciseIdentifier: "custom", muscleIdentifier: 999),
+            .invalidCompletedWorkoutStatus(id),
+            .invalidSupersetMembership(id)
+        ]
+        for error in errors {
+            try BackupLocalJournal.markPending(for: container)
+            let original = try XCTUnwrap(BackupLocalJournal.pending(for: container))
+            XCTAssertNil(try BoundaryCloudBackupExportQueue.recordFailure(error, container: container),
+                "A deterministic validation failure must not schedule a retry task")
+            let paused = try XCTUnwrap(BackupLocalJournal.pending(for: container))
+            XCTAssertEqual(paused.ticket, original.ticket)
+            XCTAssertEqual(paused.retryAfter, .distantFuture,
+                "Launch and foreground resume must also leave the ticket paused")
+            XCTAssertEqual(paused.attempt, original.attempt + 1)
+
+            // Both explicit save boundaries and manual backup use markPending.
+            try BackupLocalJournal.markPending(for: container)
+            let fresh = try XCTUnwrap(BackupLocalJournal.pending(for: container))
+            XCTAssertNotEqual(fresh.ticket, paused.ticket)
+            XCTAssertEqual(fresh.retryAfter, .distantPast)
+            XCTAssertEqual(fresh.attempt, 0)
+        }
+    }
+
+    func testExportNetworkFailuresRetainRetryBackoffAndServerDelay() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date(timeIntervalSince1970: 1_000)
+        try BackupLocalJournal.markPending(for: container)
+        for expected in [30.0, 60.0, 120.0, 240.0, 480.0, 960.0, 1920.0, 3600.0, 3600.0] {
+            XCTAssertEqual(try BoundaryCloudBackupExportQueue.recordFailure(
+                CKError(.networkFailure), container: container, now: now), expected)
+            XCTAssertEqual(try BackupLocalJournal.pending(for: container)?.retryAfter, now.addingTimeInterval(expected))
+        }
+        let throttled = CKError(.requestRateLimited, userInfo: [CKErrorRetryAfterKey: 7_200.0])
+        XCTAssertEqual(try BoundaryCloudBackupExportQueue.recordFailure(throttled, container: container, now: now), 7_200)
+        XCTAssertEqual(try BackupLocalJournal.pending(for: container)?.retryAfter, now.addingTimeInterval(7_200))
+    }
+
+    func testExportSafetyFailuresStayPausedAndMissingTicketsDoNotRetry() throws {
+        let container = try makeInMemoryContainer()
+        XCTAssertNil(try BoundaryCloudBackupExportQueue.recordFailure(CKError(.networkFailure), container: container))
+        let errors: [Error] = [UserDataCloudBackupSafetyError.remoteChanged, PersistentRestoreRecovery.RecoveryRequired()]
+        for error in errors {
+            try BackupLocalJournal.markPending(for: container)
+            XCTAssertNil(try BoundaryCloudBackupExportQueue.recordFailure(error, container: container))
+            XCTAssertEqual(try BackupLocalJournal.pending(for: container)?.retryAfter, .distantFuture)
+        }
+    }
+
+    func testDuplicateRestoreReportsRecordAndPreservesLocalData() async throws {
+        for conflicting in [false, true] {
+            let source = try makeInMemoryContainer()
+            let context = ModelContext(source)
+            let profile = UserProfile(displayName: "Backup")
+            context.insert(profile)
+            try context.saveWithRecoveryProtection()
+            var payload = try UserDataCloudBackupPayload(context: context)
+            var duplicate = try XCTUnwrap(payload.profiles.first)
+            if conflicting { duplicate.displayName = "Conflicting backup" }
+            payload.profiles.append(duplicate)
+            let record = UserDataCloudBackupRemoteRecord(updatedAt: payload.generatedAt,
+                payloadData: try JSONEncoder().encode(payload), contentSummary: payload.contentSummary)
+            let store = CapturingBackupStore()
+            await store.replaceRecord(record)
+
+            let target = try makeInMemoryContainer()
+            let targetContext = ModelContext(target)
+            targetContext.insert(UserProfile(displayName: "Keep me"))
+            try targetContext.saveWithRecoveryProtection()
+            let center = CloudBackupProgressCenter()
+            let expected = UserDataCloudRestoreValidationError.duplicateIdentifier(
+                entity: "UserProfile", identifier: profile.id.uuidString)
+            do {
+                _ = try await UserDataCloudBackupService(localContainer: target, backupStore: store,
+                    progressCenter: center).restoreLatestBackup(replacingLocalData: true)
+                XCTFail("Duplicate records must not be silently discarded")
+            } catch {
+                XCTAssertEqual(error as? UserDataCloudRestoreValidationError, expected)
+                XCTAssertTrue(error.localizedDescription.contains("UserProfile"))
+                XCTAssertTrue(error.localizedDescription.contains(profile.id.uuidString))
+            }
+            XCTAssertEqual(center.presentedOperation?.outcome, .failure(expected.localizedDescription))
+            XCTAssertEqual(try ModelContext(target).fetch(FetchDescriptor<UserProfile>()).map(\.displayName), ["Keep me"])
+            XCTAssertNil(try BackupLocalJournal.restoreRequest(for: target))
+            let unchanged = try await store.fetchBackup()
+            XCTAssertEqual(unchanged?.payloadData, record.payloadData)
+        }
+    }
+
+    func testLegacyExportRejectsDuplicateRecordsWithoutReplacingBackup() async throws {
+        let source = try makeInMemoryContainer()
+        let context = ModelContext(source)
+        let profile = UserProfile(displayName: "Original")
+        context.insert(profile)
+        try context.saveWithRecoveryProtection()
+        let store = CapturingBackupStore()
+        let service = UserDataCloudBackupService(localContainer: source, backupStore: store)
+        _ = try await service.exportCurrentBackup()
+        let original = try await store.fetchBackup()
+        let duplicate = UserProfile(displayName: "Duplicate")
+        duplicate.id = profile.id
+        context.insert(duplicate)
+        try context.saveWithRecoveryProtection()
+        do {
+            _ = try await service.exportCurrentBackup()
+            XCTFail("Invalid local data must not replace a restorable backup")
+        } catch {
+            XCTAssertEqual(error as? UserDataCloudRestoreValidationError,
+                .duplicateIdentifier(entity: "UserProfile", identifier: profile.id.uuidString))
+        }
+        let unchanged = try await store.fetchBackup()
+        XCTAssertEqual(unchanged?.payloadData, original?.payloadData)
+        XCTAssertEqual(try ModelContext(source).fetchCount(FetchDescriptor<UserProfile>()), 2)
+    }
+
     func testLegacyBackupPreservesIndependentTemplateAndWorkoutDropsets() async throws {
         let source = try DropsetBackupTestFixture.makeContainer()
         let expected = try UserDataCloudBackupPayload(context: ModelContext(source))

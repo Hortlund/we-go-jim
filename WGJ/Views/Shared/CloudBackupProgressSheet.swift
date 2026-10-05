@@ -46,6 +46,7 @@ struct CloudBackupProgressSheet: View {
                     Text(resultMessage)
                         .font(.body)
                         .foregroundStyle(WGJTheme.textSecondary)
+                        .textSelection(.enabled)
                     Button { dismiss() } label: {
                         Text("Done").frame(maxWidth: .infinity)
                     }

@@ -289,7 +289,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         let session = routeRecorder?.includingRecordedDistance(in: storedSession) ?? storedSession
 
         let task = Task {
-            await routeRecorder?.flush()
+            try await routeRecorder?.flush(sessionID: session.id)
             return try await persistence.complete(session: session, notes: notes)
         }
         completionTask = task

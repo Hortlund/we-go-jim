@@ -14,17 +14,17 @@ final class ExerciseSeedCatalogTests: XCTestCase {
         let cardioProfile: WorkoutCardioTrackingProfile?
     }
 
-    func testBundledSeedV6HasUniqueCompleteIdentitiesAndEquipment() throws {
+    func testBundledSeedV7HasUniqueCompleteIdentitiesAndEquipment() throws {
         let payload = try BundleExerciseSeedLoader().loadSeed()
         let remoteIDs = payload.exercises.compactMap(\.remoteID)
         let uuids = payload.exercises.map(\.uuid)
 
-        XCTAssertEqual(payload.version, 6)
-        XCTAssertEqual(payload.exercises.count, 247)
+        XCTAssertEqual(payload.version, 7)
+        XCTAssertEqual(payload.exercises.count, 248)
         XCTAssertEqual(remoteIDs.count, payload.exercises.count)
         XCTAssertEqual(Set(remoteIDs).count, remoteIDs.count)
         XCTAssertEqual(Set(uuids).count, uuids.count)
-        XCTAssertEqual(Set(remoteIDs), Set(1001...1247))
+        XCTAssertEqual(Set(remoteIDs), Set(1001...1248))
         XCTAssertTrue(payload.exercises.allSatisfy {
             !$0.isCurated || !$0.equipmentSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         })

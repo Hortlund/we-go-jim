@@ -4,6 +4,141 @@ import XCTest
 
 @MainActor
 final class CardioRecordingControllerTests: XCTestCase {
+    func testPreviousWorkoutRouteFailureDoesNotBlockStrengthOrIndoorCardio() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let routes = directory.appendingPathComponent("routes")
+        let recorder = CardioRouteRecorder(store: CardioRouteStore(directory: routes), manager: TestCardioLocationManager())
+        let persistence = CardioTestPersistence()
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: ActiveWorkoutSnapshotStore(baseDirectory: directory.appendingPathComponent("draft")),
+            persistence: persistence, routeRecorder: recorder)
+        var outdoor = makeActivity(outdoor: true)
+        outdoor.isCompleted = true
+        outdoor.actualDurationSeconds = 60
+        let previous = ActiveWorkoutRuntimeSession(name: "Previous walk", cardioBlocks: [outdoor])
+        try await recorder.prepare(sessionID: previous.id, activityID: outdoor.id)
+        coordinator.send(.start(previous))
+        _ = try await coordinator.complete(notes: nil)
+        XCTAssertEqual(recorder.route?.sessionID, previous.id)
+        try FileManager.default.removeItem(at: routes)
+        try Data().write(to: routes)
+
+        for indoorCardio in [false, true] {
+            var session = ActiveWorkoutRuntimeSession(name: indoorCardio ? "Indoor cardio" : "Strength")
+            if indoorCardio {
+                var activity = makeActivity(outdoor: false)
+                activity.timerState = .paused
+                activity.timerAccumulatedSeconds = 60
+                session.cardioBlocks = [activity]
+            } else {
+                session.exercises = [.init(catalogExerciseUUID: "bench", exerciseNameSnapshot: "Bench",
+                    categorySnapshot: "Strength", muscleSummarySnapshot: "Chest",
+                    setDrafts: [.init(isCompleted: true)])]
+            }
+            coordinator.send(.start(session))
+            if let activity = session.cardioBlocks.first {
+                let controller = CardioRecordingController(activityID: activity.id, coordinator: coordinator, recorder: recorder)
+                await controller.startOrResume()
+                await controller.pause()
+                XCTAssertNil(controller.errorMessage)
+                let finished = await controller.finish()
+                XCTAssertTrue(finished)
+                XCTAssertNil(controller.errorMessage)
+            }
+            _ = try await coordinator.complete(notes: nil)
+            let completed = await persistence.completedSession
+            XCTAssertEqual(completed?.id, session.id)
+            XCTAssertNil(coordinator.storedSnapshot)
+        }
+        XCTAssertEqual(recorder.route?.sessionID, previous.id)
+        do {
+            try await recorder.flush()
+            XCTFail("The old route still cannot be written")
+        } catch { }
+    }
+
+    func testFailedWriteDoesNotBlockRecordingAfterExplicitRouteRemoval() async throws {
+        for cleanup in ["reset", "remove", "restore"] {
+            let directory = temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let routes = directory.appendingPathComponent("routes")
+            let recorder = CardioRouteRecorder(store: CardioRouteStore(directory: routes), manager: TestCardioLocationManager())
+            let sessionID = UUID(), activityID = UUID()
+            try await recorder.prepare(sessionID: sessionID, activityID: activityID)
+            try await recorder.flush()
+            try FileManager.default.removeItem(at: routes)
+            try Data().write(to: routes)
+            do {
+                try await recorder.flush()
+                XCTFail("Expected route write to fail")
+            } catch { }
+            try FileManager.default.removeItem(at: routes)
+            switch cleanup {
+            case "reset": try await recorder.reset()
+            case "remove": try await recorder.remove(activityID: activityID)
+            default: recorder.invalidateAfterRestore()
+            }
+            let nextActivityID = UUID()
+            try await recorder.prepare(sessionID: sessionID, activityID: nextActivityID)
+            try await recorder.flush()
+            XCTAssertEqual(recorder.route?.activityID, nextActivityID, cleanup)
+            XCTAssertNil(recorder.persistenceError, cleanup)
+        }
+    }
+
+    func testFailedRouteWriteRetainsDraftAndRecorderUntilCompletionCanRetry() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let routeDirectory = directory.appendingPathComponent("routes")
+        let routeStore = CardioRouteStore(directory: routeDirectory)
+        let recorder = CardioRouteRecorder(store: routeStore, manager: TestCardioLocationManager())
+        let snapshots = ActiveWorkoutSnapshotStore(baseDirectory: directory.appendingPathComponent("draft"))
+        let persistence = CardioTestPersistence()
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: snapshots, persistence: persistence, routeRecorder: recorder)
+        var activity = makeActivity(outdoor: true)
+        activity.timerState = .paused
+        activity.timerAccumulatedSeconds = 60
+        var session = ActiveWorkoutRuntimeSession(name: "Retain my route")
+        session.cardioBlocks = [activity]
+        var route = CardioRoute(sessionID: session.id, activityID: activity.id)
+        route.distanceMeters = 100
+        route.points = [.init(latitude: 59, longitude: 18, timestamp: .now, horizontalAccuracy: 5, segment: 0)]
+        try CardioRouteFiles(directory: routeDirectory).write(route)
+        try await recorder.prepare(sessionID: session.id, activityID: activity.id)
+        coordinator.send(.start(session))
+        try await recorder.flush()
+        // Make the journal directory unwritable without changing the draft store.
+        try FileManager.default.removeItem(at: routeDirectory)
+        try Data().write(to: routeDirectory)
+        let controller = CardioRecordingController(activityID: activity.id, coordinator: coordinator, recorder: recorder)
+        let finished = await controller.finish()
+        XCTAssertFalse(finished)
+        XCTAssertNotNil(controller.errorMessage)
+        do {
+            _ = try await coordinator.complete(notes: nil)
+            XCTFail("Completion must fail before committing history")
+        } catch { }
+        let completed = await persistence.completedSession
+        XCTAssertNil(completed)
+        XCTAssertEqual(coordinator.storedSnapshot?.session.id, session.id)
+        let savedDraft = try await snapshots.loadStoredSnapshot()
+        XCTAssertEqual(savedDraft?.session.id, session.id)
+        do {
+            try await recorder.prepare(sessionID: UUID(), activityID: UUID())
+            XCTFail("A failed flush must prevent replacing the cached route")
+        } catch { }
+        XCTAssertEqual(recorder.route?.activityID, activity.id)
+
+        try FileManager.default.removeItem(at: routeDirectory)
+        _ = try await coordinator.complete(notes: nil)
+        let savedRoute = try await routeStore.load(activityID: activity.id)
+        XCTAssertEqual(savedRoute?.points, route.points)
+        XCTAssertEqual(savedRoute?.isRecording, false)
+        XCTAssertNil(coordinator.storedSnapshot)
+        XCTAssertNil(recorder.persistenceError)
+    }
+
     func testOutdoorBikeRecordsFastGPSDistanceAndStopsWhenFinished() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -122,7 +257,7 @@ final class CardioRecordingControllerTests: XCTestCase {
         XCTAssertEqual(recorder.route?.activityID, activity.id)
         XCTAssertEqual(recorder.route?.distanceMeters, 250)
         XCTAssertEqual(recorder.gpsState, .paused)
-        await recorder.flush()
+        try await recorder.flush()
         let saved = try await routeStore.load(activityID: activity.id)
         XCTAssertEqual(saved?.distanceMeters, 250)
     }

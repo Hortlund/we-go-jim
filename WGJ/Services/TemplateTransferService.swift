@@ -577,10 +577,11 @@ nonisolated final class TemplateTransferService {
         )
 
         do {
+            var supersetIDs: [UUID: UUID] = [:]
             try repository.importExercises(
                 templateID: template.id,
                 drafts: try transferTemplate.exercises.map {
-                    try exerciseDraft(from: $0, catalogRepository: catalogRepository)
+                    try exerciseDraft(from: $0, catalogRepository: catalogRepository, supersetIDs: &supersetIDs)
                 }
             )
             try repository.setCardioActivities(
@@ -607,6 +608,7 @@ nonisolated final class TemplateTransferService {
 
         do {
             for transferTemplate in transferFolder.templates {
+                var supersetIDs: [UUID: UUID] = [:]
                 let template = try repository.createTemplate(
                     folderID: folder.id,
                     name: transferTemplate.name,
@@ -615,7 +617,7 @@ nonisolated final class TemplateTransferService {
                 try repository.importExercises(
                     templateID: template.id,
                     drafts: try transferTemplate.exercises.map {
-                        try exerciseDraft(from: $0, catalogRepository: catalogRepository)
+                        try exerciseDraft(from: $0, catalogRepository: catalogRepository, supersetIDs: &supersetIDs)
                     }
                 )
                 try repository.setCardioActivities(
@@ -786,7 +788,8 @@ nonisolated final class TemplateTransferService {
 
     private func exerciseDraft(
         from exercise: TemplateTransferExercise,
-        catalogRepository: ExerciseCatalogRepository
+        catalogRepository: ExerciseCatalogRepository,
+        supersetIDs: inout [UUID: UUID]
     ) throws -> TemplateExerciseDraft {
         let resolvedExercise = try resolveImportedExercise(
             catalogExerciseUUID: exercise.catalogExerciseUUID,
@@ -815,14 +818,17 @@ nonisolated final class TemplateTransferService {
                     isWarmup: set.isWarmup,
                     isLocked: set.isLocked,
                     previousLoadUnit: set.loadUnit,
-                    dropStages: set.dropStages
+                    dropStages: set.dropStages.map {
+                        TemplateExerciseDropStageDraft(targetReps: $0.targetReps,
+                            targetWeight: $0.targetWeight, loadUnit: $0.loadUnit)
+                    }
                 )
             },
             components: try componentDrafts(
                 from: exercise.components,
                 catalogRepository: catalogRepository
             ),
-            superset: exercise.superset
+            superset: exercise.superset?.copied(using: &supersetIDs)
         )
     }
 

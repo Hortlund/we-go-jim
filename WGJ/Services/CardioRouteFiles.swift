@@ -89,8 +89,10 @@ nonisolated struct CardioRouteFiles: Sendable {
         try withAccess {
             advanceGeneration(forRestoreTicket: restoration.ticket)
             for route in restoration.routes ?? [] { try route.validateForBackup() }
-            let preserved = restoration.activeWorkoutSnapshotURL.flatMap {
-                try? ActiveWorkoutSnapshotStore.routeActivitiesSaved(after: restoration.cleanupBefore, at: $0)
+            // A failed read cannot establish which newer routes are safe to remove.
+            // Leave the files intact until replay can read it.
+            let preserved = try restoration.activeWorkoutSnapshotURL.map {
+                try ActiveWorkoutSnapshotStore.routeActivitiesSaved(after: restoration.cleanupBefore, at: $0)
             } ?? []
             let parents = Dictionary(uniqueKeysWithValues: restoration.activities.map { ($0.activityID, $0.sessionID) })
             let incoming = Set((restoration.routes ?? []).map(\.activityID))
