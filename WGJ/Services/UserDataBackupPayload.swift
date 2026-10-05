@@ -113,6 +113,15 @@ nonisolated struct UserDataCloudBackupPayload: Codable {
         try validateRelationships()
     }
 
+    /// Both legacy blobs and assembled archives must repair known old identities
+    /// before validation. Never let a transport reject those recoverable records first.
+    static func decodeForRestore(_ data: Data) throws -> Self {
+        var payload = try JSONDecoder().decode(Self.self, from: data)
+        try payload.repairLegacyCopiedIdentities()
+        try payload.validate()
+        return payload
+    }
+
     /// Chunks may reference parents in other chunks, but must never contain
     /// duplicate identities. Check newly encoded chunks before any upload.
     func validateUniqueIdentifiers() throws {
@@ -1737,8 +1746,7 @@ nonisolated enum UserDataBackupPayloadCodec {
             for (key, rows) in arrays { result[key] = rows }
             result["generatedAt"] = generatedAt.timeIntervalSinceReferenceDate
             let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-            try JSONDecoder().decode(UserDataCloudBackupPayload.self, from: data).validate()
-            return data
+            return try BackupArchiveCodec.json(UserDataCloudBackupPayload.decodeForRestore(data))
         }
     }
 

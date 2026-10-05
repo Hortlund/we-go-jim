@@ -4,6 +4,66 @@ import XCTest
 
 @MainActor
 final class SupersetIdentityTests: XCTestCase {
+    func testLegacyGroupRepairKeepsLatestRestSettingRegardlessOfRecordOrder() throws {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
+        context.autosaveEnabled = false
+        let template = try makeTemplate(context)
+        let session = try ActiveWorkoutSessionFactory(modelContext: context).createSessionFromTemplate(templateID: template.id)
+        try WorkoutCompletionRepository(modelContext: context, boundaryEffects: .init(scheduleBackup: { _, _ in }))
+            .completeWorkout(session: session)
+        let original = try UserDataCloudBackupPayload(context: context)
+        let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+        for reversed in [false, true] {
+            var payload = original
+            var oldTemplate = try XCTUnwrap(payload.templateSupersetGroups?.first)
+            oldTemplate.roundRestSeconds = 75
+            oldTemplate.updatedAt = oldDate
+            var latestTemplate = oldTemplate
+            latestTemplate.roundRestSeconds = 120
+            latestTemplate.updatedAt = oldDate.addingTimeInterval(10)
+            var oldWorkout = try XCTUnwrap(payload.workoutSupersetGroups?.first)
+            oldWorkout.roundRestSeconds = 75
+            oldWorkout.updatedAt = oldDate
+            var latestWorkout = oldWorkout
+            latestWorkout.roundRestSeconds = 90
+            latestWorkout.updatedAt = oldDate.addingTimeInterval(10)
+            payload.templateSupersetGroups = reversed ? [latestTemplate, oldTemplate] : [oldTemplate, latestTemplate]
+            payload.workoutSupersetGroups = reversed ? [latestWorkout, oldWorkout] : [oldWorkout, latestWorkout]
+            try payload.repairLegacyCopiedIdentities()
+            try payload.validate()
+            XCTAssertEqual(payload.templateSupersetGroups?.map(\.roundRestSeconds), [120])
+            XCTAssertEqual(payload.workoutSupersetGroups?.map(\.roundRestSeconds), [90])
+            XCTAssertEqual(try BackupArchiveCodec.json(payload.templateSets), try BackupArchiveCodec.json(original.templateSets))
+            XCTAssertEqual(try BackupArchiveCodec.json(payload.workoutSets), try BackupArchiveCodec.json(original.workoutSets))
+            let repairedTemplateID = payload.templateSupersetGroups?.first?.id
+            let repairedWorkoutID = payload.workoutSupersetGroups?.first?.id
+            XCTAssertTrue(payload.templateExercises.allSatisfy { $0.supersetGroupID == repairedTemplateID })
+            XCTAssertTrue(payload.workoutExercises.allSatisfy { $0.supersetGroupID == repairedWorkoutID })
+            try payload.repairLegacyCopiedIdentities()
+            XCTAssertEqual(payload.templateSupersetGroups?.first?.id, repairedTemplateID)
+            XCTAssertEqual(payload.workoutSupersetGroups?.first?.id, repairedWorkoutID)
+        }
+    }
+
+    func testLegacyGroupRepairRejectsConflictingLatestRecordsEvenWithOlderCopies() throws {
+        let context = ModelContext(try AppSchema.makeInMemoryContainer())
+        _ = try makeTemplate(context)
+        var payload = try UserDataCloudBackupPayload(context: context)
+        var old = try XCTUnwrap(payload.templateSupersetGroups?.first)
+        old.updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        var latest = old
+        latest.updatedAt = old.updatedAt.addingTimeInterval(10)
+        latest.roundRestSeconds = 90
+        var conflicting = latest
+        conflicting.roundRestSeconds = 120
+        payload.templateSupersetGroups = [latest, old, conflicting]
+        XCTAssertThrowsError(try payload.repairLegacyCopiedIdentities())
+        payload.templateSupersetGroups = [latest, old, latest]
+        try payload.repairLegacyCopiedIdentities()
+        try payload.validate()
+        XCTAssertEqual(payload.templateSupersetGroups?.map(\.roundRestSeconds), [90])
+    }
+
     func testNewSupersetUsesOnePersistedObjectAndRepeatedWorkoutsHaveIndependentIDs() throws {
         let context = ModelContext(try AppSchema.makeInMemoryContainer())
         context.autosaveEnabled = false
@@ -144,6 +204,12 @@ final class SupersetIdentityTests: XCTestCase {
     }
 
     func testRestoreRepairsLegacyIdentitiesAndPreservesExistingDataOnConflict() async throws {
+        for mode in 0..<3 {
+            try await assertLegacyRestore(chunked: mode != 0, previous: mode == 2)
+        }
+    }
+
+    private func assertLegacyRestore(chunked: Bool, previous: Bool) async throws {
         let context = ModelContext(try AppSchema.makeInMemoryContainer())
         context.autosaveEnabled = false
         let template = try makeTemplate(context)
@@ -171,12 +237,23 @@ final class SupersetIdentityTests: XCTestCase {
         let encoder = JSONEncoder()
         for conflicting in [true, false] {
             var input = payload
-            if conflicting { input.templateSupersetGroups![2].roundRestSeconds += 1 }
+            if conflicting {
+                input.templateSupersetGroups![2].roundRestSeconds += 1
+            } else {
+                // An old unused row kept the original rest while the live row
+                // was edited later. Exercise the complete restore transaction.
+                input.templateSupersetGroups![2].updatedAt = input.templateSupersetGroups![0].updatedAt.addingTimeInterval(-10)
+                input.templateSupersetGroups![0].roundRestSeconds = 120
+                var staleWorkout = input.workoutSupersetGroups![0]
+                staleWorkout.updatedAt = staleWorkout.updatedAt.addingTimeInterval(-10)
+                input.workoutSupersetGroups![0].roundRestSeconds = 90
+                input.workoutSupersetGroups!.append(staleWorkout)
+            }
             let record = UserDataCloudBackupRemoteRecord(updatedAt: .now, payloadData: try encoder.encode(input), contentSummary: input.contentSummary)
-            let service = UserDataCloudBackupService(localContainer: target, backupStore: IdentityBackupStore(record: record),
+            let service = UserDataCloudBackupService(localContainer: target, backupStore: IdentityBackupStore(record: record, chunked: chunked),
                 routeFiles: CardioRouteFiles(directory: root))
             do {
-                _ = try await service.restoreLatestBackup(replacingLocalData: true)
+                _ = try await service.restoreLatestBackup(replacingLocalData: true, previousGeneration: previous)
                 XCTAssertFalse(conflicting)
             } catch {
                 XCTAssertTrue(conflicting, "Unexpected restore failure: \(error)")
@@ -189,6 +266,8 @@ final class SupersetIdentityTests: XCTestCase {
         XCTAssertEqual(restored.workoutSessions.count, 2)
         XCTAssertEqual(restored.templateDropStages.count, 4)
         XCTAssertEqual(Set(restored.workoutSupersetGroups!.map(\.id)).count, 2)
+        XCTAssertEqual(restored.templateSupersetGroups?.first { $0.templateID == payload.templateSupersetGroups![0].templateID }?.roundRestSeconds, 120)
+        XCTAssertEqual(restored.workoutSupersetGroups?.first { $0.sessionID == payload.workoutSupersetGroups![0].sessionID }?.roundRestSeconds, 90)
     }
 
     private func templates(_ context: ModelContext) -> TemplateRepository {
@@ -213,8 +292,31 @@ final class SupersetIdentityTests: XCTestCase {
 
 private actor IdentityBackupStore: UserDataCloudBackupStoring {
     let record: UserDataCloudBackupRemoteRecord
-    init(record: UserDataCloudBackupRemoteRecord) { self.record = record }
-    func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? { record }
+    let chunked: Bool
+    init(record: UserDataCloudBackupRemoteRecord, chunked: Bool) {
+        self.record = record
+        self.chunked = chunked
+    }
+    func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? {
+        guard chunked else { return record }
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: record.payloadData) as? [String: Any])
+        // Split rows across transport chunks, including colliding groups/drops.
+        // Exercise the same combiner used by CloudKit before service-level repair.
+        let combiner = UserDataBackupPayloadCodec.Combiner()
+        for part in 0..<2 {
+            var chunk = object
+            for (key, value) in object {
+                if let rows = value as? [Any] {
+                    chunk[key] = rows.enumerated().filter { $0.offset % 2 == part }.map(\.element)
+                }
+            }
+            let bytes = try JSONSerialization.data(withJSONObject: chunk, options: [.sortedKeys])
+            try combiner.append(BackupArchiveCodec.decode(BackupArchiveCodec.encode(bytes)))
+        }
+        return try .init(updatedAt: record.updatedAt, payloadData: combiner.finish(generatedAt: record.updatedAt),
+            contentSummary: record.contentSummary)
+    }
+    func fetchPreviousBackup() async throws -> UserDataCloudBackupRemoteRecord? { try await fetchBackup() }
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
         let record = record
         return await MainActor.run { .init(updatedAt: record.updatedAt, contentSummary: record.contentSummary) }
