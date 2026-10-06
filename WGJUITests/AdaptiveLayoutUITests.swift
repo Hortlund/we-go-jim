@@ -931,10 +931,17 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let finish = app.buttons["cardio-recording-finish-button"]
         XCTAssertTrue(finish.waitForExistence(timeout: 5))
         finish.tap()
-        let confirmFinish = app.buttons["cardio-recording-confirm-finish-button"].firstMatch
+        let finishAlert = app.alerts["Finish activity?"]
+        XCTAssertTrue(finishAlert.waitForExistence(timeout: 4))
+        finishAlert.buttons["Keep Recording"].tap()
+        XCTAssertTrue(finish.waitForExistence(timeout: 4))
+        XCTAssertFalse(app.textFields["cardio-result-distance-field"].exists)
+        finish.tap()
+        XCTAssertTrue(finishAlert.waitForExistence(timeout: 4))
+        let confirmFinish = finishAlert.buttons["cardio-recording-confirm-finish-button"]
         XCTAssertTrue(confirmFinish.waitForExistence(timeout: 4))
         let finishScreenshot = XCTAttachment(screenshot: app.screenshot())
-        finishScreenshot.name = "Cardio finish confirmation anchored to its button"
+        finishScreenshot.name = "Centered cardio finish confirmation"
         finishScreenshot.lifetime = .keepAlways
         add(finishScreenshot)
         confirmFinish.tap()
