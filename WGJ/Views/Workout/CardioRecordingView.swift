@@ -102,6 +102,13 @@ struct CardioRecordingView: View {
         } message: {
             Text("This activity and its recorded route will be discarded.")
         }
+        .alert("Finish activity?", isPresented: $showingFinishConfirmation) {
+            Button("Keep Recording", role: .cancel) { }
+            Button("Finish Activity") { finish() }
+                .accessibilityIdentifier("cardio-recording-confirm-finish-button")
+        } message: {
+            Text("Save your time and distance for this activity.")
+        }
     }
 
     private func closePresentation() {
@@ -247,13 +254,6 @@ struct CardioRecordingView: View {
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                     .accessibilityIdentifier("cardio-recording-finish-button")
-                    .confirmationDialog("Finish activity?", isPresented: $showingFinishConfirmation, titleVisibility: .visible) {
-                        Button("Finish Activity") { finish() }
-                            .accessibilityIdentifier("cardio-recording-confirm-finish-button")
-                        Button("Keep Recording", role: .cancel) { }
-                    } message: {
-                        Text("Save your time and distance for this activity.")
-                    }
                 }
             }
         }
