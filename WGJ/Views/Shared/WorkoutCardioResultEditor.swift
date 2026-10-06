@@ -2,11 +2,14 @@ import SwiftUI
 
 struct WorkoutCardioResultEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let activityName: String
     let recordedDurationSeconds: Int?
     let recordedDistanceMeters: Double?
     let isOutdoorActivity: Bool
+    private let initialDurationSeconds: Int?
+    private let initialDistanceMeters: Double?
     let onSave: (ValidatedWorkoutCardioResult) async throws -> Void
 
     @State private var draft: WorkoutCardioResultDraft
@@ -29,10 +32,12 @@ struct WorkoutCardioResultEditor: View {
         self.recordedDurationSeconds = recordedDurationSeconds
         self.recordedDistanceMeters = recordedDistanceMeters
         self.isOutdoorActivity = isOutdoorActivity
+        self.initialDurationSeconds = recordedDurationSeconds ?? draft.actualDurationSeconds
+        self.initialDistanceMeters = recordedDistanceMeters ?? draft.unchangedOriginalDistanceMeters
         self.onSave = onSave
         self._draft = State(initialValue: draft)
         self._durationMinutesText = State(
-            initialValue: draft.actualDurationSeconds.map {
+            initialValue: (recordedDurationSeconds ?? draft.actualDurationSeconds).map {
                 WorkoutCardioResultDurationCodec.durationMinutesText(seconds: $0)
             } ?? ""
         )
@@ -47,8 +52,8 @@ struct WorkoutCardioResultEditor: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    activityHeading
                     resultInputs
-                    derivedMetrics
                     if isOutdoorActivity { notesInputs } else { details }
 
                     if let validationMessage {
@@ -59,8 +64,10 @@ struct WorkoutCardioResultEditor: View {
                             .accessibilityIdentifier("cardio-result-validation-error")
                     }
                 }
-                .padding(16)
+                .padding(20)
+                .disabled(isSaving)
             }
+            .safeAreaInset(edge: .bottom) { saveBar }
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .navigationTitle(isOutdoorActivity && recordedDurationSeconds != nil ? "Summary" : "Cardio Result")
@@ -72,84 +79,138 @@ struct WorkoutCardioResultEditor: View {
                     }
                     .disabled(isSaving)
                 }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(
-                        isSaving
-                            ? String(localized: "Saving…")
-                            : isOutdoorActivity && recordedDurationSeconds != nil
-                                ? String(localized: "Save Activity") : String(localized: "Save Result")
-                    ) {
-                        save()
-                    }
-                    .disabled(isSaving)
-                    .accessibilityIdentifier("cardio-result-save-button")
-                }
             }
         }
         .wgjSheetSurface()
         .interactiveDismissDisabled(isSaving)
     }
 
+    private var activityHeading: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(activityName)
+                .font(WGJTheme.headingFont(.largeTitle))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(resultSubtitle)
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+
     private var resultInputs: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            WGJSectionHeader(
-                activityName,
-                subtitle: resultSubtitle
-            )
+        VStack(alignment: .leading, spacing: 20) {
+            durationInput
+            Divider().overlay(WGJTheme.rowDivider)
+            distanceInput
+            derivedMetrics
+        }
+        .padding(20)
+        .wgjCardContainer()
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Duration")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textSecondary)
-
-                if let recordedDurationSeconds, !editingRecordedDuration {
-                    HStack {
-                        Text(Duration.seconds(recordedDurationSeconds).formatted(.time(pattern: .hourMinuteSecond)))
-                            .font(.title2.monospacedDigit().weight(.semibold))
-                            .accessibilityIdentifier("cardio-result-recorded-duration")
-                        Spacer()
-                        Button("Edit") { editingRecordedDuration = true }
-                            .font(.subheadline)
-                            .accessibilityLabel("Edit recorded time")
-                    }
-                } else {
-                    HStack(spacing: 10) {
-                        TextField("Minutes", text: $durationMinutesText)
-                            .keyboardType(.decimalPad)
-                            .wgjPillField()
-                            .accessibilityLabel("Duration in minutes")
-                            .accessibilityIdentifier("cardio-result-duration-field")
-
-                        Text("min")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textSecondary)
+    private var durationInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                metricLabel(String(localized: "Duration"), systemImage: "clock")
+                Spacer()
+                if initialDurationSeconds != nil, !editingRecordedDuration {
+                    editButton(label: String(localized: "Edit recorded time")) {
+                        editingRecordedDuration = true
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(recordedDistanceMeters != nil && !editingRecordedDistance ? "GPS distance" : "Distance (optional)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textSecondary)
-
-                if let recordedDistanceMeters, !editingRecordedDistance {
-                    HStack {
-                        Text("\(draft.distanceUnit.value(fromMeters: recordedDistanceMeters).formatted(.number.precision(.fractionLength(2)))) \(draft.distanceUnit.symbol)")
-                            .font(.title2.monospacedDigit().weight(.semibold))
-                            .accessibilityIdentifier("cardio-result-recorded-distance")
-                        Spacer()
-                        Button("Edit") { editingRecordedDistance = true }
-                            .font(.subheadline)
-                            .accessibilityLabel("Edit recorded distance")
-                    }
-                } else {
-                    distanceInputs
+            if let initialDurationSeconds, !editingRecordedDuration {
+                Text(Duration.seconds(initialDurationSeconds).formatted(.time(pattern: .hourMinuteSecond)))
+                    .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("cardio-result-recorded-duration")
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    TextField("Minutes", text: $durationMinutesText)
+                        .keyboardType(.decimalPad)
+                        .font(.system(.title, design: .rounded, weight: .semibold).monospacedDigit())
+                        .accessibilityLabel("Duration in minutes")
+                        .accessibilityIdentifier("cardio-result-duration-field")
+                    Text("min")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(WGJTheme.textSecondary)
                 }
+                .padding(.vertical, 8)
             }
         }
-        .padding(16)
-        .wgjCardContainer(strong: true)
+    }
+
+    private var distanceInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                metricLabel(
+                    recordedDistanceMeters != nil && !editingRecordedDistance
+                        ? String(localized: "GPS distance") : String(localized: "Distance"),
+                    systemImage: recordedDistanceMeters != nil ? "location" : "point.topleft.down.to.point.bottomright.curvepath"
+                )
+                Spacer()
+                if initialDistanceMeters != nil, !editingRecordedDistance {
+                    editButton(label: String(localized: "Edit recorded distance")) {
+                        editingRecordedDistance = true
+                    }
+                }
+            }
+
+            if let initialDistanceMeters, !editingRecordedDistance {
+                Text("\(WorkoutCardioResultDraft.distanceText(meters: initialDistanceMeters, unit: draft.distanceUnit)) \(draft.distanceUnit.symbol)")
+                    .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("cardio-result-recorded-distance")
+            } else {
+                distanceInputs
+            }
+        }
+    }
+
+    private func metricLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(WGJTheme.textSecondary)
+    }
+
+    private func editButton(label: String, action: @escaping () -> Void) -> some View {
+        Button("Edit", action: action)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(WGJTheme.accentBlue)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(label)
+    }
+
+    private var saveBar: some View {
+        Button(action: save) {
+            HStack(spacing: 10) {
+                if isSaving {
+                    ProgressView().tint(WGJTheme.primaryButtonText)
+                } else {
+                    Image(systemName: "checkmark")
+                }
+                Text(saveButtonTitle)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+        .disabled(isSaving)
+        .accessibilityIdentifier("cardio-result-save-button")
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(WGJTheme.bgBase)
+    }
+
+    private var saveButtonTitle: String {
+        if isSaving { return String(localized: "Saving…") }
+        return isOutdoorActivity && recordedDurationSeconds != nil
+            ? String(localized: "Save Activity") : String(localized: "Save Result")
     }
 
     private var resultSubtitle: String {
@@ -162,16 +223,18 @@ struct WorkoutCardioResultEditor: View {
             }
             return String(localized: "Time recorded. No GPS distance was recorded; add it manually if you know it.")
         }
-        return recordedDurationSeconds != nil
-            ? String(localized: "Time recorded. Add your distance below.")
-            : String(localized: "Log at least a duration or distance.")
+        if initialDurationSeconds != nil || initialDistanceMeters != nil {
+            return String(localized: "Review your result before saving.")
+        }
+        return String(localized: "Log at least a duration or distance.")
     }
 
     private var distanceInputs: some View {
         HStack(spacing: 10) {
             TextField("Distance", text: $draft.distanceText)
                 .keyboardType(.decimalPad)
-                .wgjPillField()
+                .font(.system(.title, design: .rounded, weight: .semibold).monospacedDigit())
+                .accessibilityLabel("Distance")
                 .accessibilityIdentifier("cardio-result-distance-field")
 
             WGJActionMenuButton("Distance unit", usesPlainButtonStyle: false) {
@@ -179,9 +242,12 @@ struct WorkoutCardioResultEditor: View {
                     Button(unit.symbol) { draft.distanceUnit = unit }
                 }
             } label: {
-                Label(draft.distanceUnit.symbol, systemImage: "chevron.up.chevron.down")
+                Label(draft.distanceUnit.symbol, systemImage: "chevron.down")
             }
-            .buttonStyle(WGJGhostButtonStyle())
+            .buttonStyle(.plain)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(WGJTheme.accentBlue)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("Distance unit")
             .accessibilityValue(draft.distanceUnit.symbol)
             .accessibilityIdentifier("cardio-result-distance-unit-picker")
@@ -192,15 +258,8 @@ struct WorkoutCardioResultEditor: View {
     private var derivedMetrics: some View {
         let summary = previewSummary
         if summary.metrics.contains(where: { $0.kind.isDerived }) {
-            VStack(alignment: .leading, spacing: 12) {
-                WGJSectionHeader(
-                    String(localized: "Calculated"),
-                    subtitle: String(localized: "Updates from your duration and distance.")
-                )
-                resultMetrics(summary.metrics.filter(\.kind.isDerived))
-            }
-            .padding(16)
-            .wgjCardContainer(strong: true)
+            Divider().overlay(WGJTheme.rowDivider)
+            resultMetrics(summary.metrics.filter(\.kind.isDerived))
         }
     }
 
@@ -254,23 +313,24 @@ struct WorkoutCardioResultEditor: View {
             }
         }
         .padding(16)
-        .wgjCardContainer(strong: true)
+        .wgjCardContainer()
     }
 
     private var notesInputs: some View {
         noteField
-            .padding(16)
-            .wgjCardContainer(strong: true)
+            .padding(20)
+            .wgjCardContainer()
     }
 
     private var noteField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Notes (optional)")
-                .font(.caption.weight(.semibold))
+            Label("Notes (optional)", systemImage: "text.alignleft")
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(WGJTheme.textSecondary)
             TextField("How did it feel?", text: $draft.notes, axis: .vertical)
-                .lineLimit(3...6)
-                .wgjPillField()
+                .lineLimit(2...5)
+                .font(.body)
+                .padding(.top, 6)
                 .accessibilityIdentifier("cardio-result-notes-field")
         }
     }
@@ -316,8 +376,8 @@ struct WorkoutCardioResultEditor: View {
     private func candidateDraft() -> WorkoutCardioResultDraft? {
         var candidate = draft
         let durationText = durationMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let recordedDurationSeconds, !editingRecordedDuration {
-            candidate.actualDurationSeconds = recordedDurationSeconds
+        if let initialDurationSeconds, !editingRecordedDuration {
+            candidate.actualDurationSeconds = initialDurationSeconds
         } else if durationText.isEmpty {
             candidate.actualDurationSeconds = nil
         } else {
@@ -334,16 +394,22 @@ struct WorkoutCardioResultEditor: View {
 
     private func resultMetrics(_ metrics: [WorkoutCardioResultSummary.Metric]) -> some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 130), spacing: 8)],
+            columns: dynamicTypeSize.isAccessibilitySize
+                ? [GridItem(.flexible())]
+                : [GridItem(.adaptive(minimum: 140), spacing: 16)],
             alignment: .leading,
             spacing: 8
         ) {
             ForEach(metrics) { metric in
-                WGJMetricPill(
-                    systemImage: metric.systemImage,
-                    value: metric.value,
-                    tint: WGJTheme.accentCyan
-                )
+                VStack(alignment: .leading, spacing: 8) {
+                    metricLabel(metric.title, systemImage: metric.systemImage)
+                    Text(metric.value)
+                        .font(.system(.title3, design: .rounded, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
                     WorkoutMetricAccessibilityPolicy.cardioMetric(
                         label: metric.title,
@@ -495,7 +561,7 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .wgjCardContainer(strong: true)
+        .wgjCardContainer()
     }
 
     private var roleTint: Color {
@@ -575,4 +641,42 @@ extension WorkoutCardioResultSummaryCard where Actions == EmptyView {
             EmptyView()
         }
     }
+}
+
+#Preview("GPS result · Dark") {
+    WorkoutCardioResultEditor(
+        activityName: "Outdoor Walk",
+        draft: WorkoutCardioResultDraft(
+            actualDurationSeconds: 1_682,
+            actualDistanceMeters: 637.2240977908418,
+            distanceUnit: .kilometers,
+            inclinePercent: nil,
+            resistanceLevel: nil,
+            notes: "",
+            trackingProfile: .walkRun
+        ),
+        recordedDurationSeconds: 1_682,
+        recordedDistanceMeters: 637.2240977908418,
+        isOutdoorActivity: true,
+        onSave: { _ in }
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Manual result · Large text") {
+    WorkoutCardioResultEditor(
+        activityName: "Treadmill",
+        draft: WorkoutCardioResultDraft(
+            actualDurationSeconds: nil,
+            actualDistanceMeters: nil,
+            distanceUnit: .miles,
+            inclinePercent: nil,
+            resistanceLevel: nil,
+            notes: "",
+            trackingProfile: .treadmill
+        ),
+        onSave: { _ in }
+    )
+    .environment(\.dynamicTypeSize, .accessibility1)
+    .preferredColorScheme(.light)
 }

@@ -41,10 +41,11 @@ nonisolated struct WorkoutCardioResultDraft: Equatable, Sendable {
         inclinePercent: Double?,
         resistanceLevel: Double?,
         notes: String,
-        trackingProfile: WorkoutCardioTrackingProfile
+        trackingProfile: WorkoutCardioTrackingProfile,
+        locale: Locale = .current
     ) {
         let distanceText = actualDistanceMeters.map {
-            WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
+            Self.distanceText(meters: $0, unit: distanceUnit, locale: locale)
         } ?? ""
 
         self.actualDurationSeconds = actualDurationSeconds
@@ -59,7 +60,7 @@ nonisolated struct WorkoutCardioResultDraft: Equatable, Sendable {
         self.originalDistanceUnit = distanceUnit
     }
 
-    fileprivate var unchangedOriginalDistanceMeters: Double? {
+    var unchangedOriginalDistanceMeters: Double? {
         guard distanceText == originalDistanceText,
               distanceUnit == originalDistanceUnit,
               let originalDistanceMeters,
@@ -68,6 +69,13 @@ nonisolated struct WorkoutCardioResultDraft: Equatable, Sendable {
             return nil
         }
         return originalDistanceMeters
+    }
+
+    static func distanceText(meters: Double, unit: WorkoutDistanceUnit, locale: Locale = .current) -> String {
+        guard meters.isFinite, meters > 0 else { return "" }
+        return unit.value(fromMeters: meters).formatted(
+            .number.locale(locale).grouping(.never).precision(.fractionLength(0...2))
+        )
     }
 
     private static func numericText(_ value: Double?) -> String {
@@ -181,16 +189,17 @@ nonisolated enum WorkoutCardioResultValidator {
         _ draft: WorkoutCardioResultDraft,
         locale: Locale
     ) throws -> Double? {
+        // The editable display is rounded, including very short distances that
+        // display as zero. Preserve the source measurement until the user edits it.
+        if let originalMeters = draft.unchangedOriginalDistanceMeters {
+            return originalMeters
+        }
         let text = draft.distanceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         guard let displayValue = LocalizedFiniteNumberParser.parse(text, locale: locale) else {
             throw WorkoutCardioResultValidationError.invalidDistance
         }
         guard displayValue > 0 else { return nil }
-
-        if let originalMeters = draft.unchangedOriginalDistanceMeters {
-            return originalMeters
-        }
 
         let meters = draft.distanceUnit.meters(from: displayValue)
         guard meters.isFinite else {
