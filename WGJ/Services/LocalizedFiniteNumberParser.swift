@@ -22,6 +22,16 @@ nonisolated enum LocalizedFiniteNumberParser {
             normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
         }
 
+        // FormatStyle can emit native digits; Double only accepts ASCII digits.
+        // Restrict this to decimal digits so other numeric symbols stay invalid.
+        normalized = normalized.unicodeScalars.map { scalar in
+            if scalar.properties.generalCategory == .decimalNumber,
+               let digit = scalar.properties.numericValue {
+                return String(Int(digit))
+            }
+            return String(scalar)
+        }.joined()
+
         guard let value = Double(normalized), value.isFinite else { return nil }
         return value
     }

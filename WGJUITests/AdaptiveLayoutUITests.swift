@@ -837,12 +837,17 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    func testReopeningManualOutdoorDistanceKeepsItEditableWithoutGPSLabel() {
+    func testReopeningManualOutdoorDistanceCanBeEditedWithoutGPSLabel() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_PAUSED_OUTDOOR_CARDIO",
             "UITEST_COMPLETED_MANUAL_OUTDOOR_CARDIO", "UITEST_NO_GPS_DISTANCE"])
         let edit = app.buttons["Edit Result"]
         XCTAssertTrue(edit.waitForExistence(timeout: 8))
         edit.tap()
+        let distance = app.staticTexts["cardio-result-recorded-distance"]
+        XCTAssertTrue(distance.waitForExistence(timeout: 8))
+        XCTAssertTrue(distance.label.replacingOccurrences(of: ",", with: ".").contains("2.5"))
+        XCTAssertFalse(app.staticTexts["GPS distance"].exists)
+        app.buttons["Edit recorded distance"].tap()
         let field = app.textFields["cardio-result-distance-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 8))
         XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: ",", with: "."), "2.5")
@@ -852,6 +857,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
         app.buttons["cardio-result-save-button"].tap()
         XCTAssertTrue(edit.waitForExistence(timeout: 8))
         edit.tap()
+        XCTAssertTrue(distance.waitForExistence(timeout: 8))
+        app.buttons["Edit recorded distance"].tap()
         XCTAssertTrue(field.waitForExistence(timeout: 8))
         XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: ",", with: "."), "2.5")
         XCTAssertFalse(app.staticTexts["GPS distance"].exists)

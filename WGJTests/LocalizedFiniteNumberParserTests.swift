@@ -9,6 +9,11 @@ final class LocalizedFiniteNumberParserTests: XCTestCase {
             ("1\u{00a0}234,5", "sv_SE", 1_234.5),
             ("1234.5", "de_DE", 1_234.5),
             (" -2,5 ", "sv_SE", -2.5),
+            ("١٬٢٣٤٫٥", "ar_EG", 1_234.5),
+            ("۰٫۶۴", "fa_IR", 0.64),
+            ("٠٫٦5", "ar_EG", 0.65),
+            ("-١٫٢٥", "ar_EG", -1.25),
+            ("१२.५", "hi_IN", 12.5),
             ("0", "en_US", 0),
         ]
         for (text, locale, expected) in cases {
@@ -17,7 +22,7 @@ final class LocalizedFiniteNumberParserTests: XCTestCase {
     }
 
     func testEmptyMalformedAndNonFiniteNumbersAreRejected() {
-        for text in ["", " \n ", "abc", "1.2.3", "NaN", "inf", "-inf", "1e999"] {
+        for text in ["", " \n ", "abc", "1.2.3", "NaN", "inf", "-inf", "1e999", "①", "²", "Ⅳ"] {
             XCTAssertNil(LocalizedFiniteNumberParser.parse(text, locale: Locale(identifier: "en_US")))
         }
     }
