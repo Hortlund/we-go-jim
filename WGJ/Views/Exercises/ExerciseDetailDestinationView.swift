@@ -487,12 +487,20 @@ struct CustomExerciseEditorView: View {
 
             if creationMode == .standard && !isCardioCategory {
                 Text("Weight means").font(.subheadline.weight(.semibold))
-                Picker("Weight means", selection: $draft.loadTrackingRaw) {
-                    Text("Automatic").tag(String?.none)
+                WGJActionMenuButton(String(localized: "Weight means")) {
+                    Button("Automatic") { draft.loadTrackingRaw = nil }
                     ForEach(ExerciseLoadKind.allCases, id: \.self) { kind in
-                        Text(kind.title).tag(Optional(kind.rawValue))
+                        Button(kind.title) { draft.loadTrackingRaw = kind.rawValue }
                     }
+                } label: {
+                    Label(draft.loadTrackingRaw.flatMap(ExerciseLoadKind.init(rawValue:))?.title
+                        ?? String(localized: "Automatic"), systemImage: "chevron.down")
+                        .padding(.vertical, 10)
                 }
+                .foregroundStyle(WGJTheme.accentBlue)
+                .accessibilityLabel("Weight means")
+                .accessibilityValue(draft.loadTrackingRaw.flatMap(ExerciseLoadKind.init(rawValue:))?.title
+                    ?? String(localized: "Automatic"))
                 .accessibilityIdentifier("custom-exercise-load-kind")
                 Text(ExerciseLoadSemantics.kind(equipment: draft.equipmentSummary, exerciseName: draft.name,
                     override: draft.loadTrackingRaw).explanation)

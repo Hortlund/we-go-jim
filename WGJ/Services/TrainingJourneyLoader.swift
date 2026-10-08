@@ -17,20 +17,24 @@ nonisolated enum TrainingJourneyLoader {
         let strengthSessions = Set(metrics.exerciseHistoryByUUID.values.flatMap { entries in
             entries.filter { $0.completedSetCount > 0 }.map(\.sessionID)
         })
+        let mappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: context,
+            catalogExerciseUUIDs: exerciseIDs)
+        let legMuscles: Set<Int> = [5, 6, 7, 9, 13]
+        var completedBySession: [UUID: [JourneyCompletedExercise]] = [:]
+        for (id, entries) in metrics.exerciseHistoryByUUID {
+            let isLeg = !(mappings[id]?.primaryMuscleIDs ?? []).isDisjoint(with: legMuscles)
+            for entry in entries where entry.completedSetCount > 0 {
+                completedBySession[entry.sessionID, default: []].append(
+                    .init(id: id, name: entry.exerciseName, isLegExercise: isLeg))
+            }
+        }
         let workouts = sessions.map { session in
             JourneyWorkout(id: session.id, name: session.name, date: session.endedAt ?? session.startedAt,
                 durationSeconds: session.durationSeconds, hasStrength: strengthSessions.contains(session.id),
                 hasCardio: !bySession[session.id, default: []].isEmpty,
                 activities: bySession[session.id, default: []].map { activity in
-                    let profile = WorkoutCardioTrackingProfileResolver.resolved(storedProfile: activity.trackingProfile,
-                        catalogExerciseUUID: activity.catalogExerciseUUID, exerciseName: activity.exerciseNameSnapshot,
-                        hasDistance: (activity.actualDistanceMeters ?? 0) > 0)
-                    return JourneyActivity(id: activity.id, exerciseID: activity.catalogExerciseUUID,
-                        name: activity.exerciseNameSnapshot, distanceMeters: activity.actualDistanceMeters ?? 0,
-                        durationSeconds: max(0, activity.actualDurationSeconds ?? 0),
-                        isWalkRun: profile == .walkRun || profile == .treadmill,
-                        isOutdoor: CardioRecordingPolicy.recordsGPS(catalogExerciseUUID: activity.catalogExerciseUUID))
-                })
+                    CardioPersonalRecordService.activity(activity)
+                }, completedExercises: completedBySession[session.id, default: []])
         }
         var exercises: [JourneyExercise] = []
         for (id, entries) in metrics.exerciseHistoryByUUID where !assisted.contains(id) {
@@ -50,8 +54,10 @@ nonisolated enum TrainingJourneyLoader {
             exercises.append(.init(id: "\(id)-reps", name: name, isReps: true, usesAddedWeight: false, performances: reps))
         }
         let profile = try ProfileRepository(modelContext: context).currentProfile()
-        return TrainingJourneyBuilder.build(workouts: workouts, exercises: exercises,
+        var snapshot = TrainingJourneyBuilder.build(workouts: workouts, exercises: exercises,
             distanceUnit: profile?.preferredDistanceUnit ?? .regionalDefault(locale: .current),
             loadUnit: profile?.preferredLoadUnit ?? .kg, calendar: calendar, now: now)
+        snapshot.celebrationScope = profile?.id.uuidString ?? "local"
+        return snapshot
     }
 }

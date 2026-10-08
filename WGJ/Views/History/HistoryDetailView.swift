@@ -217,10 +217,22 @@ struct HistoryDetailView: View {
                 )
 
                 ForEach(personalRecordHighlights) { highlight in
-                    HistoryPersonalRecordHighlightCard(highlight: highlight)
+                    HistoryPersonalRecordHighlightCard(highlight: highlight, achievedAtText: recordDateText)
                 }
             }
         }
+        if let records = snapshot?.cardioPersonalRecords, !records.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader("Cardio PRs", subtitle: "Distance and average-speed records from this workout.")
+                ForEach(records) { record in
+                    WorkoutCompletionPersonalRecordCard(record: record, achievedAtText: recordDateText)
+                }
+            }
+        }
+    }
+
+    private var recordDateText: String {
+        (session?.endedAt ?? session?.startedAt)?.formatted(date: .abbreviated, time: .shortened) ?? ""
     }
 
     private func addExerciseButton(title: String) -> some View {
@@ -1057,9 +1069,10 @@ private struct HistoryWorkoutPersonalRecordSummary {
 
 private struct HistoryPersonalRecordHighlightCard: View, Equatable {
     let highlight: HistoryDetailSnapshotBuilder.PersonalRecordHighlight
+    let achievedAtText: String
 
     static func == (lhs: HistoryPersonalRecordHighlightCard, rhs: HistoryPersonalRecordHighlightCard) -> Bool {
-        lhs.highlight == rhs.highlight
+        lhs.highlight == rhs.highlight && lhs.achievedAtText == rhs.achievedAtText
     }
 
     var body: some View {
@@ -1089,6 +1102,9 @@ private struct HistoryPersonalRecordHighlightCard: View, Equatable {
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                PersonalRecordShareButton(record: .init(id: highlight.id, exerciseName: highlight.exerciseName,
+                    performanceText: highlight.performanceText, detailText: highlight.detailText), achievedAtText: achievedAtText)
             }
 
             Spacer(minLength: 12)

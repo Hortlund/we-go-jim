@@ -11,6 +11,7 @@ enum HistoryDetailSnapshotBuilder {
         let hydrationPayloadByExerciseID: [UUID: ExerciseHydrationPayload]
         let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
         let personalRecordHighlights: [PersonalRecordHighlight]
+        var cardioPersonalRecords: [WorkoutCompletionPersonalRecord] = []
     }
 
     nonisolated struct SessionSnapshot: Identifiable, Equatable, Sendable {
@@ -236,7 +237,8 @@ enum HistoryDetailSnapshotBuilder {
             localState: localState,
             hydrationPayloadByExerciseID: hydrationPayloadByExerciseID,
             muscleHeatmap: muscleHeatmap,
-            personalRecordHighlights: personalRecordHighlights
+            personalRecordHighlights: personalRecordHighlights,
+            cardioPersonalRecords: try CardioPersonalRecordService.records(sessionID: sessionID, context: modelContext)
         )
     }
 

@@ -6,6 +6,8 @@ struct TrainingJourneyView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var celebrationID: UUID?
     @State private var snapshot: TrainingJourneySnapshot?
     @State private var selectedYear: Date?
     @State private var selectedMonth: JourneyMonth?
@@ -21,13 +23,13 @@ struct TrainingJourneyView: View {
                     JourneyLifetimeSummary(snapshot: snapshot)
                     TrainingYearRecapEntryView(snapshot: snapshot, selectedYearID: selectedYear)
                     calendarSection(snapshot)
+                    JourneyInsightsSection(snapshot: snapshot)
                     JourneyTimeline(milestones: snapshot.milestones, filter: $filter)
-                    Text("Based on your visible completed workouts. Milestones update when your history changes.")
-                        .font(.caption).foregroundStyle(WGJTheme.textSecondary)
-                } else if snapshot != nil {
+                } else if let snapshot {
                     WGJEmptyStateCard(title: "Your story starts here",
                         message: "Finish your first workout to start your journey. Every session becomes part of the bigger picture.",
                         icon: "sparkles")
+                    JourneyInsightsSection(snapshot: snapshot)
                 } else if let errorMessage {
                     WGJEmptyStateCard(title: "Couldn't load your journey", message: errorMessage,
                         icon: "exclamationmark.circle") {
@@ -40,6 +42,10 @@ struct TrainingJourneyView: View {
             .padding(16)
             .padding(.bottom, 80)
         }
+        .overlay {
+            if let celebrationID, !reduceMotion { JourneyConfetti(token: celebrationID) }
+        }
+        .onDisappear { celebrationID = nil }
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .toolbar(.visible, for: .navigationBar)
@@ -114,6 +120,8 @@ struct TrainingJourneyView: View {
             }
             guard !Task.isCancelled, requestID == loadGeneration else { return }
             snapshot = loaded
+            let newMilestones = JourneyCelebrationPreferences().claim(loaded.milestones, scope: loaded.celebrationScope)
+            if newMilestones > 0 && !reduceMotion { celebrationID = UUID() }
             if !loaded.years.contains(where: { $0.id == selectedYear }) { selectedYear = loaded.years.first?.id }
             if let month = selectedMonth {
                 selectedMonth = loaded.years.flatMap(\.months).first { $0.id == month.id }
@@ -148,6 +156,10 @@ private struct JourneyLifetimeSummary: View {
                 stat(snapshot.activeDays.formatted(), title: "Active days", icon: "calendar")
                 stat(JourneyFormatting.distance(snapshot.walkRunDistanceMeters, unit: snapshot.distanceUnit),
                     title: "Walking & running", icon: "figure.run")
+                stat(JourneyFormatting.distance(snapshot.otherCardioDistanceMeters, unit: snapshot.distanceUnit),
+                    title: "Cycling & other cardio", icon: "bicycle")
+                stat(snapshot.milestones.filter { $0.personalRecord != nil }.count.formatted(),
+                    title: "Journey PRs", icon: "trophy.fill")
             }
         }
         .padding(22)
@@ -211,11 +223,12 @@ private struct JourneyYearCalendar: View {
 }
 
 private enum JourneyFilter: String, CaseIterable, Identifiable {
-    case all = "All", strength = "Strength", cardio = "Cardio", milestones = "Milestones"
+    case all = "All", records = "PRs", strength = "Strength", cardio = "Cardio", milestones = "Milestones"
     var id: String { rawValue }
     var title: String {
         switch self {
         case .all: String(localized: "All")
+        case .records: String(localized: "PRs")
         case .strength: String(localized: "Strength")
         case .cardio: String(localized: "Cardio")
         case .milestones: String(localized: "Milestones")
@@ -224,6 +237,7 @@ private enum JourneyFilter: String, CaseIterable, Identifiable {
     func includes(_ event: JourneyMilestone) -> Bool {
         switch self {
         case .all: true
+        case .records: event.personalRecord != nil
         case .strength: event.kind == .strength
         case .cardio: event.kind == .cardio
         case .milestones: event.kind != .strength && event.kind != .cardio
@@ -232,6 +246,7 @@ private enum JourneyFilter: String, CaseIterable, Identifiable {
 }
 
 private struct JourneyTimeline: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let milestones: [JourneyMilestone]
     @Binding var filter: JourneyFilter
     @State private var expandedDays: Set<Date> = []
@@ -244,6 +259,18 @@ private struct JourneyTimeline: View {
         let groups = groups
         LazyVStack(alignment: .leading, spacing: 18) {
             Text("The moments that matter").font(.title3.bold())
+            if dynamicTypeSize.isAccessibilitySize {
+                WGJActionMenuButton(String(localized: "Show moments")) {
+                    ForEach(JourneyFilter.allCases) { item in
+                        Button(item.title) { filter = item }
+                    }
+                } label: {
+                    Label(filter.title, systemImage: "chevron.down").padding(.vertical, 10)
+                }
+                    .foregroundStyle(WGJTheme.accentCyan)
+                    .accessibilityLabel("Show moments").accessibilityValue(filter.title)
+                    .accessibilityIdentifier("journey-filter-picker")
+            } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(JourneyFilter.allCases) { item in
@@ -254,8 +281,10 @@ private struct JourneyTimeline: View {
                                 .background(filter == item ? WGJTheme.accentCyan : WGJTheme.fieldStrong, in: Capsule())
                         }.buttonStyle(.plain)
                             .accessibilityAddTraits(filter == item ? .isSelected : [])
+                            .accessibilityIdentifier("journey-filter-\(item.rawValue)")
                     }
                 }
+            }
             }
             if groups.isEmpty {
                 Text("Your next milestone is still ahead. Keep showing up.")
@@ -264,6 +293,10 @@ private struct JourneyTimeline: View {
             ForEach(Array(groups.enumerated()), id: \.element.date) { index, group in
                 let day = group.date
                 let events = group.events
+                let sessions = Dictionary(grouping: events, by: \.sessionID).values.sorted {
+                    let left = $0.first!, right = $1.first!
+                    return left.date == right.date ? left.sessionID.uuidString < right.sessionID.uuidString : left.date > right.date
+                }
                 if index == 0 || Calendar.current.component(.year, from: groups[index - 1].date) != Calendar.current.component(.year, from: day) {
                     Text(day.formatted(.dateTime.year())).font(.title2.bold()).padding(.top, 8)
                 }
@@ -275,11 +308,11 @@ private struct JourneyTimeline: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(day.formatted(.dateTime.day().month(.wide)))
                             .font(.caption.weight(.semibold)).foregroundStyle(WGJTheme.textSecondary)
-                        ForEach(expandedDays.contains(day) ? events : Array(events.prefix(3))) { event in
-                            JourneyMilestoneRow(event: event)
+                        ForEach(expandedDays.contains(day) ? sessions : Array(sessions.prefix(3)), id: \.first!.sessionID) { moments in
+                            JourneySessionMoments(events: moments)
                         }
-                        if events.count > 3 {
-                            Button(expandedDays.contains(day) ? String(localized: "Show less") : String(localized: "Show all \(events.count) moments")) {
+                        if sessions.count > 3 {
+                            Button(expandedDays.contains(day) ? String(localized: "Show less") : String(localized: "Show all \(sessions.count) workouts")) {
                                 if expandedDays.contains(day) { expandedDays.remove(day) } else { expandedDays.insert(day) }
                             }.font(.subheadline).foregroundStyle(WGJTheme.accentBlue)
                         }
@@ -290,7 +323,36 @@ private struct JourneyTimeline: View {
     }
 }
 
-private struct JourneyMilestoneRow: View {
+private struct JourneySessionMoments: View {
+    let events: [JourneyMilestone]
+    @State private var expanded = false
+
+    private var ordered: [JourneyMilestone] {
+        events.sorted {
+            if ($0.personalRecord != nil) != ($1.personalRecord != nil) { return $0.personalRecord != nil }
+            return $0.id < $1.id
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if events.count > 1 {
+                Text("\(events.count) moments from this workout")
+                    .font(.subheadline.weight(.medium)).foregroundStyle(WGJTheme.textSecondary)
+            }
+            ForEach(expanded ? ordered : Array(ordered.prefix(3))) { event in
+                JourneyMilestoneRow(event: event)
+            }
+            if events.count > 3 {
+                Button(expanded ? String(localized: "Show less") : String(localized: "Show all \(events.count) moments")) {
+                    expanded.toggle()
+                }.font(.subheadline).foregroundStyle(WGJTheme.accentBlue)
+            }
+        }
+    }
+}
+
+struct JourneyMilestoneRow: View {
     let event: JourneyMilestone
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -300,6 +362,9 @@ private struct JourneyMilestoneRow: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: event.kind.systemImage).foregroundStyle(WGJTheme.accentCyan).frame(width: 24)
                     VStack(alignment: .leading, spacing: 5) {
+                        if let caption = event.playfulTitle {
+                            Text(caption).font(.caption.weight(.medium)).foregroundStyle(WGJTheme.accentBlue)
+                        }
                         Text(event.title).font(.headline).foregroundStyle(WGJTheme.textPrimary)
                         Text(event.detail).font(.caption).foregroundStyle(WGJTheme.textSecondary)
                     }
@@ -322,6 +387,11 @@ private struct JourneyMilestoneRow: View {
                 .chartYScale(domain: .automatic(includesZero: false))
                 .frame(height: 65)
                 .accessibilityLabel("\(event.title). \(event.detail)")
+            }
+            if let record = event.personalRecord {
+                PersonalRecordShareButton(record: record, achievedAtText: event.date.formatted(date: .abbreviated, time: .shortened), playfulTitle: event.playfulTitle)
+            } else {
+                JourneyMilestoneShareButton(event: event)
             }
             if let activityID = event.activityID {
                 JourneyRoutePreview(sessionID: event.sessionID, activityID: activityID)

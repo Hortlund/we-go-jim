@@ -21,7 +21,7 @@ nonisolated enum TrainingYearRecapBuilder {
             let sessionIDs = Set(workouts.map(\.id))
             let milestones = snapshot.milestones.filter { sessionIDs.contains($0.sessionID) }
             let highlight = milestones.first { $0.kind == .strength }
-                ?? milestones.first { $0.kind == .cardio && $0.id.hasPrefix("distance-") }
+                ?? milestones.first { $0.kind == .cardio && $0.personalRecord != nil }
                 ?? milestones.first
             // First month wins ties, keeping the recap deterministic.
             let busiest = year.months.reduce(nil as JourneyMonth?) { best, month in

@@ -17,40 +17,56 @@ nonisolated enum TrainingJourneyBuilder {
         }
         let thresholds = Set([10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000])
         var distance = 0.0
+        var otherDistance = 0.0
+        var nextOtherDistanceStep = 0
+        var trainingSeconds = 0
+        var nextTimeStep = 0
+        let timeSteps = [10, 24, 50, 100, 168, 250, 500, 1_000]
+        var activeDays: Set<Date> = []
         let distanceSteps: [Double] = [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
         var nextDistanceStep = 0
         // Distance thresholds follow the chosen display unit, with meters using km milestones.
         let milestoneUnit: WorkoutDistanceUnit = distanceUnit == .meters ? .kilometers : distanceUnit
         var longestByExercise: [String: Double] = [:]
-        var featuredDistanceByExercise: [String: Double] = [:]
         for (index, workout) in ordered.enumerated() {
             if thresholds.contains(index + 1) {
                 events.append(.init(id: "workouts-\(index + 1)", sessionID: workout.id, date: workout.date,
                     kind: .workouts, title: String(localized: "\(index + 1) workouts completed"),
                     detail: String(localized: "Every session adds up.")))
             }
-            for activity in workout.activities
-                where activity.isWalkRun && activity.distanceMeters.isFinite && activity.distanceMeters > 0 {
-                distance += activity.distanceMeters
+            let day = calendar.startOfDay(for: workout.date)
+            if activeDays.insert(day).inserted, [30, 100, 365, 1_000].contains(activeDays.count) {
+                events.append(.init(id: "active-days-\(activeDays.count)", sessionID: workout.id, date: workout.date,
+                    kind: .consistency, title: String(localized: "\(activeDays.count) active days"),
+                    detail: String(localized: "Days you made time for yourself. Every one counts.")))
+            }
+            trainingSeconds += max(0, workout.durationSeconds)
+            var crossedHours: Int?
+            while nextTimeStep < timeSteps.count, trainingSeconds >= timeSteps[nextTimeStep] * 3_600 {
+                crossedHours = timeSteps[nextTimeStep]
+                nextTimeStep += 1
+            }
+            if let crossedHours {
+                events.append(.init(id: "training-hours-\(crossedHours)", sessionID: workout.id, date: workout.date,
+                    kind: .workouts, title: String(localized: "\(crossedHours) hours of training"),
+                    detail: String(localized: "Time invested in getting stronger, fitter, and feeling good.")))
+            }
+            for activity in workout.activities.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+                let validDistance = activity.distanceMeters.isFinite && activity.distanceMeters > 0
+                    && activity.trackingProfile != .timeOnly && activity.trackingProfile != .stairClimber
                 let previous = longestByExercise[activity.exerciseID]
-                let featured = featuredDistanceByExercise[activity.exerciseID] ?? previous
                 if previous == nil {
+                    let detail = validDistance
+                        ? "\(JourneyFormatting.distance(activity.distanceMeters, unit: distanceUnit)) · \(JourneyFormatting.time(activity.durationSeconds))"
+                        : JourneyFormatting.time(activity.durationSeconds)
                     events.append(.init(id: "first-cardio-\(activity.exerciseID)", sessionID: workout.id, date: workout.date,
                         kind: .cardio, title: String(localized: "Your first \(activity.name.lowercased())"),
-                        detail: "\(JourneyFormatting.distance(activity.distanceMeters, unit: distanceUnit)) · \(JourneyFormatting.time(activity.durationSeconds))",
-                        activityID: activity.isOutdoor ? activity.id : nil))
+                        detail: detail, activityID: activity.isOutdoor ? activity.id : nil))
                 }
-                if let previous, let featured, activity.distanceMeters > previous,
-                   activity.distanceMeters >= featured * 1.05,
-                   activity.distanceMeters - featured >= 100 {
-                    events.append(.init(id: "distance-\(activity.id)", sessionID: workout.id, date: workout.date,
-                        kind: .cardio, title: String(localized: "Longest \(activity.name.lowercased())"),
-                        detail: "\(JourneyFormatting.distance(activity.distanceMeters, unit: distanceUnit)) · \(JourneyFormatting.time(activity.durationSeconds))",
-                        activityID: activity.isOutdoor ? activity.id : nil))
-                    featuredDistanceByExercise[activity.exerciseID] = activity.distanceMeters
-                }
-                if previous == nil { featuredDistanceByExercise[activity.exerciseID] = activity.distanceMeters }
-                longestByExercise[activity.exerciseID] = max(previous ?? 0, activity.distanceMeters)
+                longestByExercise[activity.exerciseID] = max(previous ?? 0, validDistance ? activity.distanceMeters : 0)
+                guard validDistance else { continue }
+                if activity.isWalkRun { distance += activity.distanceMeters }
+                else { otherDistance += activity.distanceMeters }
             }
             // A long outing can cross several thresholds. Feature the highest one reached.
             var crossed: Double?
@@ -64,20 +80,29 @@ nonisolated enum TrainingJourneyBuilder {
                     kind: .cardio, title: String(localized: "\(JourneyFormatting.distance(milestoneUnit.meters(from: crossed), unit: milestoneUnit)) on foot"),
                     detail: String(localized: "Total recorded walking and running distance.")))
             }
+            var crossedOther: Double?
+            while nextOtherDistanceStep < distanceSteps.count,
+                  otherDistance >= milestoneUnit.meters(from: distanceSteps[nextOtherDistanceStep]) {
+                crossedOther = distanceSteps[nextOtherDistanceStep]
+                nextOtherDistanceStep += 1
+            }
+            if let crossedOther {
+                events.append(.init(id: "other-distance-\(milestoneUnit.rawValue)-\(crossedOther)", sessionID: workout.id,
+                    date: workout.date, kind: .cardio,
+                    title: String(localized: "\(JourneyFormatting.distance(milestoneUnit.meters(from: crossedOther), unit: milestoneUnit)) beyond walking and running"),
+                    detail: String(localized: "Total recorded cycling, rowing, and other distance cardio.")))
+            }
         }
+        events += CardioPersonalRecordService.milestones(workouts: ordered, unit: distanceUnit)
         for exercise in exercises.sorted(by: { $0.id < $1.id }) {
             let points = exercise.performances.filter {
                 visibleIDs.contains($0.sessionID) && $0.value.isFinite && $0.value > 0
             }.sorted { $0.date == $1.date ? $0.sessionID.uuidString < $1.sessionID.uuidString : $0.date < $1.date }
             guard let first = points.first else { continue }
             var record = first.value
-            var featured = first.value
             for (index, point) in points.enumerated().dropFirst() {
                 guard point.value > record else { continue }
                 record = point.value
-                let minimumChange = exercise.isReps ? 2.0 : max(2.5, featured * 0.1)
-                guard point.value - featured >= minimumChange - 0.0001 else { continue }
-                featured = point.value
                 func valueText(_ value: Double) -> String {
                     if exercise.isReps { return String(localized: "\(Int(value)) reps") }
                     let displayed = (loadUnit == .lb ? value / 0.45359237 : value)
@@ -95,7 +120,12 @@ nonisolated enum TrainingJourneyBuilder {
                     chart: chartPoints(points, through: index).map {
                         JourneyPerformance(sessionID: $0.sessionID, date: $0.date,
                             value: exercise.isReps ? $0.value : (loadUnit == .lb ? $0.value / 0.45359237 : $0.value))
-                    }, chartUnit: unit))
+                    }, chartUnit: unit, personalRecord: .init(
+                        id: "strength-\(exercise.id)-\(point.sessionID)", exerciseName: exercise.name,
+                        performanceText: valueText(point.value),
+                        detailText: exercise.isReps ? String(localized: "Most bodyweight reps")
+                            : exercise.usesAddedWeight ? String(localized: "Heaviest added weight")
+                            : String(localized: "Heaviest weight")), recordKey: "strength-\(exercise.id)"))
             }
         }
         events += consistencyEvents(ordered, calendar: calendar)
@@ -136,10 +166,17 @@ nonisolated enum TrainingJourneyBuilder {
                 title: yearFormatter.string(from: year.start, to: year.end.addingTimeInterval(-1)), months: months))
             yearCursor = year.end
         }
-        return TrainingJourneySnapshot(workoutCount: ordered.count, activeDays: days.count,
+        events = JourneyCelebrationBuilder.milestones(workouts: ordered, exercises: exercises,
+            existing: events, unit: distanceUnit, calendar: calendar, now: now)
+        let insights = JourneyInsightsBuilder.build(workouts: ordered, exercises: exercises,
+            years: Array(years.reversed()), events: events, unit: distanceUnit, calendar: calendar, now: now)
+        var snapshot = TrainingJourneySnapshot(workoutCount: ordered.count, activeDays: days.count,
             durationSeconds: ordered.reduce(0) { $0 + max(0, $1.durationSeconds) },
             walkRunDistanceMeters: distance, firstWorkoutDate: ordered.first?.date, years: Array(years.reversed()),
-            milestones: events.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }, distanceUnit: distanceUnit)
+            milestones: events.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }, distanceUnit: distanceUnit,
+            otherCardioDistanceMeters: otherDistance, insights: insights)
+        snapshot.achievementGoals = JourneyAchievementCatalog.build(snapshot, calendar: calendar)
+        return snapshot
     }
 
     private static func chartPoints(_ points: [JourneyPerformance], through lastIndex: Int) -> [JourneyPerformance] {
@@ -158,7 +195,7 @@ nonisolated enum TrainingJourneyBuilder {
         for week in weeks.keys.sorted() {
             streak = previous.flatMap { calendar.date(byAdding: .weekOfYear, value: 1, to: $0) } == week ? streak + 1 : 1
             previous = week
-            guard [4, 12, 26, 52].contains(streak), achieved.insert(streak).inserted,
+            guard [4, 10, 12, 26, 52].contains(streak), achieved.insert(streak).inserted,
                   let workout = weeks[week]?.min(by: { $0.date == $1.date ? $0.id.uuidString < $1.id.uuidString : $0.date < $1.date }) else { continue }
             events.append(.init(id: "consistency-\(streak)", sessionID: workout.id, date: workout.date, kind: .consistency,
                 title: String(localized: "\(streak) consecutive training weeks"),

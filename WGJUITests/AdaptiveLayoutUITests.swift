@@ -345,7 +345,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     func testYearInTrainingRecapPreviewsAndSharesAnImage() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE", "UITEST_PROGRESS_PRIOR_YEAR"])
-        openTrainingJourneyFromProfile(in: app)
+        openTrainingJourneyFromProgress(in: app)
         let recap = app.buttons["training-year-recap-entry"]
         for _ in 0..<3 where !recap.isHittable { app.swipeUp() }
         XCTAssertTrue(recap.isHittable)
@@ -393,7 +393,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     func testYearInTrainingRecapSupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        openTrainingJourneyFromProfile(in: app)
+        openTrainingJourneyFromProgress(in: app)
         let recap = app.buttons["training-year-recap-entry"]
         for _ in 0..<5 where !recap.isHittable { app.swipeUp() }
         XCTAssertTrue(recap.isHittable)
@@ -405,12 +405,11 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    func testTrainingJourneyIsOnlyAvailableFromProfile() {
+    func testTrainingJourneyIsOnlyAvailableFromProgress() {
         let app = launchLocalApp()
-        openProgressTab(in: app)
-        XCTAssertTrue(app.staticTexts["Log two workouts to compare progress"].waitForExistence(timeout: 8))
+        app.buttons["Profile"].firstMatch.tap()
         XCTAssertFalse(app.buttons["training-journey-entry"].exists)
-        openTrainingJourneyFromProfile(in: app)
+        openTrainingJourneyFromProgress(in: app)
         XCTAssertTrue(app.staticTexts["Your story starts here"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["training-year-recap-entry"].exists)
     }
@@ -418,7 +417,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     func testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE"])
-        openTrainingJourneyFromProfile(in: app)
+        openTrainingJourneyFromProgress(in: app)
         XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
         let fixtureDate = Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         let fixtureYear = Calendar.current.component(.year, from: fixtureDate)
@@ -446,10 +445,151 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
+    func testJourneyIndividualPRPreviewsAndSharesWithoutWorkout() {
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
+        openTrainingJourneyFromProgress(in: app)
+        let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "share-pr-")).firstMatch
+        for _ in 0..<10 where !share.isHittable { app.swipeUp() }
+        XCTAssertTrue(share.isHittable, app.debugDescription)
+        share.tap()
+        XCTAssertTrue(app.navigationBars["Personal Record"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["TOTAL VOLUME"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Individual PR preview"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["personal-record-share-export"].tap()
+        let copy = app.cells["Copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 8))
+        copy.tap()
+        XCTAssertTrue(app.buttons["personal-record-share-export"].waitForExistence(timeout: 8))
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Your Journey"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testJourneyMilestoneSharingAndHighlightReel() {
+        verifyJourneyMilestoneSharingAndHighlightReel()
+    }
+
+    @MainActor
+    func testJourneyCelebrationsSupportAccessibilityTextSize() {
+        verifyJourneyMilestoneSharingAndHighlightReel(additionalArguments: [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    }
+
+    @MainActor
+    private func verifyJourneyMilestoneSharingAndHighlightReel(additionalArguments: [String] = []) {
+        let textSize = additionalArguments.isEmpty
+            ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"] : additionalArguments
+        let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"] + textSize)
+        openTrainingJourneyFromProgress(in: app)
+        let next = app.staticTexts["Next up"]
+        for _ in 0..<8 where !next.isHittable { app.swipeUp() }
+        XCTAssertTrue(next.isHittable)
+        let allGoals = app.buttons["journey-all-goals"]
+        for _ in 0..<3 where !allGoals.isHittable { app.swipeUp() }
+        XCTAssertTrue(allGoals.isHittable)
+        allGoals.tap()
+        XCTAssertTrue(app.navigationBars["Achievements"].waitForExistence(timeout: 8))
+        let goalFilter = app.buttons["journey-goal-filter"]
+        XCTAssertTrue(goalFilter.isHittable)
+        verifyScrollingFilterStaysInItsRow(goalFilter, choose: "To unlock", in: app)
+        let future = app.descendants(matching: .any)["journey-goal-first-cardio"].firstMatch
+        for _ in 0..<5 where !future.isHittable { app.swipeUp() }
+        XCTAssertTrue(future.isHittable, app.debugDescription)
+        let goalScreenshot = XCTAttachment(screenshot: app.screenshot())
+        goalScreenshot.name = "Achievement goals still to unlock"
+        goalScreenshot.lifetime = .keepAlways
+        add(goalScreenshot)
+        let workoutSeries = app.buttons["journey-goal-series-workouts"]
+        for _ in 0..<12 where !workoutSeries.isHittable { app.swipeUp() }
+        XCTAssertTrue(workoutSeries.isHittable)
+        workoutSeries.tap()
+        XCTAssertTrue(app.navigationBars["Showing up"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Current goal"].exists)
+        let laterGoal = app.descendants(matching: .any)["journey-goal-workouts-100"].firstMatch
+        for _ in 0..<8 where !laterGoal.isHittable { app.swipeUp() }
+        XCTAssertTrue(laterGoal.isHittable)
+        app.navigationBars["Showing up"].buttons.element(boundBy: 0).tap()
+        for _ in 0..<5 where !goalFilter.isHittable { app.swipeDown() }
+        goalFilter.tap()
+        app.buttons["Cleared"].tap()
+        let beginning = app.descendants(matching: .any)["journey-goal-beginning"].firstMatch
+        XCTAssertTrue(beginning.waitForExistence(timeout: 5))
+        selectAchievementPage("Stats", in: app)
+        let streak = app.descendants(matching: .any)["journey-achievement-streak"].firstMatch
+        XCTAssertTrue(streak.waitForExistence(timeout: 5))
+        let yearPicker = app.buttons["journey-achievement-year"]
+        yearPicker.tap()
+        app.buttons[String(Calendar.current.component(.year, from: Date()))].tap()
+        let moments = app.descendants(matching: .any)["journey-achievement-moments"].firstMatch
+        XCTAssertTrue(moments.waitForExistence(timeout: 5))
+        selectAchievementPage("Earned", in: app)
+        let earnedFilter = app.buttons["journey-earned-filter"]
+        for _ in 0..<3 where !earnedFilter.isHittable { app.swipeDown() }
+        verifyScrollingFilterStaysInItsRow(earnedFilter, choose: "All achievements", in: app)
+        earnedFilter.tap()
+        app.buttons["Milestones"].tap()
+        let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "share-milestone-")).firstMatch
+        for _ in 0..<10 where !share.isHittable { app.swipeUp() }
+        XCTAssertTrue(share.isHittable, app.debugDescription)
+        share.tap()
+        XCTAssertTrue(app.navigationBars["Milestone"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.switches["achievement-meme-toggle"].exists)
+        XCTAssertFalse(app.staticTexts["Share this achievement on its own."].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Milestone share with story header and raised caption"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["personal-record-share-export"].tap()
+        let copy = app.cells["Copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 8))
+        copy.tap()
+        XCTAssertTrue(app.buttons["personal-record-share-export"].waitForExistence(timeout: 8))
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Achievements"].waitForExistence(timeout: 8))
+        app.navigationBars["Achievements"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Your Journey"].waitForExistence(timeout: 8))
+        if !additionalArguments.isEmpty {
+            let filter = app.buttons["journey-filter-picker"]
+            for _ in 0..<12 where !filter.isHittable { app.swipeUp() }
+            XCTAssertTrue(filter.isHittable)
+            verifyScrollingFilterStaysInItsRow(filter, choose: "All", in: app)
+        }
+    }
+
+    @MainActor
+    private func selectAchievementPage(_ title: String, in app: XCUIApplication) {
+        let picker = app.buttons["journey-achievement-page-picker"]
+        if picker.exists {
+            picker.tap()
+            app.buttons[title].firstMatch.tap()
+        } else {
+            app.buttons["journey-achievement-page-\(title.lowercased())"].tap()
+        }
+    }
+
+    @MainActor
+    private func verifyScrollingFilterStaysInItsRow(_ button: XCUIElement, choose option: String, in app: XCUIApplication) {
+        let originalFrame = button.frame
+        button.tap()
+        app.buttons[option].firstMatch.tap()
+        XCTAssertEqual(button.frame.minY, originalFrame.minY, accuracy: 4,
+            "Dismissing the options must return the source button to its row")
+        let scroll = app.scrollViews.firstMatch
+        scroll.swipeUp()
+        XCTAssertTrue(!button.isHittable || button.frame.maxY < originalFrame.maxY - 40,
+            "The filter must scroll with its content, without a floating copy")
+        for _ in 0..<6 where !button.isHittable { scroll.swipeDown() }
+        XCTAssertTrue(button.isHittable)
+    }
+
+    @MainActor
     func testTrainingJourneySupportsAccessibilityTextSize() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        openTrainingJourneyFromProfile(in: app)
+        openTrainingJourneyFromProgress(in: app)
         XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
         let month = app.buttons["journey-month-2"]
         for _ in 0..<5 where !month.isHittable { app.swipeUp() }
@@ -1734,7 +1874,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
 
     @MainActor
     func testCustomExerciseCanChooseAssistanceMeaning() {
-        let app = launchLocalApp()
+        let app = launchLocalApp(additionalArguments: [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"])
         openExercisesTab(in: app)
         let create = app.buttons["exercises-create-button"]
         for _ in 0..<6 where !create.isHittable { app.swipeDown() }
@@ -1743,8 +1884,20 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let picker = app.buttons["custom-exercise-load-kind"]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         picker.tap()
+        let menuScreenshot = XCTAttachment(screenshot: app.screenshot())
+        menuScreenshot.name = "Weight meaning options"
+        menuScreenshot.lifetime = .keepAlways
+        add(menuScreenshot)
         app.buttons["Assistance"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Log the machine assistance. Less assistance is harder; compare on the same machine."].exists)
+        XCTAssertTrue(picker.waitForExistence(timeout: 3))
+        let selectedAssistance = NSPredicate(format: "value == %@", "Assistance")
+        expectation(for: selectedAssistance, evaluatedWith: picker)
+        waitForExpectations(timeout: 3)
+        let explanation = app.staticTexts["Log the machine assistance. Less assistance is harder; compare on the same machine."]
+        for _ in 0..<3 where !explanation.isHittable { app.swipeUp() }
+        XCTAssertTrue(explanation.exists)
+        for _ in 0..<3 where !picker.isHittable { app.swipeDown() }
+        verifyScrollingFilterStaysInItsRow(picker, choose: "Assistance", in: app)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Custom exercise weight meaning"
         attachment.lifetime = .keepAlways
@@ -2167,12 +2320,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    private func openTrainingJourneyFromProfile(in app: XCUIApplication) {
-        let nextPage = app.buttons["Next Page"].firstMatch
-        if nextPage.exists { nextPage.tap() }
-        let profile = app.buttons["Profile"].firstMatch
-        XCTAssertTrue(profile.waitForExistence(timeout: 8))
-        profile.tap()
+    private func openTrainingJourneyFromProgress(in app: XCUIApplication) {
+        openProgressTab(in: app)
         let entry = app.buttons["training-journey-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 8))
         for _ in 0..<8 where !entry.isHittable { app.swipeUp() }
