@@ -145,13 +145,13 @@ final class TrainingJourneyTests: XCTestCase {
         XCTAssertEqual(Set(snapshot.years.map(\.id)).count, snapshot.years.count, file: file, line: line)
     }
 
-    func testMeaningfulStrengthChangesUseLifetimeBaselineAndExcludeDeletedSessions() throws {
+    func testEveryStrengthRecordUsesLifetimeBaselineAndExcludesDeletedSessions() throws {
         let workouts = (1...5).map { workout($0) }
         let values = [50.0, 52.5, 55, 54, 61]
         let exercise = JourneyExercise(id: "bench", name: "Bench", isReps: false, usesAddedWeight: false,
             performances: zip(workouts, values).map { .init(sessionID: $0.0.id, date: $0.0.date, value: $0.1) })
         let events = build(workouts, exercises: [exercise]).milestones.filter { $0.kind == .strength }
-        XCTAssertEqual(events.map(\.sessionID), [workouts[4].id, workouts[2].id])
+        XCTAssertEqual(events.map(\.sessionID), [workouts[4].id, workouts[2].id, workouts[1].id])
         XCTAssertEqual(events.last?.chart.first?.value, 50)
         XCTAssertEqual(events.first?.chart.last?.value, 61)
         let afterDeletion = build(Array(workouts.dropFirst(3)), exercises: [exercise])
@@ -170,11 +170,11 @@ final class TrainingJourneyTests: XCTestCase {
         let event = try XCTUnwrap(build(workouts, exercises: [exercise]).milestones.first { $0.kind == .strength })
         XCTAssertLessThanOrEqual(event.chart.count, 24)
         XCTAssertEqual(event.chart.first?.value, 5)
-        XCTAssertEqual(event.chart.last?.value, 203)
+        XCTAssertEqual(event.chart.last?.value, 204)
         XCTAssertEqual(event.chartUnit, "reps")
     }
 
-    func testDistanceIgnoresMachinesAndInvalidValuesAndFeaturesSlowRecordGrowth() {
+    func testOnFootTotalIgnoresMachinesAndInvalidValuesAndEveryDistanceRecordAppears() {
         let workouts = [
             workout(1, activities: [activity(1_000)]),
             workout(2, activities: [activity(1_040), activity(50_000, exercise: "bike", onFoot: false)]),
@@ -183,8 +183,8 @@ final class TrainingJourneyTests: XCTestCase {
         ]
         let snapshot = build(workouts)
         XCTAssertEqual(snapshot.walkRunDistanceMeters, 4_240)
-        let records = snapshot.milestones.filter { $0.id.hasPrefix("distance-") }
-        XCTAssertEqual(records.count, 1)
+        let records = snapshot.milestones.filter { $0.id.hasPrefix("cardio-pr-distance-") }
+        XCTAssertEqual(records.count, 3)
         XCTAssertEqual(records.first?.sessionID, workouts[3].id)
     }
 
@@ -195,6 +195,33 @@ final class TrainingJourneyTests: XCTestCase {
         XCTAssertEqual(milestones.count, 1)
         XCTAssertTrue(try XCTUnwrap(milestones.first).id.contains("miles-100"))
         XCTAssertEqual(build([session], unit: .meters).milestones.filter { $0.id.hasPrefix("total-distance-") }.count, 1)
+    }
+
+    func testActiveDaysTrainingHoursAndOtherCardioCelebrateDistinctMilestones() {
+        let workouts = (1...30).map { workout($0, duration: 3_600, activities: [activity(2_000, exercise: "bike", onFoot: false)]) }
+        let snapshot = build(workouts + [workout(30, duration: 0)])
+        XCTAssertEqual(snapshot.activeDays, 30)
+        XCTAssertEqual(snapshot.otherCardioDistanceMeters, 60_000)
+        XCTAssertEqual(snapshot.walkRunDistanceMeters, 0)
+        XCTAssertEqual(snapshot.milestones.filter { $0.id == "active-days-30" }.count, 1)
+        XCTAssertEqual(snapshot.milestones.first { $0.id == "training-hours-10" }?.sessionID, workouts[9].id)
+        XCTAssertEqual(snapshot.milestones.filter { $0.id.hasPrefix("other-distance-") }.count, 2)
+    }
+
+    func testLargeHistoryKeepsRecordChartsBoundedAndCountsEveryWorkout() {
+        let workouts = (0..<10_000).map { index in
+            JourneyWorkout(id: UUID(), name: "Training", date: date(1).addingTimeInterval(Double(index) * 43_200),
+                durationSeconds: 600, hasStrength: true, hasCardio: false, activities: [])
+        }
+        let exercise = JourneyExercise(id: "bench", name: "Bench", isReps: false, usesAddedWeight: false,
+            performances: workouts.enumerated().map { .init(sessionID: $0.element.id, date: $0.element.date,
+                value: 50 + Double($0.offset) / 100) })
+        let snapshot = build(workouts, exercises: [exercise])
+        XCTAssertEqual(snapshot.workoutCount, 10_000)
+        XCTAssertEqual(snapshot.years.flatMap(\.months).flatMap(\.workouts).count, 10_000)
+        let records = snapshot.milestones.filter { $0.personalRecord != nil }
+        XCTAssertEqual(records.count, 9_999)
+        XCTAssertTrue(records.allSatisfy { $0.chart.count <= 24 })
     }
 
     func testConsistencyCountsWeeksRatherThanSessionsAndResetsAtGaps() {
@@ -278,6 +305,36 @@ final class TrainingJourneyLoaderTests: XCTestCase {
         XCTAssertEqual(hidden.workoutCount, 1)
         XCTAssertEqual(hidden.walkRunDistanceMeters, 0)
         XCTAssertFalse(hidden.milestones.contains { $0.kind == .strength })
+        XCTAssertFalse(context.hasChanges)
+    }
+
+    func testCelebrationsUseCatalogMusclesAndCompletedCyclingWithoutWrites() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: "Journey-celebrations-\(UUID())")
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let workout = session(in: context, day: 1, kilograms: 50)
+        let muscle = MuscleGroup(remoteID: 5, name: "Quadriceps", nameEn: "Quadriceps")
+        let catalog = ExerciseCatalogItem(remoteUUID: "bench", displayName: "Custom leg exercise")
+        context.insert(muscle)
+        context.insert(catalog)
+        catalog.primaryMuscles = [muscle]
+        let bike = WorkoutSessionCardioBlock(sessionID: workout.id, phase: .preWorkout,
+            catalogExerciseUUID: "seed-bike", exerciseNameSnapshot: "Bike", categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "", trackingProfile: .machineDistance, targetDurationSeconds: 0,
+            actualDurationSeconds: 10_000, actualDistanceMeters: 100_000, isCompleted: true, session: workout)
+        context.insert(bike)
+        workout.cardioBlocks = [bike]
+        try context.saveWithRecoveryProtection()
+        let loaded = try TrainingJourneyLoader.load(context: context)
+        XCTAssertTrue(loaded.milestones.contains { $0.id == "celebration-leg-day" })
+        XCTAssertTrue(loaded.milestones.contains { $0.id == "celebration-cycling-100km" })
+        XCTAssertTrue(loaded.milestones.contains { $0.id == "celebration-mixed" })
+        XCTAssertFalse(context.hasChanges)
+        workout.archivedAt = .now
+        try context.saveWithRecoveryProtection()
+        let hidden = try TrainingJourneyLoader.load(context: context)
+        XCTAssertTrue(hidden.milestones.isEmpty)
+        XCTAssertTrue(hidden.insights.facts.isEmpty)
         XCTAssertFalse(context.hasChanges)
     }
 

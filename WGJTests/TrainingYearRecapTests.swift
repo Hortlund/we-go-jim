@@ -71,7 +71,8 @@ final class TrainingYearRecapTests: XCTestCase {
         let snapshot = TrainingJourneyBuilder.build(workouts: [old, current], exercises: [exercise],
             calendar: calendar, now: date(2026, 10, 3))
         let result = TrainingYearRecapBuilder.build(snapshot, calendar: calendar, now: date(2026, 10, 3))
-        XCTAssertEqual(result[0].milestoneCount, 1)
+        // PR, anniversary, comeback, first workout of the year, and 25% improvement.
+        XCTAssertEqual(result[0].milestoneCount, 5)
         XCTAssertTrue(try XCTUnwrap(result[0].highlight).contains("Bench"))
         XCTAssertEqual(result[1].milestoneCount, 1)
         XCTAssertEqual(result[1].highlight, "Your first workout")
@@ -87,6 +88,26 @@ final class TrainingYearRecapTests: XCTestCase {
         XCTAssertEqual(leap.months.count, 13)
         XCTAssertEqual(leap.months.reduce(0) { $0 + $1.workoutCount }, 1)
         XCTAssertEqual(Set(leap.months.map(\.id)).count, 13)
+    }
+
+    func testCardioPRHighlightWinsOverLaterWorkoutMilestone() throws {
+        for metric in ["distance", "speed"] {
+            let firstActivity = JourneyActivity(id: UUID(), exerciseID: "run", name: "Outdoor Run",
+                distanceMeters: 1_000, durationSeconds: 600, isWalkRun: true, isOutdoor: true)
+            let recordActivity = JourneyActivity(id: UUID(), exerciseID: "run", name: "Outdoor Run",
+                distanceMeters: metric == "distance" ? 2_000 : 1_000,
+                durationSeconds: metric == "distance" ? 1_200 : 500, isWalkRun: true, isOutdoor: true)
+            let workouts = [workout(date(2026, 1, 1), activities: [firstActivity]),
+                workout(date(2026, 1, 2), activities: [recordActivity])]
+                + (3...10).map { workout(date(2026, 1, $0)) }
+            let now = date(2026, 10, 3)
+            let snapshot = TrainingJourneyBuilder.build(workouts: workouts, exercises: [], calendar: calendar, now: now)
+            let record = try XCTUnwrap(snapshot.milestones.first { $0.personalRecord != nil })
+            XCTAssertEqual(record.id, "cardio-pr-\(metric)-\(recordActivity.id)")
+            XCTAssertEqual(snapshot.milestones.first { $0.id == "workouts-10" }?.sessionID, workouts.last?.id)
+            let recap = try XCTUnwrap(TrainingYearRecapBuilder.build(snapshot, calendar: calendar, now: now).first)
+            XCTAssertEqual(recap.highlight, record.title)
+        }
     }
 
     @MainActor

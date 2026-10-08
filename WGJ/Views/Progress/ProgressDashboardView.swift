@@ -32,6 +32,7 @@ struct ProgressDashboardView: View {
                     subtitle: "See how far you've come, then explore what's changing."
                 )
 
+                TrainingJourneyEntryView(compact: true)
                 content
             }
             .padding(.top, 8)

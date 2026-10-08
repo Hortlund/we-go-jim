@@ -49,9 +49,13 @@
         "AdaptiveLayoutUITests/testHistoryDetailRetriesCanceledInitialLoadAfterTabReturn",
         "AdaptiveLayoutUITests/testTemplateLibraryScrollsToOffscreenRowsAndBack",
         "DeepLinkAccessibilityUITests",
-        "AdaptiveLayoutUITests/testTrainingJourneyIsOnlyAvailableFromProfile",
+        "AdaptiveLayoutUITests/testTrainingJourneyIsOnlyAvailableFromProgress",
         "AdaptiveLayoutUITests/testTrainingJourneyCalendarAndMilestoneOpenSavedWorkouts",
         "AdaptiveLayoutUITests/testTrainingJourneySupportsAccessibilityTextSize",
+        "AdaptiveLayoutUITests/testJourneyIndividualPRPreviewsAndSharesWithoutWorkout",
+        "AdaptiveLayoutUITests/testJourneyMilestoneSharingAndHighlightReel",
+        "AdaptiveLayoutUITests/testJourneyCelebrationsSupportAccessibilityTextSize",
+        "AdaptiveLayoutUITests/testCustomExerciseCanChooseAssistanceMeaning",
         "AdaptiveLayoutUITests/testYearInTrainingRecapPreviewsAndSharesAnImage",
         "AdaptiveLayoutUITests/testYearInTrainingRecapSupportsAccessibilityTextSize"
       ]

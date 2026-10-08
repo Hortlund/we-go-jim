@@ -272,6 +272,7 @@ struct WorkoutCompletionSummaryView: View {
                             GymCompletionEasterEgg(egg: egg)
                         }
                         if snapshot.exerciseCount == 0 && !snapshot.cardioRecap.isEmpty {
+                            personalRecordsSection(snapshot)
                             cardioRecapSection(snapshot)
                             estimatedCaloriesCard(snapshot)
                         } else {
@@ -595,7 +596,7 @@ struct WorkoutCompletionSummaryView: View {
                 )
             } else {
                 ForEach(snapshot.personalRecords) { record in
-                    WorkoutCompletionPersonalRecordCard(record: record)
+                    WorkoutCompletionPersonalRecordCard(record: record, achievedAtText: snapshot.completedAtText)
                 }
             }
         }
@@ -869,13 +870,6 @@ nonisolated struct WorkoutCaloriePresentationPolicy: Equatable, Sendable {
     }
 }
 
-struct WorkoutCompletionPersonalRecord: Identifiable, Equatable, Sendable {
-    let id: String
-    let exerciseName: String
-    let performanceText: String
-    let detailText: String
-}
-
 struct WorkoutCompletionExerciseRecap: Identifiable, Equatable, Sendable {
     let id: UUID
     let exerciseName: String
@@ -944,7 +938,8 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         }
         let achievements = try WorkoutMetricsService(modelContext: modelContext)
             .sessionSetPRAchievements(sessionID: sessionID)
-        let personalRecords = achievements.map(makePersonalRecord)
+        let personalRecords = try achievements.map(makePersonalRecord)
+            + CardioPersonalRecordService.records(sessionID: sessionID, context: modelContext)
 
         let prHeadline: String
         let prSupportText: String
@@ -954,7 +949,7 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
             let warmupSummary = completedWarmupSetCount > 0
                 ? " plus \(completedWarmupSetCount) warm-up set\(completedWarmupSetCount == 1 ? "" : "s")"
                 : ""
-            prSupportText = "You logged \(completedSetCount) working sets\(warmupSummary) across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
+            prSupportText = exercises.isEmpty ? String(localized: "Every activity builds your baseline. Keep showing up.") : "You logged \(completedSetCount) working sets\(warmupSummary) across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
         case 1:
             prHeadline = "1 new PR today"
             prSupportText = "Your new PR from this session is listed below."
@@ -1150,8 +1145,9 @@ private struct WorkoutCompletionStatCard: View {
     }
 }
 
-private struct WorkoutCompletionPersonalRecordCard: View {
+struct WorkoutCompletionPersonalRecordCard: View {
     let record: WorkoutCompletionPersonalRecord
+    let achievedAtText: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -1177,6 +1173,8 @@ private struct WorkoutCompletionPersonalRecordCard: View {
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                PersonalRecordShareButton(record: record, achievedAtText: achievedAtText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)

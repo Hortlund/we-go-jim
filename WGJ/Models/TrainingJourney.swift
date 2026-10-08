@@ -8,6 +8,13 @@ nonisolated struct JourneyWorkout: Identifiable, Sendable {
     let hasStrength: Bool
     let hasCardio: Bool
     let activities: [JourneyActivity]
+    var completedExercises: [JourneyCompletedExercise] = []
+}
+
+nonisolated struct JourneyCompletedExercise: Sendable {
+    let id: String
+    let name: String
+    var isLegExercise: Bool = false
 }
 
 nonisolated struct JourneyActivity: Sendable {
@@ -18,6 +25,8 @@ nonisolated struct JourneyActivity: Sendable {
     let durationSeconds: Int
     let isWalkRun: Bool
     let isOutdoor: Bool
+    var trackingProfile: WorkoutCardioTrackingProfile = .walkRun
+    var isCycling: Bool = false
 }
 
 nonisolated struct JourneyPerformance: Identifiable, Sendable {
@@ -36,7 +45,7 @@ nonisolated struct JourneyExercise: Sendable {
 }
 
 nonisolated enum JourneyMilestoneKind: String, CaseIterable, Sendable {
-    case beginning, workouts, strength, cardio, consistency
+    case beginning, workouts, strength, cardio, consistency, celebration
 
     var systemImage: String {
         switch self {
@@ -45,6 +54,7 @@ nonisolated enum JourneyMilestoneKind: String, CaseIterable, Sendable {
         case .strength: "dumbbell.fill"
         case .cardio: "figure.run"
         case .consistency: "flame.fill"
+        case .celebration: "sparkles"
         }
     }
 }
@@ -59,6 +69,10 @@ nonisolated struct JourneyMilestone: Identifiable, Sendable {
     var activityID: UUID? = nil
     var chart: [JourneyPerformance] = []
     var chartUnit: String? = nil
+    var personalRecord: WorkoutCompletionPersonalRecord? = nil
+    var recordKey: String? = nil
+    var playfulTitle: String? = nil
+    var unlockedAt: Date? = nil
 }
 
 nonisolated struct JourneyDay: Identifiable, Sendable {
@@ -94,6 +108,10 @@ nonisolated struct TrainingJourneySnapshot: Sendable {
     let years: [JourneyYear]
     let milestones: [JourneyMilestone]
     let distanceUnit: WorkoutDistanceUnit
+    var otherCardioDistanceMeters: Double = 0
+    var insights: JourneyInsights = .init()
+    var achievementGoals: [JourneyAchievementGoal] = []
+    var celebrationScope: String = "local"
 
     static let empty = Self(workoutCount: 0, activeDays: 0, durationSeconds: 0,
         walkRunDistanceMeters: 0, firstWorkoutDate: nil, years: [], milestones: [], distanceUnit: .kilometers)
