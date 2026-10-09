@@ -113,6 +113,12 @@ struct WGJApp: App {
         )
 
         let container = try ModelContainer(for: appSchema, configurations: [inMemory])
+#if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("MARKETING_SHOWCASE") {
+            try MarketingShowcaseSeed.seed(container: container)
+            return container
+        }
+#endif
         try seedUITestCatalogIfNeeded(container: container)
         try seedUITestExerciseProgressIfRequested(container: container)
         try seedUITestProfileBodyweightIfRequested(container: container)

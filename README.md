@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="WGJ/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" alt="We Go Jim app icon" width="128">
+  <img src="WGJ/Assets.xcassets/SplashIcon.imageset/SplashIcon@3x.png" alt="We Go Jim app icon" width="128">
   <br><br>
   <a href="https://apps.apple.com/app/id6760931499">
     <img src="https://toolbox.marketingtools.apple.com/api/badges/download-on-the-app-store/black/en-us?size=250x83" alt="Download We Go Jim on the App Store" width="150">
@@ -15,10 +15,12 @@ WGJ is local-first. Templates, active workout progress, completed workouts, prof
 The current deployment target is **iOS/iPadOS 18.0 or later**, built with the iOS 27 SDK.
 
 <p align="center">
-  <img src="AppStoreScreenshots/03-start-workout.png" alt="Start Workout screen" width="30%">
-  <img src="AppStoreScreenshots/09-active-workout-sets.png" alt="Active Workout logging screen" width="30%">
-  <img src="AppStoreScreenshots/05-progress.png" alt="Progress comparison screen" width="30%">
+  <img src="AppStoreScreenshots/iPhone/02-template-preview.png" alt="Plan a Push workout with warm-up and working sets" width="30%">
+  <img src="AppStoreScreenshots/iPhone/03-log-workout.png" alt="Log completed sets and follow the rest timer" width="30%">
+  <img src="AppStoreScreenshots/iPhone/05-muscle-heatmap.png" alt="Track weekly goals and muscle coverage" width="30%">
 </p>
+
+[App Store screenshots and preview videos](AppStoreScreenshots/README.md) include ten screenshots and three short app demos for each device family, captured with fictional local data.
 
 ## Philosophy
 
@@ -75,6 +77,7 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 ```text
 .
 |- AppStoreScreenshots/       Store and README screenshots
+|- AppStorePreviews/          iPhone and iPad app preview videos
 |- Configuration/             Shared release-like Xcode settings
 |- WGJ.xcodeproj
 |- WGJ-App-Info.plist
