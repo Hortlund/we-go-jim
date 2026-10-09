@@ -37,8 +37,26 @@ struct TermsSafetyView: View {
                     title: "What WGJ does",
                     lines: [
                         "WGJ helps you log workouts, organize templates, review history, and track profile progress.",
-                        "Training guidance, previous-performance hints, goals, charts, and summaries are informational only.",
+                        "Training guidance, previous-performance hints, achievement goals, personal records, yearly recaps, charts, and coach summaries are informational only.",
                         "WGJ does not diagnose, treat, prevent, or cure any medical condition and does not replace professional coaching or medical advice.",
+                    ]
+                )
+
+                termsCard(
+                    title: "Estimates and outdoor recording",
+                    lines: [
+                        "Calorie estimates are approximate calculations from the details you enter and your logged activity, not sensor measurements.",
+                        "Outdoor walk, run, and bike routes, distance, and pace depend on GPS permission, signal quality, and device behavior. WGJ is not a navigation or emergency service.",
+                        "Achievement goals are optional history-based milestones, not prescribed training targets. Use your own judgment about effort and recovery.",
+                    ]
+                )
+
+                termsCard(
+                    title: "Health, sharing, and backup",
+                    lines: [
+                        "Apple Health export is optional. Later edits or deletions in WGJ do not change workouts or calories already saved to Health; manage those records in the Health app.",
+                        "Live Activities may show workout details on the Lock Screen. Shared workout, route, milestone, and personal-record images may reveal training details or places you visited.",
+                        "Cloud backup stores snapshots rather than merging devices. Restoring or choosing Use This Device’s Data can replace saved data; review the confirmation before continuing.",
                     ]
                 )
 
@@ -56,7 +74,7 @@ struct TermsSafetyView: View {
                     lines: [
                         "WGJ is an independent hobby project, so support is best-effort and response times are not guaranteed.",
                         "Use Support for app issues, privacy questions, and data-deletion follow-up.",
-                        "You can delete your local app data from Settings.",
+                        "Delete My Data in Settings deletes the cloud backup before clearing local user data. Cloud deletion errors stop the operation, and local cleanup failures are reported. Shared copies and exported Health records remain outside this deletion.",
                     ]
                 )
             }

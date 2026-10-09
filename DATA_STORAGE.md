@@ -28,7 +28,7 @@ Workout Live Activities are optional system presentations of the local active dr
 
 ## Backup format and size
 
-The v3 archive uses one immutable compressed chunk per completed workout or template, plus a shared profile/widgets/folders/custom-exercises chunk. Derived projections, bundled catalog data, image caches and active drafts are excluded. Each chunk has a SHA-256 integrity digest and a unique storage identity. LZFSE compression applies to the actual CloudKit asset; there is no duplicate inline payload.
+The v3 archive uses immutable compressed history chunks containing up to 64 completed workouts, one chunk per template, separate completed-route chunks, and a shared profile/widgets/folders/custom-exercises chunk. History is partitioned by workout identity so an edit rewrites only its batch; unchanged chunks are reused. Derived projections, coach caches, bundled catalog data, image caches and active drafts are excluded. Each chunk has a SHA-256 integrity digest and a unique storage identity. LZFSE compression applies to the actual CloudKit asset; there is no duplicate inline payload.
 
 An export reads aggregate headers, reuses unchanged chunks, and encodes only changed aggregates. The generation manifest lists the chunks needed for a complete restore. Unchanged saves do not publish a generation. Changed chunks upload in batches of 50, then an immutable manifest is saved, then a small head record is conditionally published. A partial upload cannot become the current backup. Status checks fetch metadata only.
 

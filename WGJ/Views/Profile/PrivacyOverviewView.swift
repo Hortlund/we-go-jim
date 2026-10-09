@@ -44,8 +44,9 @@ struct PrivacyOverviewView: View {
                     title: "Where it lives",
                     lines: [
                         "Core workout, template, exercise, history, and profile features work locally on your device.",
-                        "When iCloud is available, WGJ may export a best-effort CloudKit backup after workout completion or template saves.",
+                        "When iCloud is available, WGJ schedules best-effort private CloudKit backup after committed workout, template, profile, settings, and history changes.",
                         "Active-workout drafts stay local while the workout is active.",
+                        "Cloud backup keeps the current snapshot and two previous generations. Derived stats and coach caches stay local.",
                     ]
                 )
 
@@ -55,6 +56,15 @@ struct PrivacyOverviewView: View {
                         "Location is used only while recording an outdoor walk, run, or bike ride, including with your screen locked. Pausing or finishing stops GPS recording.",
                         "Live routes are saved on this device. Completed routes are included in WGJ’s private iCloud backup and restored with your workouts. Route coordinates are not exported to Apple Health.",
                         "Apple Maps displays your route. Deleting a workout or deleting WGJ data also removes its locally recorded route.",
+                        "Shared cardio story images can include your route and its start and end points. Review the preview before sharing; WGJ cannot delete copies held by recipients or other apps.",
+                    ]
+                )
+
+                privacyCard(
+                    title: "Live Activities",
+                    lines: [
+                        "Live Activities are off by default. If enabled, workout names, timers, set progress, rest countdowns, and cardio distance or pace may appear on your Lock Screen and Dynamic Island where supported.",
+                        "Updates are generated on your device and do not include route coordinates. Anyone looking at your screen may see these details; turn Live Activities off in Settings when needed.",
                     ]
                 )
 
@@ -72,7 +82,8 @@ struct PrivacyOverviewView: View {
                     title: "Your controls",
                     lines: [
                         "You can use WGJ locally when iCloud or CloudKit is unavailable.",
-                        "You can delete local app data from Settings.",
+                        "Delete My Data in Settings deletes your CloudKit backup before clearing local user data. If cloud deletion fails, local deletion does not proceed; local cleanup failures are reported.",
+                        "Deleting an individual workout does not immediately remove copies in older cloud backups, shared images, or Apple Health.",
                         "Cloud backup failures do not block local saves.",
                     ]
                 )
