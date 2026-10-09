@@ -4,6 +4,8 @@ Captured from the running app on 9 October 2026. Workout data is fictional; the 
 
 ## Upload files
 
+Product page header and search-result artwork are in [AppStoreCreative](../AppStoreCreative/README.md). Upload those to their dedicated creative slots, separately from the screenshots and previews below.
+
 | Device slot | Screenshots | App previews |
 | --- | --- | --- |
 | iPhone 6.1 / 6.3 inch | [10 portrait PNGs](iPhone), 1206 × 2622 | [3 MP4s](../AppStorePreviews/iPhone), 886 × 1920 |
