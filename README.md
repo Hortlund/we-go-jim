@@ -10,7 +10,7 @@
 
 **We Go Jim** is an opinionated, native workout tracker for iPhone and iPad. It is built around a focused loop: plan a workout, log it without friction, finish cleanly, and understand what changed.
 
-WGJ is local-first. Templates, active workout progress, completed workouts, profile data, and history are stored on-device with SwiftData. A private CloudKit record provides best-effort backup and restore at explicit save boundaries; it is not used as a live SwiftData sync layer and does not sit in the workout interaction path.
+WGJ is local-first. Templates, active workout progress, completed workouts, profile data, and history are stored on-device using SwiftData and local snapshot files. Incremental snapshots in the user's private CloudKit database provide best-effort backup and explicit restore. Committed save boundaries schedule backup work; CloudKit does not provide live SwiftData sync or sit in the workout interaction path.
 
 The current deployment target is **iOS/iPadOS 18.0 or later**, built with the iOS 27 SDK.
 
@@ -34,6 +34,9 @@ The current deployment target is **iOS/iPadOS 18.0 or later**, built with the iO
 - **Log without losing context.** Start empty or from a template, apply previous performance, edit the workout structure in place, use optional training guidance, run rest timers with background notifications, and keep the screen awake during active sessions.
 - **Resume reliably.** Minimize the active workout while using other tabs, background the app, or relaunch it and restore the locally persisted session, rest timer, and scroll position.
 - **Track strength and cardio together.** Cardio activities support warm-up, main, and finisher roles; time, distance, or open goals; live timers; and derived pace, speed, or rowing split metrics where applicable.
+- **Record outdoor routes.** Built-in Outdoor Walk, Outdoor Run, and Outdoor Bike activities support GPS recording with Precise Location permission, including while the screen is locked. Pause or finish to stop recording, review the saved route, and include it in a cardio story image when sharing. Manual distance entry remains available without GPS. Live routes stay local; completed routes can join the private CloudKit backup.
+- **Follow the session from the Lock Screen.** Optional Live Activities show workout timers, set progress, rest countdowns, or cardio distance and pace on supported system surfaces. They default to off, update locally, and do not expose route coordinates.
+- **Optionally save to Apple Health.** Export newly completed workouts after the local save, with a separate opt-in for estimated active calories. Export defaults to off, does not import other apps' Health data or backfill old workouts, and does not mirror later WGJ edits or deletions. For cardio-only sessions, the exported interval uses recorded activity duration, excluding pauses and result-review time. Health export queues and recovery records stay on-device and are excluded from cloud and device backups.
 - **Keep templates in step with real training.** Save an improvised workout as a new template or review a structured diff before applying workout changes back to its source template.
 - **Review useful completion data.** See duration, working and warm-up sets, training volume, estimated active calories, muscle emphasis, best sets, and personal-record highlights, then render a shareable workout card.
 - **Celebrate individual PRs.** Share one strength or cardio achievement as a 1080 × 1920 image from completion, saved workout history, or Journey. Cardio records cover longest distance and fastest whole-activity average speed, compared within the same exercise and tracking profile. Speed records require at least 1 km and positive recorded time; the first qualifying activity establishes a baseline. These are average-speed records, not GPS peak speeds or inferred distance splits.
@@ -41,7 +44,7 @@ The current deployment target is **iOS/iPadOS 18.0 or later**, built with the iO
 - **Make the milestones yours.** Journey celebrates anniversaries, welcoming comebacks, distinct active-day months, exercise variety, strength + cardio sessions, percentage improvements and PR collections. Gym-meme captions give achievements personality without duplicating existing badges. Half-marathon/marathon comparisons describe cumulative on-foot distance; cycling and rowing have their own distance celebrations. Leg-day achievements require a known primary leg/glute muscle classification; cycling-specific badges use the built-in bike activities.
 - **See what's next and celebrate the year.** Next up shows three approaching milestones without deadlines. Journey also shows longest weekly streak, most active month, workouts per active week and active days versus the same date last year. A full Achievements screen shows every earned milestone and PR, a goal catalog with cleared and to-unlock states, and annual/all-time statistics. Repeating goals appear once per series at the next target; open a series to see every cleared and upcoming step. Next up links to the complete catalog. Share any milestone or PR as an individual image, with its celebratory caption, app logo and blue branding. New milestones get one small confetti burst in Journey, respecting Reduce Motion; old history is backfilled quietly.
 
-- **Explore exercises.** Search and filter a bundled 247-exercise catalog, use the interactive muscle map, cache exercise media, and create custom strength or cardio exercises.
+- **Explore exercises.** Search and filter a bundled 248-exercise catalog, use the interactive muscle map, cache exercise media, and create custom strength or cardio exercises.
 - **Inspect history and progress.** Browse workouts by calendar, edit completed entries, inspect exercise history, and compare any two compatible completed workouts across exercise and session metrics.
 - **Customize the profile dashboard.** Configure weekly goals, PRs, streaks, top exercises, consistency calendars, muscle heatmaps, and per-exercise trends for estimated 1RM, max weight, max reps, and volume.
 - **Get a private coach brief.** Weekly summaries and follow-up prompts use Apple's on-device Foundation Models when available, with deterministic local summaries as the fallback.
@@ -57,7 +60,10 @@ WGJ uses SwiftUI, Swift 6, and SwiftData. The app and widget target iPhone and i
 - **Repositories and services** own persistence, backup boundaries, metrics, projections, cache management, and business rules.
 - **Active workout state** is memory-first while open and snapshot-backed for crash/relaunch recovery.
 - **Background projections** keep history analytics, profile metrics, and coach inputs away from hot editing and scrolling paths.
-- **CloudKit backup** serializes user data into one record in the user's private database. Local commits succeed independently of backup availability. Backup status is checked once per cold start and on explicit refresh; navigation does not fetch backups. See [backup boundaries and schema rollout](docs/cloud-backup-boundaries.md).
+- **CloudKit backup** uses compressed, integrity-checked chunks for history batches of up to 64 workouts, individual templates and completed routes, plus shared profile/widgets/folders/custom-exercise data. Unchanged chunks are reused; a manifest and conditional head publication make a complete snapshot available for restore. The current and two previous generations are retained. Local commits succeed independently of backup availability. Backup status is checked once per cold start and on explicit refresh; navigation does not fetch backups. See [storage, recovery, and backup rollout](DATA_STORAGE.md) and the [save-boundary inventory](docs/cloud-backup-boundaries.md).
+- **Recovery protection** routes ordinary SwiftData writes through `saveWithRecoveryProtection()`, with main-context autosave disabled. Restore holds `LocalStoreWriteBarrier` for the local transaction and uses durable recovery snapshots before replacing data.
+- **Core Location and MapKit** record and display optional outdoor routes in protected local files. Completed-route backup and explicit image sharing are separate from live recording.
+- **HealthKit and ActivityKit** provide optional workout export and local Live Activities. Health export commits after WGJ's local completion and maintains its own device-local retry journal.
 - **WidgetKit** reads a compact weekly-goal snapshot from the shared app group instead of querying the main stores.
 - **Foundation Models** optionally generates private coach copy on supported systems; the feature has a non-generative fallback.
 - **MuscleMap** is the only Swift Package dependency and provides the interactive body-map rendering.
@@ -91,7 +97,7 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 |  |- WidgetShared/           Shared widget snapshot types
 |  |- ContentView.swift       Root app flow and lifecycle routing
 |  `- WGJApp.swift            Model container setup and bootstrap
-|- WGJWidgetExtension/        Weekly goal widget
+|- WGJWidgetExtension/        Weekly goal widget and workout Live Activities
 |- WGJTests/                  Persistence, domain, projection, layout, and policy tests
 `- WGJUITests/                Adaptive-layout and deep-link accessibility tests
 ```
@@ -133,14 +139,14 @@ iCloud.se.highball.WeGoJim
 
 That container identifier is not a credential. It is app-specific Apple entitlement metadata that is visible in signed apps and project settings. Forks need their own container because CloudKit access is controlled by Apple Developer account entitlements, not by secrecy of the identifier.
 
-Enable the iCloud/CloudKit, App Groups, and notification capabilities for the replacement identifiers in the Apple Developer portal. To exercise backup and restore, run on a simulator or device signed into iCloud and make sure the entitlements match the selected build configuration.
+Configure the iCloud/CloudKit, App Groups, and HealthKit capabilities for the replacement identifiers. Preserve the app's location and Health usage descriptions, location background mode, and Live Activities support; rest notifications request permission at runtime. To exercise backup and restore, run on a simulator or device signed into iCloud and make sure the entitlements match the selected build configuration.
 
 ## Legal Links
 
 The app links to these public pages from Settings:
 
 - [Privacy policy](https://highball.se/wgj/privacy/)
-- [Terms and product site](https://highball.se/wgj/index.html)
+- [Terms and safety](https://highball.se/wgj/terms/)
 - [Support and issue tracker](https://github.com/Hortlund/we-go-jim/issues)
 
 Forks should replace these URLs in `AppRuntimeConfig` before distribution.
@@ -207,6 +213,9 @@ Edit only `Configuration/Version.xcconfig` to set `MARKETING_VERSION` and `CURRE
 - Template, profile, settings, exercise, and history mutations commit locally before scheduling best-effort backup.
 - Startup checks fetch lightweight backup metadata; they do not replace local data or start broad background synchronization.
 - Restore is an explicit user action and is committed through a local restore transaction.
+- Backup is a snapshot lineage, not a multi-device merge. A stale or unrelated device must restore the current backup or explicitly choose **Use This Device's Data** before replacing it.
+- Active drafts, live GPS journals, derived projections, coach caches, bundled catalog data, and image caches are excluded from WGJ's CloudKit backup. Optional calorie profile details, saved estimates, and completed routes are included.
+- Deleting a workout removes its local route, but older backup generations can retain the earlier data. **Delete My Data** deletes the cloud backup before clearing local user data; a cloud deletion failure stops that flow, and local artifact-cleanup failures are reported. Shared files and successfully exported Apple Health records must be managed separately.
 - CloudKit operations run outside interaction-critical view work and may degrade without blocking local use.
 - Widget publication uses a local snapshot in the app group and does not depend on CloudKit.
 
@@ -232,7 +241,3 @@ Good contributions tend to:
 ## License
 
 WGJ is released under the [MIT License](LICENSE).
-
-### Data storage and backup deployment
-
-See [DATA_STORAGE.md](DATA_STORAGE.md) for the local schema, incremental backup format, migration and recovery behavior, rollout steps, and measured large-history fixtures.
