@@ -18,7 +18,9 @@ struct TrainingJourneyView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 26) {
+            // Measure the page sections eagerly. Wrapping the lazy timeline in
+            // another lazy stack makes its changing height estimates move the viewport.
+            VStack(alignment: .leading, spacing: 26) {
                 if let snapshot, snapshot.workoutCount > 0 {
                     JourneyLifetimeSummary(snapshot: snapshot)
                     TrainingYearRecapEntryView(snapshot: snapshot, selectedYearID: selectedYear)
@@ -297,26 +299,29 @@ private struct JourneyTimeline: View {
                     let left = $0.first!, right = $1.first!
                     return left.date == right.date ? left.sessionID.uuidString < right.sessionID.uuidString : left.date > right.date
                 }
-                if index == 0 || Calendar.current.component(.year, from: groups[index - 1].date) != Calendar.current.component(.year, from: day) {
-                    Text(day.formatted(.dateTime.year())).font(.title2.bold()).padding(.top, 8)
-                }
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(spacing: 0) {
-                        Circle().fill(WGJTheme.accentCyan).frame(width: 9, height: 9)
-                        Rectangle().fill(WGJTheme.outline).frame(width: 1).frame(maxHeight: .infinity)
-                    }.frame(width: 10).padding(.top, 5).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(day.formatted(.dateTime.day().month(.wide)))
-                            .font(.caption.weight(.semibold)).foregroundStyle(WGJTheme.textSecondary)
-                        ForEach(expandedDays.contains(day) ? sessions : Array(sessions.prefix(3)), id: \.first!.sessionID) { moments in
-                            JourneySessionMoments(events: moments)
-                        }
-                        if sessions.count > 3 {
-                            Button(expandedDays.contains(day) ? String(localized: "Show less") : String(localized: "Show all \(sessions.count) workouts")) {
-                                if expandedDays.contains(day) { expandedDays.remove(day) } else { expandedDays.insert(day) }
-                            }.font(.subheadline).foregroundStyle(WGJTheme.accentBlue)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                // Each date is one stable lazy row, including its optional year heading.
+                VStack(alignment: .leading, spacing: 18) {
+                    if index == 0 || Calendar.current.component(.year, from: groups[index - 1].date) != Calendar.current.component(.year, from: day) {
+                        Text(day.formatted(.dateTime.year())).font(.title2.bold()).padding(.top, 8)
+                    }
+                    HStack(alignment: .top, spacing: 14) {
+                        VStack(spacing: 0) {
+                            Circle().fill(WGJTheme.accentCyan).frame(width: 9, height: 9)
+                            Rectangle().fill(WGJTheme.outline).frame(width: 1).frame(maxHeight: .infinity)
+                        }.frame(width: 10).padding(.top, 5).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(day.formatted(.dateTime.day().month(.wide)))
+                                .font(.caption.weight(.semibold)).foregroundStyle(WGJTheme.textSecondary)
+                            ForEach(expandedDays.contains(day) ? sessions : Array(sessions.prefix(3)), id: \.first!.sessionID) { moments in
+                                JourneySessionMoments(events: moments)
+                            }
+                            if sessions.count > 3 {
+                                Button(expandedDays.contains(day) ? String(localized: "Show less") : String(localized: "Show all \(sessions.count) workouts")) {
+                                    if expandedDays.contains(day) { expandedDays.remove(day) } else { expandedDays.insert(day) }
+                                }.font(.subheadline).foregroundStyle(WGJTheme.accentBlue)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
