@@ -33,7 +33,9 @@ final class CloudBackupProgressUITests: XCTestCase {
         XCTAssertFalse(app.buttons["cloud-backup-progress-done"].exists)
         XCTAssertTrue(app.staticTexts["Restore complete"].waitForExistence(timeout: 20))
         let done = app.buttons["cloud-backup-progress-done"]
-        XCTAssertGreaterThan(done.frame.width, app.frame.width * 0.75)
+        let sheet = app.descendants(matching: .any)["cloud-backup-progress-sheet"].firstMatch
+        XCTAssertTrue(sheet.exists)
+        XCTAssertGreaterThan(done.frame.width, sheet.frame.width * 0.75)
         let completion = XCTAttachment(screenshot: app.screenshot())
         completion.name = "Restore complete polished"
         completion.lifetime = .keepAlways
@@ -58,7 +60,10 @@ final class CloudBackupProgressUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Backing up to iCloud"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.otherElements["cloud-backup-status-banner"].exists)
         XCTAssertFalse(app.staticTexts["Please keep WGJ open until this finishes. Large backups can take a few minutes."].exists)
-        XCTAssertTrue(app.tabBars.firstMatch.isHittable)
+        let progress = app.buttons["Progress"].firstMatch
+        XCTAssertTrue(progress.isHittable)
+        progress.tap()
+        XCTAssertTrue(app.buttons["training-journey-entry"].waitForExistence(timeout: 5))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Automatic backup banner"
         attachment.lifetime = .keepAlways

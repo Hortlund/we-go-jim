@@ -9,6 +9,7 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isKeyboardVisible = false
+    @State private var activeWorkoutStripHeight: CGFloat = 0
     @State private var backupProgress = CloudBackupProgressCenter.shared
 
     private var overlayAnimation: Animation {
@@ -20,13 +21,28 @@ struct MainTabView: View {
     }
 
     var body: some View {
+        if #available(iOS 27.1, *) {
+            MainTabBarLayout { usesVerticalTabChrome in
+                tabs(usesVerticalTabChrome: usesVerticalTabChrome)
+            }
+        } else {
+            tabs(usesVerticalTabChrome: false)
+        }
+    }
+
+    private func tabs(usesVerticalTabChrome: Bool) -> some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
         @Bindable var activeWorkoutPresentationState = activeWorkoutPresentationState
 
-        GeometryReader { proxy in
+        return GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
-            let overlayBottomInset = activeWorkoutOverlayBottomInset(size: proxy.size)
+            let stripBottomGap = MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+                screenHeight: proxy.size.height,
+                usesModernTabChrome: usesModernTabChrome,
+                usesVerticalTabChrome: usesVerticalTabChrome
+            )
+            let overlayBottomInset = activeWorkoutOverlayBottomInset(stripBottomGap: stripBottomGap)
 
             ZStack(alignment: .bottom) {
                 TabView(selection: $tabState.selectedTab) {
@@ -91,10 +107,11 @@ struct MainTabView: View {
                 .environment(\.activeWorkoutOverlayBottomInset, overlayBottomInset)
 
                 MainTabBottomOverlayChrome(
-                    size: proxy.size,
+                    stripHeight: $activeWorkoutStripHeight,
                     bottomSafeAreaInset: bottomSafeAreaInset,
                     isKeyboardVisible: isKeyboardVisible,
-                    usesModernTabChrome: usesModernTabChrome,
+                    stripBottomGap: stripBottomGap,
+                    overlayBottomInset: overlayBottomInset,
                     overlayAnimation: overlayAnimation,
                     activeWorkoutAnimation: activeWorkoutOverlayAnimation,
                     onPresentActiveWorkout: presentActiveWorkout
@@ -141,7 +158,7 @@ struct MainTabView: View {
         }
     }
 
-    private func activeWorkoutOverlayBottomInset(size: CGSize) -> CGFloat {
+    private func activeWorkoutOverlayBottomInset(stripBottomGap: CGFloat) -> CGFloat {
         guard activeWorkoutPresentationState.activeSessionID != nil,
               activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
               !isKeyboardVisible
@@ -150,7 +167,8 @@ struct MainTabView: View {
         }
 
         return MainTabOverlayLayoutPolicy.activeWorkoutScrollBottomInset(
-            stripBottomGap: activeWorkoutStripBottomGap(size: size)
+            stripHeight: activeWorkoutStripHeight,
+            stripBottomGap: stripBottomGap
         )
     }
 
@@ -188,13 +206,6 @@ struct MainTabView: View {
     private func sanitizedOverlayLength(_ value: CGFloat) -> CGFloat {
         guard value.isFinite else { return 0 }
         return max(value, 0)
-    }
-
-    private func activeWorkoutStripBottomGap(size: CGSize) -> CGFloat {
-        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
-            screenHeight: size.height,
-            usesModernTabChrome: usesModernTabChrome
-        )
     }
 
     private var usesModernTabChrome: Bool {
@@ -313,14 +324,26 @@ private struct CloudBackupStatusBannerHost: View {
     }
 }
 
+@available(iOS 27.1, *)
+private struct MainTabBarLayout<Content: View>: View {
+    @Environment(\.toolbarVerticalEdge) private var toolbarVerticalEdge
+
+    let content: (Bool) -> Content
+
+    var body: some View {
+        content(toolbarVerticalEdge != nil)
+    }
+}
+
 private struct MainTabBottomOverlayChrome: View {
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
+    @Binding var stripHeight: CGFloat
 
-    let size: CGSize
     let bottomSafeAreaInset: CGFloat
     let isKeyboardVisible: Bool
-    let usesModernTabChrome: Bool
+    let stripBottomGap: CGFloat
+    let overlayBottomInset: CGFloat
     let overlayAnimation: Animation
     let activeWorkoutAnimation: Animation
     let onPresentActiveWorkout: (UUID) -> Void
@@ -333,6 +356,9 @@ private struct MainTabBottomOverlayChrome: View {
             {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
                     onPresentActiveWorkout(activeSessionID)
+                }
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+                    stripHeight = height
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift)
                 .transition(activeWorkoutStripTransition)
@@ -364,21 +390,14 @@ private struct MainTabBottomOverlayChrome: View {
     }
 
     private var activeWorkoutStripBottomLift: CGFloat {
-        bottomSafeAreaInset + activeWorkoutStripBottomGap
+        bottomSafeAreaInset + stripBottomGap
     }
 
     private var popupBottomLift: CGFloat {
-        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
-            return activeWorkoutStripBottomLift + 82
+        if overlayBottomInset > 0 {
+            return bottomSafeAreaInset + overlayBottomInset
         }
         return bottomSafeAreaInset + 72
-    }
-
-    private var activeWorkoutStripBottomGap: CGFloat {
-        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
-            screenHeight: size.height,
-            usesModernTabChrome: usesModernTabChrome
-        )
     }
 }
 

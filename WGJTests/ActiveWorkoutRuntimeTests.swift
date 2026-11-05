@@ -821,7 +821,11 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
             dropStages: [WorkoutSessionDropStageDraft(id: stageID, actualReps: 6)])]
         var buffer = WorkoutMetricInputDraftBuffer()
         for (text, baseReps, dropReps) in [
+            ("1.5", Optional(8), Optional(6)),
+            ("-12", Optional(8), Optional(6)),
+            ("reps", Optional(8), Optional(6)),
             (String(repeating: "9", count: 400), Optional(8), Optional(6)),
+            ("٨", Optional(8), Optional(8)),
             (String(Int.max), Optional(999), Optional(999)),
             ("", nil, nil)
         ] {

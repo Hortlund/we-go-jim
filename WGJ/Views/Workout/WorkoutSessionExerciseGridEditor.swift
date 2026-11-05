@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 
+nonisolated struct WorkoutMetricScrollTarget: Hashable {
+    let rowID: UUID
+    let metric: WorkoutMetricInputDraftBuffer.Metric
+}
+
 nonisolated struct ActiveWorkoutKeyboardDismissToken: Equatable, Sendable {
     private(set) var value: Int = 0
 
@@ -59,7 +64,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     var flushIdentifier: UUID?
     var keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
-    var onInputFocusChange: (Bool) -> Void
+    var onInputFocusChange: (WorkoutMetricScrollTarget?) -> Void
     var onDirtyStateChange: (Bool) -> Void
 
     private let externalIsExpanded: Binding<Bool>?
@@ -72,7 +77,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var debounceCoordinator = WorkoutGridDebounceCoordinator()
     @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
-    @State private var focusedDropStageIDs: Set<UUID> = []
+    @State private var focusedDropStages: [UUID: WorkoutMetricScrollTarget] = [:]
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -83,9 +88,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         let setID: UUID
         let metric: Metric
 
-        enum Metric: Hashable {
-            case weight
-            case reps
+        typealias Metric = WorkoutMetricInputDraftBuffer.Metric
+
+        var scrollTarget: WorkoutMetricScrollTarget {
+            WorkoutMetricScrollTarget(rowID: setID, metric: metric)
         }
     }
 
@@ -132,7 +138,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         flushIdentifier: UUID? = nil,
         keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
-        onInputFocusChange: @escaping (Bool) -> Void = { _ in },
+        onInputFocusChange: @escaping (WorkoutMetricScrollTarget?) -> Void = { _ in },
         onDirtyStateChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseName = exerciseName
@@ -249,8 +255,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
             }
             .onDisappear {
-                focusedDropStageIDs.removeAll()
-                onInputFocusChange(false)
+                focusedDropStages.removeAll()
+                onInputFocusChange(nil)
                 flushPendingEditorState()
                 if let flushIdentifier {
                     flushCoordinator?.unregister(exerciseID: flushIdentifier)
@@ -293,7 +299,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private var interactionObservedCard: some View {
         valueObservedCard
             .onChange(of: focusedInput) { previousFocus, newFocus in
-                onInputFocusChange(newFocus != nil || !focusedDropStageIDs.isEmpty)
+                onInputFocusChange(newFocus?.scrollTarget ?? focusedDropStages.values.first)
                 handleFocusedInputChange(previousFocus, newFocus)
             }
             .onChange(of: keyboardDismissToken) { _, _ in
@@ -993,6 +999,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .reps).label)
                     .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .reps).value)
                     .accessibilityIdentifier("workout-set-\(index)-reps-field")
+                    .id(inputFocus(for: index, metric: .reps).scrollTarget)
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -1087,6 +1094,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .weight).label)
                         .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .weight).value)
                         .accessibilityIdentifier("workout-set-\(index)-weight-field")
+                        .id(inputFocus(for: index, metric: .weight).scrollTarget)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -2464,14 +2472,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         requestCompletionChange(at: index, isCompleted: !setDrafts[index].isCompleted)
     }
 
-    private func handleDropStageInputFocusChange(_ isFocused: Bool, stageID: UUID) {
-        if isFocused {
-            focusedDropStageIDs.insert(stageID)
-        } else {
-            focusedDropStageIDs.remove(stageID)
-        }
+    private func handleDropStageInputFocusChange(_ target: WorkoutMetricScrollTarget?, stageID: UUID) {
+        focusedDropStages[stageID] = target
         // An offscreen sibling's disappearance must not clear the focused drop.
-        onInputFocusChange(!focusedDropStageIDs.isEmpty || focusedInput != nil)
+        onInputFocusChange(target ?? focusedInput?.scrollTarget ?? focusedDropStages.values.first)
     }
 
     private func toggleCompletion(setID: UUID) {
@@ -2637,7 +2641,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func stageCurrentInputDraftIfNeeded(for focus: SetInputFocus) {
         guard let index = indexForSetID(focus.setID) else { return }
-        let metric = inputDraftMetric(for: focus.metric)
+        let metric = focus.metric
         guard metricInputDraftBuffer.text(for: focus.setID, metric: metric) == nil else { return }
         metricInputDraftBuffer.sync(setID: focus.setID, metric: metric, draft: setDrafts[index])
     }
@@ -2691,7 +2695,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         clearsText: Bool
     ) -> Bool {
         var updatedDrafts = setDrafts
-        let metric = inputDraftMetric(for: focus.metric)
+        let metric = focus.metric
         let changed = metricInputDraftBuffer.commit(
             setID: focus.setID,
             metric: metric,
@@ -2755,15 +2759,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         handleDraftValueMutation(previousDrafts: previousDrafts)
         return true
-    }
-
-    private func inputDraftMetric(for metric: SetInputFocus.Metric) -> WorkoutMetricInputDraftBuffer.Metric {
-        switch metric {
-        case .weight:
-            return .weight
-        case .reps:
-            return .reps
-        }
     }
 
     private func requestImmediateCommitForCurrentState(

@@ -14,6 +14,7 @@ struct ActiveWorkoutView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
 
     private let sessionID: UUID
@@ -87,13 +88,14 @@ struct ActiveWorkoutView: View {
     @State private var keyboardDismissToken = ActiveWorkoutKeyboardDismissToken()
     @State private var isKeyboardVisible = false
     @State private var keyboardContainerFrame = CGRect.zero
-    @State private var isMetricInputFocused = false
-    @State private var focusedMetricInputExerciseID: UUID?
+    @State private var focusedMetricInput: (exerciseID: UUID, target: WorkoutMetricScrollTarget)?
     @State private var keyboardDismissTargetExerciseID: UUID?
 
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
+
+    private var isMetricInputFocused: Bool { focusedMetricInput != nil }
 
     private var persistenceBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -103,19 +105,39 @@ struct ActiveWorkoutView: View {
         self.sessionID = sessionID
     }
 
+    private var workoutScrollView: some View {
+        ScrollViewReader { proxy in
+            let scrollView = ScrollView {
+                // A non-lazy stack keeps the scroll position stable as set rows change height.
+                activeWorkoutScrollContent
+                    .scrollTargetLayout()
+                    .padding(16)
+            }
+            .accessibilityIdentifier("active-workout-scroll-view")
+            if #available(iOS 27.1, *) {
+                scrollView.onHingeChange { oldContext, newContext in
+                    guard oldContext.hinge?.status != newContext.hinge?.status,
+                          let target = focusedMetricInput?.target else { return }
+                    // The keyboard can stay up when the viewport changes across a fold.
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard focusedMetricInput?.target == target else { return }
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                }
+            } else {
+                scrollView
+            }
+        }
+    }
+
     var body: some View {
         Group {
             Group {
                 if let activityID = standaloneCardioActivityID {
                     standaloneCardioView(activityID: activityID)
                 } else {
-                    ScrollView {
-                        // Exercise cards can change height aggressively as set rows update, and a
-                        // non-lazy stack keeps the scroll position stable during active logging.
-                        activeWorkoutScrollContent
-                        .scrollTargetLayout()
-                        .padding(16)
-                    }
+                    workoutScrollView
                 }
             }
             .scrollPosition($scrollPosition)
@@ -670,21 +692,42 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    @ViewBuilder
     private var finishToolbarButton: some View {
-        Button("Finish") {
+        let button = Button("Finish") {
             presentFinishConfirmation()
         }
         .disabled(isEndingSession || session == nil || !hasWorkoutContent)
         .accessibilityIdentifier("active-workout-finish-button")
-        .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-            if let content = finishSummaryModel.content {
-                ActiveWorkoutFinishPopover(
-                    content: content,
-                    onFinish: confirmFinishWorkout,
-                    onCancel: { showingFinishConfirmation = false }
-                )
-                .presentationCompactAdaptation(.popover)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            button.sheet(isPresented: $showingFinishConfirmation, onDismiss: finishConfirmationDidDismiss) {
+                ScrollView {
+                    finishConfirmationContent
+                        .frame(maxWidth: 560, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityIdentifier("active-workout-finish-confirmation-sheet")
+                .safeAreaPadding(.top, 16)
+                .wgjSheetSurface()
             }
+        } else {
+            button.popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                finishConfirmationContent
+                    .frame(width: 320, alignment: .leading)
+                    .presentationCompactAdaptation(.popover)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var finishConfirmationContent: some View {
+        if let content = finishSummaryModel.content {
+            ActiveWorkoutFinishConfirmationView(
+                content: content,
+                onFinish: confirmFinishWorkout,
+                onCancel: { showingFinishConfirmation = false }
+            )
         }
     }
 
@@ -892,8 +935,8 @@ struct ActiveWorkoutView: View {
                     },
                     flushCoordinator: rowFlushCoordinator,
                     keyboardDismissToken: keyboardDismissToken,
-                    onInputFocusChange: { isFocused in
-                        handleMetricInputFocusChange(isFocused, exerciseID: exerciseID)
+                    onInputFocusChange: { target in
+                        handleMetricInputFocusChange(target, exerciseID: exerciseID)
                     }
                 )
                 .equatable()
@@ -2370,13 +2413,13 @@ struct ActiveWorkoutView: View {
     }
 
     private func saveExerciseSettings(_ draft: ActiveWorkoutExerciseSettingsDraft) {
-        guard sessionExercises.contains(where: { $0.id == draft.exerciseID }) else {
+        guard let exercise = sessionExercises.first(where: { $0.id == draft.exerciseID }) else {
             showError(WorkoutSessionRepositoryError.sessionExerciseNotFound)
             return
         }
 
-        let minReps = parsedRepValue(from: draft.minRepsText)
-        let maxReps = parsedRepValue(from: draft.maxRepsText)
+        let minReps = LocalizedFiniteNumberParser.optionalWholeNumber(draft.minRepsText, fallback: exercise.targetRepMin)
+        let maxReps = LocalizedFiniteNumberParser.optionalWholeNumber(draft.maxRepsText, fallback: exercise.targetRepMax)
         let normalizedRest = max(0, min(3600, draft.restSeconds))
 
         updateRuntimeSession { session in
@@ -2613,7 +2656,7 @@ struct ActiveWorkoutView: View {
     private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
         let validExerciseIDs = Set(sessionExercises.map(\.id))
         return ActiveWorkoutScrollRestorePolicy.target(
-            focusedExerciseID: focusedMetricInputExerciseID.flatMap { validExerciseIDs.contains($0) ? $0 : nil },
+            focusedExerciseID: focusedMetricInput.flatMap { validExerciseIDs.contains($0.exerciseID) ? $0.exerciseID : nil },
             keyboardExerciseID: keyboardDismissTargetExerciseID.flatMap { validExerciseIDs.contains($0) ? $0 : nil },
             trackedTarget: scrollPositionTracker.currentTarget,
             expandedExerciseIDs: cardStateController.expandedExerciseIDs(),
@@ -2672,11 +2715,16 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            restTimerState.clearRestTimer()
-            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-            dismiss()
-
-            await activeWorkoutCoordinator.discard()
+            do {
+                try await activeWorkoutCoordinator.discard()
+                guard activeWorkoutPresentationState.activeSessionID == sessionID else { return }
+                activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+                dismiss()
+            } catch {
+                isEndingSession = false
+                scheduleForegroundNonCriticalInteractionWorkResume()
+                showError(error)
+            }
         }
     }
 
@@ -2702,11 +2750,6 @@ struct ActiveWorkoutView: View {
         return String(format: "%d:%02d", mins, secs)
     }
 
-    private func parsedRepValue(from text: String) -> Int? {
-        let cleaned = text.filter(\.isNumber)
-        return cleaned.isEmpty ? nil : Int(cleaned)
-    }
-
     private func applyTemplateUpdate(_ preview: WorkoutTemplateSyncPreview) {
         let backgroundStore = persistenceBackgroundStore
         Task.detached(priority: .utility) {
@@ -2730,8 +2773,8 @@ struct ActiveWorkoutView: View {
     }
 
     private func dismissKeyboard() {
-        if let focusedMetricInputExerciseID {
-            keyboardDismissTargetExerciseID = focusedMetricInputExerciseID
+        if let focusedMetricInput {
+            keyboardDismissTargetExerciseID = focusedMetricInput.exerciseID
         }
 
         keyboardDismissToken.requestDismiss()
@@ -2741,24 +2784,22 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func handleMetricInputFocusChange(_ isFocused: Bool, exerciseID: UUID) {
-        if isFocused {
+    private func handleMetricInputFocusChange(_ target: WorkoutMetricScrollTarget?, exerciseID: UUID) {
+        if let target {
             // Drop the stale pre-keyboard anchor before suspending tracking so it
             // cannot snap the scroll view back when the keyboard later dismisses.
             scrollPositionTracker.currentTarget = nil
-            isMetricInputFocused = true
-            focusedMetricInputExerciseID = exerciseID
+            focusedMetricInput = (exerciseID, target)
             keyboardDismissTargetExerciseID = nil
             return
         }
 
-        if focusedMetricInputExerciseID == exerciseID {
-            focusedMetricInputExerciseID = nil
+        if focusedMetricInput?.exerciseID == exerciseID {
+            focusedMetricInput = nil
         }
         if keyboardDismissTargetExerciseID == exerciseID {
             keyboardDismissTargetExerciseID = nil
         }
-        isMetricInputFocused = focusedMetricInputExerciseID != nil
     }
 
     private var exerciseReorderItems: [ExerciseReorderListItem] {
@@ -2814,10 +2855,14 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func handleFinishConfirmationChange(from oldValue: Bool, to newValue: Bool) {
-        if oldValue, !newValue {
-            finishSummaryModel.dismiss()
-        }
-        guard oldValue, !newValue, pendingFinishAfterConfirmation else { return }
+        guard oldValue, !newValue, !dynamicTypeSize.isAccessibilitySize else { return }
+        finishConfirmationDidDismiss()
+    }
+
+    @MainActor
+    private func finishConfirmationDidDismiss() {
+        finishSummaryModel.dismiss()
+        guard pendingFinishAfterConfirmation else { return }
         pendingFinishAfterConfirmation = false
 
         Task { @MainActor in
@@ -3097,8 +3142,7 @@ struct ActiveWorkoutView: View {
         if ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) {
             dismissKeyboard()
             isKeyboardVisible = false
-            isMetricInputFocused = false
-            focusedMetricInputExerciseID = nil
+            focusedMetricInput = nil
         }
 
         if ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: newPhase) {

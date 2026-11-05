@@ -376,6 +376,7 @@ struct JourneyMilestoneRow: View {
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(WGJTheme.textSecondary)
                 }
+                .contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityHint("Opens the original workout")
                 .accessibilityIdentifier("journey-milestone-\(event.kind.rawValue)")
             if event.chart.count > 1 {
@@ -453,7 +454,10 @@ private struct JourneyMonthDetail: View {
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(WGJTheme.textSecondary)
-                                }.padding(14).wgjCardContainer()
+                                }
+                                .padding(14)
+                                .wgjCardContainer()
+                                .contentShape(Rectangle())
                             }.buttonStyle(.plain)
                         }
                     }

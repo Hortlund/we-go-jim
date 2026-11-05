@@ -2,6 +2,127 @@ import XCTest
 @testable import WGJ
 
 final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
+    func testDiscardRemovesDraftWhenDeletionMarkerIsUnavailable() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let snapshot = makeStoredSnapshot(revision: 1, name: "Canceled workout")
+        _ = try await store.save(snapshot)
+        // A directory at the marker path prevents reading or atomically replacing it.
+        let marker = directory.appendingPathComponent("active-workout-deleted-sessions.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: false)
+
+        try await store.discardSession(snapshot)
+
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let restored = try await reopened.loadStoredSnapshot()
+        XCTAssertNil(restored)
+    }
+
+    func testDiscardRemovesCorruptDraftSoReplacementCanSave() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let file = directory.appendingPathComponent("active-workout-snapshot.json")
+        try Data("Truncated draft".utf8).write(to: file)
+
+        try await store.discardSession(makeStoredSnapshot(revision: 1, name: "Canceled workout"))
+
+        let replacement = makeStoredSnapshot(revision: 2, name: "New workout")
+        let saved = try await store.save(replacement)
+        XCTAssertEqual(saved, .written)
+    }
+
+    func testDiscardedRoutesRetryAfterRelaunchAndPreserveReplacement() async throws {
+        let directory = try makeTemporaryDirectory()
+        let routesDirectory = directory.appendingPathComponent("Routes", isDirectory: true)
+        let routeStore = CardioRouteStore(directory: routesDirectory)
+        let snapshotStore = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var discarded = makeStoredSnapshot(revision: 1, name: "Canceled walk")
+        _ = try await snapshotStore.save(discarded)
+
+        let activity = makeOutdoorWalk()
+        discarded.session.cardioBlocks.append(activity)
+        let discardedRoute = makeRecordedRoute(sessionID: discarded.session.id, activityID: activity.id)
+        let replacement = ActiveWorkoutStoredSnapshot(revision: 2, session: ActiveWorkoutRuntimeSession(name: "New workout"))
+        let retainedRoute = makeRecordedRoute(sessionID: replacement.session.id, activityID: UUID())
+        let generation = await routeStore.writeGeneration()
+        try await routeStore.save(discardedRoute, generation: generation)
+        try await routeStore.save(retainedRoute, generation: generation)
+
+        try await snapshotStore.discardSession(discarded)
+        _ = try await snapshotStore.save(replacement)
+        // A damaged file still needs removal by the activity ID saved in the cleanup record.
+        let damagedFile = routesDirectory.appendingPathComponent("\(activity.id.uuidString).json")
+        try Data("Truncated route".utf8).write(to: damagedFile)
+
+        let firstLaunch = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        await firstLaunch.retryDiscardedRouteCleanups { _, _ in throw CocoaError(.fileWriteNoPermission) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: damagedFile.path))
+
+        let secondLaunch = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let reopenedRoutes = CardioRouteStore(directory: routesDirectory)
+        await secondLaunch.retryDiscardedRouteCleanups { sessionID, activityIDs in
+            XCTAssertEqual(sessionID, discardedRoute.sessionID)
+            XCTAssertEqual(activityIDs, [activity.id])
+            try await reopenedRoutes.delete(sessionID: sessionID, activityIDs: activityIDs)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: damagedFile.path))
+        let savedRoute = try await reopenedRoutes.load(activityID: retainedRoute.activityID)
+        let savedDraft = try await secondLaunch.loadStoredSnapshot()
+        XCTAssertEqual(savedRoute, retainedRoute)
+        XCTAssertEqual(savedDraft?.session.id, replacement.session.id)
+
+        await secondLaunch.retryDiscardedRouteCleanups { _, _ in XCTFail("Completed cleanup must be retired") }
+    }
+
+    func testFailedDiscardMovePreservesActiveDraftAndRoute() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var snapshot = makeStoredSnapshot(revision: 1, name: "Keep walking")
+        let activity = makeOutdoorWalk()
+        snapshot.session.cardioBlocks.append(activity)
+        _ = try await store.save(snapshot)
+        let routeStore = CardioRouteStore(directory: directory.appendingPathComponent("Routes"))
+        let route = makeRecordedRoute(sessionID: snapshot.session.id, activityID: activity.id)
+        let generation = await routeStore.writeGeneration()
+        try await routeStore.save(route, generation: generation)
+
+        let blockedDestination = directory.appendingPathComponent("discarded-workout-\(snapshot.session.id.uuidString).json")
+        try FileManager.default.createDirectory(at: blockedDestination, withIntermediateDirectories: false)
+        do {
+            try await store.discardSession(snapshot)
+            XCTFail("Expected the draft move to fail")
+        } catch let error as CocoaError {
+            XCTAssertEqual(error.code, .fileWriteFileExists)
+        }
+
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        await reopened.retryDiscardedRouteCleanups { _, _ in XCTFail("A failed discard must not delete a route") }
+        let retained = try await reopened.loadStoredSnapshot()
+        XCTAssertEqual(retained?.session.id, snapshot.session.id)
+        XCTAssertEqual(retained?.session.cardioBlocks.map(\.id), [activity.id])
+        let retainedRoute = try await routeStore.load(activityID: activity.id)
+        XCTAssertEqual(retainedRoute, route)
+    }
+
+    func testDiscardWithoutSavedDraftRecordsKnownRouteForRelaunch() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var snapshot = makeStoredSnapshot(revision: 1, name: "Unsaved walk")
+        let activity = makeOutdoorWalk()
+        snapshot.session.cardioBlocks.append(activity)
+        try await store.discardSession(snapshot)
+
+        let expectedSessionID = snapshot.session.id
+        let deleted = expectation(description: "Recovered the route cleanup record")
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        await reopened.retryDiscardedRouteCleanups { sessionID, activityIDs in
+            XCTAssertEqual(sessionID, expectedSessionID)
+            XCTAssertEqual(activityIDs, [activity.id])
+            deleted.fulfill()
+        }
+        await fulfillment(of: [deleted], timeout: 2)
+    }
+
     func testIndependentDropsetsSurviveColdSnapshotLoadAndStageDeletion() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -166,6 +287,19 @@ final class ActiveWorkoutSnapshotRevisionTests: XCTestCase {
                 updatedAt: Date(timeIntervalSince1970: 100)
             )
         )
+    }
+
+    private func makeOutdoorWalk() -> ActiveWorkoutRuntimeCardioBlock {
+        ActiveWorkoutRuntimeCardioBlock(phase: .postWorkout, role: .main, catalogExerciseUUID: "seed-outdoor-walk",
+            exerciseNameSnapshot: "Outdoor Walk", categorySnapshot: "Cardio", muscleSummarySnapshot: "",
+            targetDurationSeconds: 0)
+    }
+
+    private func makeRecordedRoute(sessionID: UUID, activityID: UUID) -> CardioRoute {
+        var route = CardioRoute(sessionID: sessionID, activityID: activityID)
+        route.points = [CardioRoutePoint(latitude: 59.33, longitude: 18.07,
+                                       timestamp: Date(timeIntervalSinceReferenceDate: 100), horizontalAccuracy: 8, segment: 0)]
+        return route
     }
 
     private func makeTemporaryDirectory() throws -> URL {

@@ -385,10 +385,7 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
     }
 
     private static func parsedReps(_ text: String, fallback: Int?) -> Int? {
-        let cleaned = text.filter(\.isNumber)
-        guard !cleaned.isEmpty else { return nil }
-        guard let reps = Int(cleaned) else { return fallback }
-        return min(999, reps)
+        LocalizedFiniteNumberParser.optionalWholeNumber(text, fallback: fallback, maximum: 999)
     }
 
     private func resolvedWeightedLoadUnit(

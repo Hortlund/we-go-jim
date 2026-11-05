@@ -13,13 +13,18 @@ struct ProfileWidgetManagerView: View {
 
     @State private var configs: [ProfileWidgetConfigSnapshot] = []
     @State private var widgetListSnapshot = ProfileWidgetManagerListSnapshot.empty
-    @State private var exerciseOptions: [ExerciseHistoryOption] = []
-    @State private var selectingExerciseTarget: ExerciseSelectionTarget?
+    @State private var exerciseSelection: ExerciseSelectionPresentation?
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var isLoading = false
     @State private var exercisePickerLoadTask: Task<Void, Never>?
     @State private var exercisePickerLoadToken: UUID?
+
+    private struct ExerciseSelectionPresentation: Identifiable {
+        let target: ExerciseSelectionTarget
+        let options: [ExerciseHistoryOption]
+        var id: String { target.id }
+    }
 
     private enum ExerciseSelectionTarget: Identifiable, Sendable {
         case singleton(kind: ProfileWidgetKind, enableAfterSelection: Bool)
@@ -136,12 +141,12 @@ struct ProfileWidgetManagerView: View {
         .onDisappear {
             cancelExercisePickerLoad()
         }
-        .sheet(item: $selectingExerciseTarget) { target in
+        .sheet(item: $exerciseSelection) { selection in
             ProfileWidgetExercisePickerView(
-                initialMetric: target.metric ?? .oneRepMax,
-                options: exerciseOptions,
+                initialMetric: selection.target.metric ?? .oneRepMax,
+                options: selection.options,
                 onSelect: { option in
-                    saveExerciseSelection(option, for: target)
+                    saveExerciseSelection(option, for: selection.target)
                 }
             )
             .wgjSheetSurface()
@@ -442,6 +447,7 @@ struct ProfileWidgetManagerView: View {
         guard !isSavingConfiguration else { return }
         isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
+        let previousConfigs = configs
         applyConfigs(configs.map { snapshot in
             guard snapshot.id == config.id else { return snapshot }
             return snapshot.updating(isEnabled: !config.isEnabled)
@@ -460,6 +466,7 @@ struct ProfileWidgetManagerView: View {
                 }
                 applyConfigs(snapshots)
             } catch {
+                applyConfigs(previousConfigs)
                 showError(error)
             }
         }
@@ -469,6 +476,7 @@ struct ProfileWidgetManagerView: View {
         guard !isSavingConfiguration else { return }
         isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
+        let previousConfigs = configs
         if config.kind.isExerciseTrend {
             applyConfigs(configs.filter { $0.id != config.id })
         } else {
@@ -491,6 +499,7 @@ struct ProfileWidgetManagerView: View {
                 }
                 applyConfigs(snapshots)
             } catch {
+                applyConfigs(previousConfigs)
                 showError(error)
             }
         }
@@ -513,14 +522,10 @@ struct ProfileWidgetManagerView: View {
 
         let backgroundStore = widgetBackgroundStore
         do {
-            let snapshot = try await backgroundStore.perform("profile-widgets.initial-load") { backgroundContext in
-                ProfileWidgetManagerSnapshot(
-                    configs: try ProfileWidgetRepository(modelContext: backgroundContext).configurationSnapshots(),
-                    exerciseOptions: try WorkoutMetricsService(modelContext: backgroundContext).exerciseHistoryOptions()
-                )
+            let configs = try await backgroundStore.perform("profile-widgets.initial-load") { backgroundContext in
+                try ProfileWidgetRepository(modelContext: backgroundContext).configurationSnapshots()
             }
-            applyConfigs(snapshot.configs)
-            exerciseOptions = snapshot.exerciseOptions
+            applyConfigs(configs)
         } catch {
             showError(error)
         }
@@ -535,13 +540,12 @@ struct ProfileWidgetManagerView: View {
         let emptyMessage = "Complete sets for an exercise first, then add a trend with or without weight."
         exercisePickerLoadTask = Task.detached(priority: .userInitiated) {
             do {
-                let options = try await backgroundStore.perform("profile-widgets.exercise-options") { backgroundContext in
+                let options = try await backgroundStore.performRead("profile-widgets.exercise-options") { backgroundContext in
                     try WorkoutMetricsService(modelContext: backgroundContext).exerciseHistoryOptions(metric: metric)
                 }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard exercisePickerLoadToken == token else { return }
-                    exerciseOptions = options
                     exercisePickerLoadTask = nil
                     exercisePickerLoadToken = nil
                     guard !options.isEmpty else {
@@ -549,7 +553,7 @@ struct ProfileWidgetManagerView: View {
                         showingError = true
                         return
                     }
-                    selectingExerciseTarget = target
+                    exerciseSelection = ExerciseSelectionPresentation(target: target, options: options)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -576,6 +580,7 @@ struct ProfileWidgetManagerView: View {
         guard !isSavingConfiguration else { return }
         isSavingConfiguration = true
         let backgroundStore = widgetBackgroundStore
+        let previousConfigs = configs
         applyConfigs(Self.applyingExerciseSelection(option, target: target, to: configs))
         Task { @MainActor in
             defer { isSavingConfiguration = false }
@@ -611,6 +616,7 @@ struct ProfileWidgetManagerView: View {
                 }
                 applyConfigs(snapshots)
             } catch {
+                applyConfigs(previousConfigs)
                 showError(error)
             }
         }
@@ -696,11 +702,6 @@ struct ProfileWidgetManagerView: View {
             ]
         }
     }
-}
-
-private struct ProfileWidgetManagerSnapshot: Sendable {
-    let configs: [ProfileWidgetConfigSnapshot]
-    let exerciseOptions: [ExerciseHistoryOption]
 }
 
 nonisolated struct ProfileWidgetManagerListSnapshot: Sendable {

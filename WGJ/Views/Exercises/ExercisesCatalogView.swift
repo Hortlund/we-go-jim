@@ -175,13 +175,15 @@ struct ExercisesCatalogView: View {
     var body: some View {
         ScrollViewReader { proxy in
             GeometryReader { geometry in
+                let usesCompactSearchHeader = isSearchFieldFocused
+                    && (geometry.size.height < 440 || dynamicTypeSize.isAccessibilitySize)
                 VStack(alignment: .leading, spacing: 0) {
-                    pinnedSearchControls
+                    pinnedSearchControls(usesCompactSearchHeader: usesCompactSearchHeader)
                         .fixedSize(horizontal: false, vertical: true)
 
                     ZStack(alignment: .topTrailing) {
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
+                            LazyVStack(alignment: .leading, spacing: 0) {
                                 Color.clear
                                     .frame(height: 1)
                                     .id(topAnchorID)
@@ -190,26 +192,22 @@ struct ExercisesCatalogView: View {
                                     emptyState
                                         .padding(.top, 6)
                                 } else {
-                                    LazyVStack(alignment: .leading, spacing: 2) {
-                                        ForEach(controller.projection.sections) { section in
-                                            VStack(alignment: .leading, spacing: 0) {
-                                                WGJCompactSectionHeader(section.title)
-                                                    .id(section.id)
-                                                    .padding(.top, 0)
-                                                    .padding(.bottom, 6)
-
-                                                LazyVStack(alignment: .leading, spacing: 0) {
-                                                    ForEach(section.rows) { row in
-                                                        if let exercise = controller.catalog.exerciseByUUID[row.id] {
-                                                            exerciseRow(
-                                                                exercise,
-                                                                matchedNameTokens: row.matchedNameTokens
-                                                            )
-                                                            .id(row.id)
-                                                        }
-                                                    }
+                                    ForEach(controller.projection.sections) { section in
+                                        Section {
+                                            ForEach(section.rows) { row in
+                                                if let exercise = controller.catalog.exerciseByUUID[row.id] {
+                                                    exerciseRow(
+                                                        exercise,
+                                                        matchedNameTokens: row.matchedNameTokens
+                                                    )
+                                                    .id(row.id)
                                                 }
                                             }
+                                        } header: {
+                                            WGJCompactSectionHeader(section.title)
+                                                .id(section.id)
+                                                .padding(.top, 2)
+                                                .padding(.bottom, 6)
                                         }
                                     }
                                 }
@@ -218,6 +216,7 @@ struct ExercisesCatalogView: View {
                             .padding(.trailing, contentTrailingPadding)
                             .padding(.bottom, 104)
                         }
+                        .accessibilityIdentifier("exercises-catalog-scroll-view")
                         .scrollDismissesKeyboard(.interactively)
                         .onScrollGeometryChange(for: CGFloat.self) { geometry in
                             geometry.contentOffset.y + geometry.contentInsets.top
@@ -312,7 +311,6 @@ struct ExercisesCatalogView: View {
                 }
             )
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
         .wgjScreenBackground()
         .alert("Exercises Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -386,7 +384,7 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private var pinnedSearchControls: some View {
+    private func pinnedSearchControls(usesCompactSearchHeader: Bool) -> some View {
         ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedProgress in
             let collapseProgress = isPickerMode || isSearchFieldFocused || activeFilterDropdown != nil
                 ? 0
@@ -394,7 +392,7 @@ struct ExercisesCatalogView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if !isPickerMode {
                     ExercisesCatalogCollapsibleHeaderSection(
-                        progress: collapseProgress,
+                        progress: usesCompactSearchHeader ? 1 : collapseProgress,
                         reduceMotion: reduceMotion
                     ) {
                         VStack(alignment: .leading, spacing: 0) {
@@ -422,13 +420,13 @@ struct ExercisesCatalogView: View {
                 }
 
                 if isPickerMode {
-                    expandedFilterControls
+                    expandedFilterControls(showsCreateButton: !usesCompactSearchHeader)
                 } else {
                     ExercisesCatalogCollapsibleHeaderSection(
                         progress: collapseProgress,
                         reduceMotion: reduceMotion
                     ) {
-                        expandedFilterControls
+                        expandedFilterControls(showsCreateButton: !usesCompactSearchHeader)
                     }
                 }
             }
@@ -439,14 +437,16 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private var expandedFilterControls: some View {
+    private func expandedFilterControls(showsCreateButton: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear
                 .frame(height: controlsSpacing)
 
             VStack(alignment: .leading, spacing: controlsSpacing) {
                 filterRow
-                createExerciseButton
+                if showsCreateButton {
+                    createExerciseButton
+                }
             }
         }
     }
@@ -922,7 +922,7 @@ struct ExercisesCatalogView: View {
                 }
 
                 let createdSession = Self.makeEmptyRuntimeSession()
-                try await saveRuntimeSessionByAppending(appendInput, to: createdSession)
+                try await saveRuntimeSessionByAppending(appendInput, to: createdSession, isNew: true)
                 presentActiveWorkout(sessionID: createdSession.id)
                 appTabState.selectedTab = .startWorkout
             } catch {
@@ -982,7 +982,8 @@ struct ExercisesCatalogView: View {
     @MainActor
     private func saveRuntimeSessionByAppending(
         _ exercise: ExerciseRuntimeAppendInput,
-        to session: ActiveWorkoutRuntimeSession
+        to session: ActiveWorkoutRuntimeSession,
+        isNew: Bool = false
     ) async throws {
         let sortOrder = session.exercises.count
         let backgroundStore = exercisesBackgroundStore
@@ -995,7 +996,7 @@ struct ExercisesCatalogView: View {
             preferredLoadUnit: preferredLoadUnit
         )
         if activeWorkoutCoordinator.storedSnapshot?.session.id != session.id {
-            _ = activeWorkoutCoordinator.send(.start(session))
+            _ = activeWorkoutCoordinator.send(.start(session, isNew: isNew))
         }
         let expandedExerciseIDs = activeWorkoutPresentationState
             .preparedExpandedExerciseIDs(for: session.id)

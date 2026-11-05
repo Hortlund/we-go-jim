@@ -22,17 +22,28 @@ nonisolated enum LocalizedFiniteNumberParser {
             normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
         }
 
-        // FormatStyle can emit native digits; Double only accepts ASCII digits.
-        // Restrict this to decimal digits so other numeric symbols stay invalid.
-        normalized = normalized.unicodeScalars.map { scalar in
+        guard let value = Double(asciiDecimalDigits(in: normalized)), value.isFinite else { return nil }
+        return value
+    }
+
+    static func optionalWholeNumber(_ text: String, fallback: Int?, maximum: Int = .max) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = asciiDecimalDigits(in: trimmed)
+        guard normalized.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let value = Int(normalized) else { return fallback }
+        return min(maximum, value)
+    }
+
+    private static func asciiDecimalDigits(in text: String) -> String {
+        // FormatStyle can emit native digits. Restrict conversion to decimal
+        // digits so superscripts and other numeric symbols stay invalid.
+        text.unicodeScalars.map { scalar in
             if scalar.properties.generalCategory == .decimalNumber,
                let digit = scalar.properties.numericValue {
                 return String(Int(digit))
             }
             return String(scalar)
         }.joined()
-
-        guard let value = Double(normalized), value.isFinite else { return nil }
-        return value
     }
 }

@@ -1,14 +1,22 @@
 import SwiftUI
-import SwiftData
 
-struct ActiveWorkoutFinishPopover: View {
+struct ActiveWorkoutFinishConfirmationView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let content: ActiveWorkoutFinishConfirmationContent
     let onFinish: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
+        let detailsLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        let actionsLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 10) {
+            detailsLayout {
                 Image(systemName: content.iconSystemName)
                     .font(.title3)
                     .foregroundStyle(content.hasIncompleteWork ? WGJTheme.warning : WGJTheme.success)
@@ -27,7 +35,7 @@ struct ActiveWorkoutFinishPopover: View {
                 }
             }
 
-            HStack(spacing: 10) {
+            actionsLayout {
                 Button(content.cancelButtonTitle, action: onCancel)
                     .buttonStyle(WGJGhostButtonStyle())
 
@@ -41,6 +49,5 @@ struct ActiveWorkoutFinishPopover: View {
             }
         }
         .padding(14)
-        .frame(width: 320, alignment: .leading)
     }
 }

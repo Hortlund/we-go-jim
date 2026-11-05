@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 nonisolated struct TemplateEditorKeyboardDismissToken: Equatable, Sendable {
     private(set) var value: Int = 0
@@ -914,7 +915,7 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 inputDraftStore.stage(newValue, for: .repMin)
-                let updatedValue = parsedOptionalInt(from: newValue)
+                let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(newValue, fallback: targetRepMin)
                 if targetRepMin != updatedValue {
                     targetRepMin = updatedValue
                 }
@@ -933,7 +934,7 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 inputDraftStore.stage(newValue, for: .repMax)
-                let updatedValue = parsedOptionalInt(from: newValue)
+                let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(newValue, fallback: targetRepMax)
                 if targetRepMax != updatedValue {
                     targetRepMax = updatedValue
                 }
@@ -941,16 +942,11 @@ struct TemplateExercisePrescriptionEditor: View {
         )
     }
 
-    private func parsedOptionalInt(from text: String) -> Int? {
-        let cleaned = text.filter(\.isNumber)
-        return cleaned.isEmpty ? nil : Int(cleaned)
-    }
-
     private func updateRepsText(_ newValue: String, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
         inputDraftStore.stage(newValue, for: .set(setID: setID, metric: .reps))
-        let updatedValue = parsedOptionalInt(from: newValue)
+        let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(newValue, fallback: setDrafts[index].targetReps)
         if setDrafts[index].targetReps != updatedValue {
             setDrafts[index].targetReps = updatedValue
         }
@@ -1138,8 +1134,9 @@ struct TemplateExercisePrescriptionEditor: View {
               let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
             return
         }
-        let cleaned = newValue.filter(\.isNumber)
-        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+        let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(
+            newValue, fallback: setDrafts[setIndex].dropStages[stageIndex].targetReps
+        )
         guard setDrafts[setIndex].dropStages[stageIndex].targetReps != updatedValue else { return }
         setDrafts[setIndex].dropStages[stageIndex].targetReps = updatedValue
         requestImmediateCommit()
@@ -1252,21 +1249,18 @@ struct TemplateExercisePrescriptionEditor: View {
 
         switch focus {
         case .repMin:
-            let cleaned = text.filter(\.isNumber)
-            let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+            let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(text, fallback: targetRepMin)
             guard targetRepMin != updatedValue else { return }
             targetRepMin = updatedValue
         case .repMax:
-            let cleaned = text.filter(\.isNumber)
-            let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+            let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(text, fallback: targetRepMax)
             guard targetRepMax != updatedValue else { return }
             targetRepMax = updatedValue
         case let .set(setID, metric):
             guard let index = indexForSetID(setID) else { return }
             switch metric {
             case .reps:
-                let cleaned = text.filter(\.isNumber)
-                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+                let updatedValue = LocalizedFiniteNumberParser.optionalWholeNumber(text, fallback: setDrafts[index].targetReps)
                 guard setDrafts[index].targetReps != updatedValue else { return }
                 setDrafts[index].targetReps = updatedValue
             case .weight:
@@ -1778,6 +1772,11 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         case reps
     }
 
+    // The iPad's floating numeric keypad can cover nearby drop controls.
+    private var usesDockedNumericKeyboard: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     init(
         setIndex: Int,
         index: Int,
@@ -1886,7 +1885,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
                     onWeightChanged(value)
                 }
             ))
-            .keyboardType(.decimalPad)
+            .keyboardType(usesDockedNumericKeyboard ? .numbersAndPunctuation : .decimalPad)
             .multilineTextAlignment(.center)
             .focused($focusedField, equals: .weight)
             .accessibilityLabel("Set \(setIndex + 1), drop \(index + 1), weight")
@@ -1917,7 +1916,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
                 onRepsChanged(value)
             }
         ))
-        .keyboardType(.numberPad)
+        .keyboardType(usesDockedNumericKeyboard ? .numbersAndPunctuation : .numberPad)
         .multilineTextAlignment(.center)
         .wgjPillField()
         .focused($focusedField, equals: .reps)

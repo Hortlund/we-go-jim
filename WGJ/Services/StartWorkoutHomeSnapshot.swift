@@ -87,10 +87,11 @@ nonisolated enum StartWorkoutHomeSnapshotLoader {
     static func load(modelContext: ModelContext) throws -> StartWorkoutHomeSnapshot {
         let templateRepository = TemplateRepository(modelContext: modelContext)
         let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        let templates = try templateRepository.templates()
         return StartWorkoutHomeSnapshotBuilder.build(
             folders: try templateRepository.folders(),
-            templates: try templateRepository.templates(),
-            completedSessions: try sessionRepository.completedSessions()
+            templates: templates,
+            lastCompletedByTemplateID: try sessionRepository.latestCompletedDates(forTemplateIDs: Set(templates.map(\.id)))
         )
     }
 }
@@ -99,7 +100,7 @@ nonisolated enum StartWorkoutHomeSnapshotBuilder {
     static func build(
         folders: [TemplateFolder],
         templates: [WorkoutTemplate],
-        completedSessions: [WorkoutSession]
+        lastCompletedByTemplateID: [UUID: Date]
     ) -> StartWorkoutHomeSnapshot {
         let templateCountsByFolderID = Dictionary(
             grouping: templates,
@@ -116,8 +117,6 @@ nonisolated enum StartWorkoutHomeSnapshotBuilder {
         let templateSnapshots = templates.map(StartWorkoutTemplateRowSnapshot.init(template:))
         let orderedTemplates = orderTemplates(templateSnapshots, folders: folderSnapshots)
         let sections = buildSections(folders: folderSnapshots, templates: orderedTemplates)
-        let lastCompletedByTemplateID = buildLastCompletedByTemplateID(completedSessions)
-
         return StartWorkoutHomeSnapshot(
             folders: folderSnapshots,
             templates: orderedTemplates,
@@ -217,26 +216,6 @@ nonisolated enum StartWorkoutHomeSnapshotBuilder {
         }
 
         return sections
-    }
-
-    private static func buildLastCompletedByTemplateID(_ sessions: [WorkoutSession]) -> [UUID: Date] {
-        var completedByTemplateID: [UUID: Date] = [:]
-
-        for session in sessions {
-            guard session.status == .completed, let templateID = session.templateID else {
-                continue
-            }
-            let completedAt = session.endedAt ?? session.startedAt
-            if let existing = completedByTemplateID[templateID] {
-                if completedAt > existing {
-                    completedByTemplateID[templateID] = completedAt
-                }
-            } else {
-                completedByTemplateID[templateID] = completedAt
-            }
-        }
-
-        return completedByTemplateID
     }
 }
 

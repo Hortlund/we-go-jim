@@ -86,6 +86,7 @@ struct ProfileWidgetExercisePickerView: View {
                             }
                             .padding(12)
                             .wgjCardContainer(cornerRadius: WGJRadius.control)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))

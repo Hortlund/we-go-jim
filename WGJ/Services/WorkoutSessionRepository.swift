@@ -463,6 +463,22 @@ nonisolated final class WorkoutSessionRepository {
         try completedSessions(before: nil, excludingSessionID: nil, includeArchived: includeArchived)
     }
 
+    func latestCompletedDates(forTemplateIDs templateIDs: Set<UUID>) throws -> [UUID: Date] {
+        guard !templateIDs.isEmpty else { return [:] }
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        var descriptor = FetchDescriptor<WorkoutSession>(predicate: #Predicate { session in
+            session.statusRaw == completedStatus && session.archivedAt == nil && session.templateID != nil
+        })
+        descriptor.propertiesToFetch = [\.templateID, \.endedAt, \.startedAt]
+        var latestByTemplateID: [UUID: Date] = [:]
+        for session in try modelContext.fetch(descriptor) {
+            guard let templateID = session.templateID, templateIDs.contains(templateID) else { continue }
+            let completedAt = session.endedAt ?? session.startedAt
+            latestByTemplateID[templateID] = max(latestByTemplateID[templateID] ?? completedAt, completedAt)
+        }
+        return latestByTemplateID
+    }
+
     func completedSessions(
         before date: Date?,
         limit: Int,

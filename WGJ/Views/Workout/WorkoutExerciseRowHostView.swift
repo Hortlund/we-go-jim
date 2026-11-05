@@ -65,7 +65,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let onExerciseDelete: (() -> Void)?
     let flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     let keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
-    let onInputFocusChange: (Bool) -> Void
+    let onInputFocusChange: (WorkoutMetricScrollTarget?) -> Void
 
     @State private var localRestSeconds: Int
     @State private var localSetDrafts: [WorkoutSessionSetDraft]
@@ -118,7 +118,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
-        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
+        onInputFocusChange: @escaping (WorkoutMetricScrollTarget?) -> Void = { _ in }
     ) {
         self.exerciseID = exerciseID
         self.contentIdentity = WorkoutExerciseRowContentIdentity(

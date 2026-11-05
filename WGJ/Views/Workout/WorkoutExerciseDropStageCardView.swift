@@ -17,16 +17,11 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
     let onDelete: () -> Void
     let keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
     let onCommitPendingInput: () -> Void
-    let onInputFocusChange: (Bool) -> Void
+    let onInputFocusChange: (WorkoutMetricScrollTarget?) -> Void
 
     @State private var repsText: String
     @State private var weightText: String
-    @FocusState private var focusedField: Field?
-
-    private enum Field: Hashable {
-        case weight
-        case reps
-    }
+    @FocusState private var focusedField: WorkoutMetricInputDraftBuffer.Metric?
 
     init(
         exerciseName: String,
@@ -42,7 +37,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
         onDelete: @escaping () -> Void,
         keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
         onCommitPendingInput: @escaping () -> Void = {},
-        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
+        onInputFocusChange: @escaping (WorkoutMetricScrollTarget?) -> Void = { _ in }
     ) {
         self.exerciseName = exerciseName
         self.setIndex = setIndex
@@ -162,7 +157,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             weightText = resolved
         }
         .onChange(of: focusedField) { oldValue, newValue in
-            onInputFocusChange(newValue != nil)
+            onInputFocusChange(newValue.map { WorkoutMetricScrollTarget(rowID: stage.id, metric: $0) })
             guard oldValue != nil, newValue == nil else { return }
             commitLocalText()
             onCommitPendingInput()
@@ -172,7 +167,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             commitLocalText()
             onCommitPendingInput()
             focusedField = nil
-            onInputFocusChange(false)
+            onInputFocusChange(nil)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
@@ -180,12 +175,12 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             commitLocalText()
             onCommitPendingInput()
             focusedField = nil
-            onInputFocusChange(false)
+            onInputFocusChange(nil)
         }
         .onDisappear {
             commitLocalText()
             onCommitPendingInput()
-            onInputFocusChange(false)
+            onInputFocusChange(nil)
         }
     }
 
@@ -205,6 +200,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
                 .accessibilityLabel(weightAccessibility.label)
                 .accessibilityValue(weightAccessibility.value)
                 .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-weight-field")
+                .id(WorkoutMetricScrollTarget(rowID: stage.id, metric: .weight))
 
             WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
@@ -242,6 +238,7 @@ struct WorkoutExerciseDropStageCardView: View, Equatable {
             .accessibilityLabel(repsAccessibility.label)
             .accessibilityValue(repsAccessibility.value)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
+            .id(WorkoutMetricScrollTarget(rowID: stage.id, metric: .reps))
     }
 
     private var weightAccessibility: WorkoutMetricAccessibilityDescriptor {

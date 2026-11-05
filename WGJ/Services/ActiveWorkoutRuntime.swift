@@ -89,10 +89,14 @@ nonisolated enum ActiveWorkoutSnapshotWriteResult: Equatable, Sendable {
     case rejectedInvalidated
 }
 
+typealias DiscardedRouteDeletion = @Sendable (UUID, Set<UUID>) async throws -> Void
+
 nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
     func loadStoredSnapshot() async throws -> ActiveWorkoutStoredSnapshot?
     func save(_ snapshot: ActiveWorkoutStoredSnapshot) async throws -> ActiveWorkoutSnapshotWriteResult
     func delete() async throws
+    func discardSession(_ snapshot: ActiveWorkoutStoredSnapshot, mayHaveRouteFiles: Bool) async throws
+    func cleanUpDiscardedRoutes(sessionID: UUID, activityIDs: Set<UUID>, using deleteRoutes: DiscardedRouteDeletion) async throws
 }
 
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
@@ -740,6 +744,11 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     private static let defaultFileName = "active-workout-snapshot.json"
     private static let invalidationFileName = "active-workout-invalidated-before.json"
     private static let deletedSessionsFileName = "active-workout-deleted-sessions.json"
+    private static let discardedDraftPrefix = "discarded-workout-"
+
+    private nonisolated struct DiscardedRouteCleanup: Codable {
+        let activityIDs: Set<UUID>
+    }
 
     nonisolated static var defaultSnapshotURL: URL {
         defaultBaseDirectory().appendingPathComponent(defaultFileName)
@@ -757,6 +766,7 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     private let baseDirectory: URL
     private var cachedSnapshotData: Data?
     private let pendingDeletionIDs: @Sendable () -> Set<UUID>
+    private var routeCleanupsInProgress: Set<UUID> = []
 
     init(baseDirectory: URL? = nil, pendingDeletionIDs: @escaping @Sendable () -> Set<UUID> = {
         Set((UserDefaults.standard.stringArray(forKey: AppDataArtifactCleanupQueue.deletedSessionsDefaultsKey) ?? [])
@@ -1017,12 +1027,111 @@ actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
             let marker = baseDirectory.appendingPathComponent(Self.deletedSessionsFileName)
             try JSONEncoder().encode(deleted).write(to: marker, options: [.atomic])
         }
-        let url = snapshotURL
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let snapshot = try Self.decodeSnapshot(Data(contentsOf: url), at: url)
-        guard snapshot.session.id == sessionID else { return }
-        try FileManager.default.removeItem(at: url)
-        cachedSnapshotData = nil
+        guard let data = try dataIfPresent(at: snapshotURL) else { return }
+        if let snapshot = try decodeDraftForRemoval(data), snapshot.session.id != sessionID { return }
+        try delete()
+    }
+
+    func discardSession(_ snapshot: ActiveWorkoutStoredSnapshot, mayHaveRouteFiles: Bool = true) throws {
+        Self.snapshotFileLock.lock()
+        defer { Self.snapshotFileLock.unlock() }
+        let sessionID = snapshot.session.id
+        let activityIDs = Set(snapshot.session.cardioBlocks.map(\.id))
+        let pendingURL = discardedDraftURL(for: sessionID)
+        let needsRouteCleanup = mayHaveRouteFiles || snapshot.session.cardioBlocks.contains(where: CardioRecordingPolicy.recordsGPS)
+
+        if let data = try dataIfPresent(at: snapshotURL) {
+            let saved = try decodeDraftForRemoval(data)
+            if saved == nil || saved?.session.id == sessionID {
+                if !needsRouteCleanup, saved?.session.cardioBlocks.contains(where: CardioRecordingPolicy.recordsGPS) != true {
+                    try delete()
+                    return
+                }
+                let savedActivityIDs = Set(saved?.session.cardioBlocks.map(\.id) ?? [])
+                if !activityIDs.isSubset(of: savedActivityIDs) {
+                    // Keep identities added since the last save, including those of damaged route files.
+                    try encoder.encode(snapshot).write(to: snapshotURL, options: [.atomic])
+                    cachedSnapshotData = nil
+                }
+                // A same-directory rename retires the active draft and publishes its cleanup in one step.
+                try FileManager.default.moveItem(at: snapshotURL, to: pendingURL)
+                cachedSnapshotData = nil
+                return
+            }
+        }
+
+        // An unsaved workout can have route files too. Leave any replacement draft alone.
+        guard needsRouteCleanup else { return }
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        let cleanup = DiscardedRouteCleanup(activityIDs: activityIDs)
+        try JSONEncoder().encode(cleanup).write(to: pendingURL, options: [.atomic])
+    }
+
+    func cleanUpDiscardedRoutes(sessionID: UUID, activityIDs: Set<UUID>, using deleteRoutes: DiscardedRouteDeletion) async throws {
+        guard routeCleanupsInProgress.insert(sessionID).inserted else { return }
+        defer { routeCleanupsInProgress.remove(sessionID) }
+        let pendingURL = discardedDraftURL(for: sessionID)
+        guard let data = try dataIfPresent(at: pendingURL) else { return }
+        let savedActivityIDs = (try? JSONDecoder().decode(DiscardedRouteCleanup.self, from: data))?.activityIDs
+            ?? Set((try? Self.decodeSnapshot(data, at: pendingURL))?.session.cardioBlocks.map(\.id) ?? [])
+        try await deleteRoutes(sessionID, activityIDs.union(savedActivityIDs))
+        try removeDiscardedDraft(at: pendingURL)
+    }
+
+    func retryDiscardedRouteCleanups(using deleteRoutes: DiscardedRouteDeletion = { sessionID, activityIDs in
+        try CardioRouteStore.shared.delete(sessionID: sessionID, activityIDs: activityIDs)
+    }) async {
+        guard let sessionIDs = try? pendingDiscardedSessionIDs() else { return }
+        for sessionID in sessionIDs {
+            try? await cleanUpDiscardedRoutes(sessionID: sessionID, activityIDs: [], using: deleteRoutes)
+        }
+    }
+
+    /// Called after an explicit local data reset has removed every route journal.
+    func removeDiscardedRouteCleanupRecords() throws {
+        for sessionID in try pendingDiscardedSessionIDs() {
+            try removeDiscardedDraft(at: discardedDraftURL(for: sessionID))
+        }
+    }
+
+    private func pendingDiscardedSessionIDs() throws -> [UUID] {
+        let urls: [URL]
+        do {
+            urls = try FileManager.default.contentsOfDirectory(at: baseDirectory, includingPropertiesForKeys: nil)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return []
+        }
+        return urls.compactMap { url in
+            let name = url.deletingPathExtension().lastPathComponent
+            guard url.pathExtension == "json", name.hasPrefix(Self.discardedDraftPrefix) else { return nil }
+            return UUID(uuidString: String(name.dropFirst(Self.discardedDraftPrefix.count)))
+        }
+    }
+
+    private func removeDiscardedDraft(at url: URL) throws {
+        do { try FileManager.default.removeItem(at: url) }
+        catch let error as CocoaError where error.code == .fileNoSuchFile { }
+    }
+
+    private func discardedDraftURL(for sessionID: UUID) -> URL {
+        baseDirectory.appendingPathComponent("\(Self.discardedDraftPrefix)\(sessionID.uuidString).json")
+    }
+
+    private func dataIfPresent(at url: URL) throws -> Data? {
+        do {
+            return try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return nil
+        }
+    }
+
+    private func decodeDraftForRemoval(_ data: Data) throws -> ActiveWorkoutStoredSnapshot? {
+        do {
+            return try Self.decodeSnapshot(data, at: snapshotURL)
+        } catch is DecodingError {
+            // An unreadable draft cannot be restored and would block the next save.
+            return nil
+        }
     }
 
     private func deletedSessionIDs() throws -> Set<UUID> {

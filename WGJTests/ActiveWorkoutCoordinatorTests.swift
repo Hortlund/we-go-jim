@@ -3,6 +3,197 @@ import XCTest
 
 @MainActor
 final class ActiveWorkoutCoordinatorTests: XCTestCase {
+    func testUnsavedStrengthWorkoutCanBeDiscardedWithUnwritableStorage() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence(),
+                                                   routeRecorder: nil)
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Empty Workout"), isNew: true))
+        await coordinator.flushSnapshot()
+        XCTAssertNotNil(coordinator.persistenceWarning)
+
+        try await coordinator.discard()
+
+        XCTAssertNil(coordinator.storedSnapshot)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    func testRemovedOutdoorActivityStillQueuesCleanupForAnUnsavedDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let cleanupAttempted = expectation(description: "Route cleanup was attempted")
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store, persistence: StubActiveWorkoutPersistence(), routeRecorder: nil,
+            deleteDiscardedRoutes: { _, _ in
+                cleanupAttempted.fulfill()
+                throw CocoaError(.fileWriteNoPermission)
+            }
+        )
+        var session = ActiveWorkoutRuntimeSession(name: "Workout")
+        coordinator.send(.start(session, isNew: true), persist: false)
+
+        session.cardioBlocks = [ActiveWorkoutRuntimeCardioBlock(
+            phase: .postWorkout, role: .main, catalogExerciseUUID: "seed-outdoor-walk",
+            exerciseNameSnapshot: "Outdoor Walk", categorySnapshot: "Cardio", muscleSummarySnapshot: "",
+            targetDurationSeconds: 0
+        )]
+        coordinator.send(.synchronize(session: session, restTimer: nil, presentationMode: .presented,
+                                      scrollTarget: nil, expandedExerciseIDs: []), persist: false)
+        session.cardioBlocks = []
+        coordinator.send(.synchronize(session: session, restTimer: nil, presentationMode: .presented,
+                                      scrollTarget: nil, expandedExerciseIDs: []), persist: false)
+        try await coordinator.discard()
+        await fulfillment(of: [cleanupAttempted], timeout: 2)
+
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let recovered = expectation(description: "Retained cleanup for the removed activity")
+        let sessionID = session.id
+        await reopened.retryDiscardedRouteCleanups { id, _ in
+            XCTAssertEqual(id, sessionID)
+            recovered.fulfill()
+        }
+        await fulfillment(of: [recovered], timeout: 2)
+    }
+
+    func testDiscardPreservesReplacementWithoutCreatingDeletionHistory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence(),
+                                                   routeRecorder: nil)
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Canceled workout")))
+        let canceled = try XCTUnwrap(coordinator.storedSnapshot)
+        await coordinator.flushSnapshot()
+
+        // The next workout may already be on disk by the time cleanup reaches it.
+        let replacement = ActiveWorkoutStoredSnapshot(revision: canceled.revision + 1,
+                                                       session: ActiveWorkoutRuntimeSession(name: "New workout"))
+        let saved = try await store.save(replacement)
+        XCTAssertEqual(saved, .written)
+        try await coordinator.discard()
+
+        let reopened = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let retained = try await reopened.loadStoredSnapshot()
+        XCTAssertEqual(retained?.session.id, replacement.session.id)
+        XCTAssertNil(coordinator.storedSnapshot)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(
+            "active-workout-deleted-sessions.json"
+        ).path))
+    }
+
+    func testDiscardCancelsAnInFlightFlush() async throws {
+        let writeStarted = expectation(description: "The flush reached snapshot storage")
+        let store = RecordingActiveWorkoutSnapshotStore(writeDelayNanoseconds: 5_000_000_000, onSaveStart: {
+            writeStarted.fulfill()
+        })
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence(),
+                                                   routeRecorder: nil)
+        coordinator.send(.start(ActiveWorkoutRuntimeSession(name: "Canceled workout")), persist: false)
+        let flush = Task { await coordinator.flushSnapshot() }
+        await fulfillment(of: [writeStarted], timeout: 3)
+
+        try await coordinator.discard()
+        await flush.value
+
+        let saved = await store.lastSnapshot()
+        XCTAssertNil(saved)
+        XCTAssertNil(coordinator.storedSnapshot)
+    }
+
+    func testDiscardReturnsWhileRouteCleanupIsStillRunning() async throws {
+        let cleanupStarted = expectation(description: "Route cleanup started")
+        let discardReturned = expectation(description: "Draft removal returned")
+        let cleanupFinished = expectation(description: "Route cleanup finished")
+        let (cleanupGate, releaseCleanup) = AsyncStream<Void>.makeStream()
+        defer { releaseCleanup.finish() }
+        let activity = ActiveWorkoutRuntimeCardioBlock(
+            phase: .postWorkout, role: .main, catalogExerciseUUID: "seed-outdoor-walk",
+            exerciseNameSnapshot: "Outdoor Walk", categorySnapshot: "Cardio", muscleSummarySnapshot: "",
+            targetDurationSeconds: 0
+        )
+        let session = ActiveWorkoutRuntimeSession(name: "Canceled workout", cardioBlocks: [activity])
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store, persistence: StubActiveWorkoutPersistence(), routeRecorder: nil,
+            deleteDiscardedRoutes: { sessionID, activityIDs in
+                XCTAssertEqual(sessionID, session.id)
+                XCTAssertEqual(activityIDs, [activity.id])
+                cleanupStarted.fulfill()
+                for await _ in cleanupGate { }
+                cleanupFinished.fulfill()
+            }
+        )
+        coordinator.send(.start(session))
+        await coordinator.flushSnapshot()
+
+        let discard = Task {
+            try await coordinator.discard()
+            discardReturned.fulfill()
+        }
+        await fulfillment(of: [discardReturned, cleanupStarted], timeout: 3)
+        XCTAssertNil(coordinator.storedSnapshot)
+        let removed = await store.lastSnapshot()
+        XCTAssertNil(removed)
+
+        let replacement = ActiveWorkoutRuntimeSession(name: "New workout")
+        coordinator.send(.start(replacement))
+        await coordinator.flushSnapshot()
+        let saved = await store.lastSnapshot()
+        XCTAssertEqual(saved?.session.id, replacement.id)
+
+        releaseCleanup.finish()
+        try await discard.value
+        await fulfillment(of: [cleanupFinished], timeout: 3)
+    }
+
+    func testFailedDiscardKeepsTheWorkoutAvailableForRetry() async throws {
+        let store = RecordingActiveWorkoutSnapshotStore(discardFailuresRemaining: 1)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence(),
+                                                   routeRecorder: nil)
+        let session = ActiveWorkoutRuntimeSession(name: "Canceled workout")
+        coordinator.send(.start(session))
+        await coordinator.flushSnapshot()
+
+        do {
+            try await coordinator.discard()
+            XCTFail("Expected the snapshot removal failure")
+        } catch let error as CocoaError {
+            XCTAssertEqual(error.code, .fileWriteNoPermission)
+        }
+        XCTAssertEqual(coordinator.storedSnapshot?.session.id, session.id)
+
+        try await coordinator.discard()
+        let saved = await store.lastSnapshot()
+        XCTAssertNil(saved)
+        XCTAssertNil(coordinator.storedSnapshot)
+    }
+
+    func testNewWorkoutCanSaveWhileAnOlderDraftIsStillOnDisk() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let older = ActiveWorkoutStoredSnapshot(revision: 20, session: ActiveWorkoutRuntimeSession(name: "Old workout"))
+        _ = try await store.save(older)
+        let coordinator = ActiveWorkoutCoordinator(snapshotStore: store, persistence: StubActiveWorkoutPersistence(),
+                                                   routeRecorder: nil)
+        await coordinator.restore()
+        coordinator.clearInMemory()
+        let replacement = ActiveWorkoutRuntimeSession(name: "New workout")
+        coordinator.send(.start(replacement))
+        await coordinator.flushSnapshot()
+
+        let saved = try await store.loadStoredSnapshot()
+        XCTAssertEqual(saved?.session.id, replacement.id)
+        XCTAssertGreaterThan(saved?.revision ?? 0, older.revision)
+    }
+
     func testRestoreKeepsNewerWorkoutPresentationTimerAndPendingEdits() async throws {
         for startsNewWorkout in [false, true] {
             let cutoff = Date.now
@@ -428,17 +619,23 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
     private var activeWrites = 0
     private var attempts = 0
     private var failuresRemaining: Int
+    private var discardFailuresRemaining: Int
     private var maxActiveWrites = 0
     private let writeDelayNanoseconds: UInt64
+    private let onSaveStart: @Sendable () -> Void
     private let onSave: @Sendable (ActiveWorkoutStoredSnapshot) -> Void
 
     init(
         initialSnapshot: ActiveWorkoutStoredSnapshot? = nil,
         writeDelayNanoseconds: UInt64 = 0,
         failuresRemaining: Int = 0,
+        discardFailuresRemaining: Int = 0,
+        onSaveStart: @escaping @Sendable () -> Void = {},
         onSave: @escaping @Sendable (ActiveWorkoutStoredSnapshot) -> Void = { _ in }
     ) {
         self.failuresRemaining = failuresRemaining
+        self.discardFailuresRemaining = discardFailuresRemaining
+        self.onSaveStart = onSaveStart
         self.onSave = onSave
         if let initialSnapshot {
             snapshots = [initialSnapshot]
@@ -458,10 +655,11 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
         }
         activeWrites += 1
         maxActiveWrites = max(maxActiveWrites, activeWrites)
+        defer { activeWrites -= 1 }
+        onSaveStart()
         if writeDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: writeDelayNanoseconds)
         }
-        defer { activeWrites -= 1 }
         if snapshots.last == snapshot {
             return .unchanged
         }
@@ -472,6 +670,18 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
 
     func delete() async throws {
         snapshots.removeAll()
+    }
+
+    func discardSession(_ snapshot: ActiveWorkoutStoredSnapshot, mayHaveRouteFiles: Bool) throws {
+        if discardFailuresRemaining > 0 {
+            discardFailuresRemaining -= 1
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        snapshots.removeAll { $0.session.id == snapshot.session.id }
+    }
+
+    func cleanUpDiscardedRoutes(sessionID: UUID, activityIDs: Set<UUID>, using deleteRoutes: DiscardedRouteDeletion) async throws {
+        try await deleteRoutes(sessionID, activityIDs)
     }
 
     func lastSnapshot() -> ActiveWorkoutStoredSnapshot? {
