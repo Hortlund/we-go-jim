@@ -74,6 +74,7 @@ struct TemplateEditorView: View {
                 }
                 .padding(16)
             }
+            .accessibilityIdentifier("template-editor-scroll-view")
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -146,6 +147,7 @@ struct TemplateEditorView: View {
                 await loadCatalogMatches()
             }
         }
+        .presentationSizing(.page)
     }
 
     private var templateMetaCard: some View {

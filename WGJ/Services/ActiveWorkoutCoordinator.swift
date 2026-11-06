@@ -3,7 +3,7 @@ import Observation
 import SwiftData
 
 nonisolated enum ActiveWorkoutCommand: Sendable {
-    case start(ActiveWorkoutRuntimeSession)
+    case start(ActiveWorkoutRuntimeSession, isNew: Bool = false)
     case updateMetadata(name: String, notes: String)
     case appendExercise(ActiveWorkoutRuntimeExercise)
     case replaceExercise(exerciseID: UUID, replacement: ActiveWorkoutRuntimeExercise)
@@ -113,22 +113,31 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     @ObservationIgnored private let persistence: any ActiveWorkoutPersistence
     @ObservationIgnored private let routeRecorder: CardioRouteRecorder?
     @ObservationIgnored private let liveActivityPublisher: (any WorkoutLiveActivityPublishing)?
+    @ObservationIgnored private let deleteDiscardedRoutes: DiscardedRouteDeletion
     @ObservationIgnored private var hasResolvedLiveActivitySession = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var scheduledSave: (id: UUID, revision: UInt64)?
+    @ObservationIgnored private var discardingSessionIDs: Set<UUID> = []
+    @ObservationIgnored private var mayHaveRouteFiles = true
     @ObservationIgnored private var completionTask: Task<WorkoutCompletionCommitResult, Error>?
     @ObservationIgnored private var lastPersistedRevision: UInt64?
+    // The next workout can start while a canceled draft is still being removed.
+    @ObservationIgnored private var latestRevision: UInt64 = 0
 
     init(
         snapshotStore: any ActiveWorkoutSnapshotStoring = ActiveWorkoutSnapshotStore.shared,
         persistence: any ActiveWorkoutPersistence,
         routeRecorder: CardioRouteRecorder? = .shared,
-        liveActivityPublisher: (any WorkoutLiveActivityPublishing)? = nil
+        liveActivityPublisher: (any WorkoutLiveActivityPublishing)? = nil,
+        deleteDiscardedRoutes: @escaping DiscardedRouteDeletion = { sessionID, activityIDs in
+            try CardioRouteStore.shared.delete(sessionID: sessionID, activityIDs: activityIDs)
+        }
     ) {
         self.snapshotStore = snapshotStore
         self.persistence = persistence
         self.routeRecorder = routeRecorder
         self.liveActivityPublisher = liveActivityPublisher
+        self.deleteDiscardedRoutes = deleteDiscardedRoutes
         if liveActivityPublisher != nil {
             routeRecorder?.onProgress = { [weak self] in self?.refreshLiveActivity() }
         }
@@ -153,10 +162,11 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     ) -> ActiveWorkoutMutationReceipt {
         var snapshot: ActiveWorkoutStoredSnapshot
         switch command {
-        case .start(let session):
+        case .start(let session, let isNew):
             hasResolvedLiveActivitySession = true
+            mayHaveRouteFiles = !isNew
             snapshot = ActiveWorkoutStoredSnapshot(
-                revision: storedSnapshot?.revision ?? 0,
+                revision: latestRevision,
                 session: session
             )
         default:
@@ -178,6 +188,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             ) ?? snapshot.session
         }
 
+        if !mayHaveRouteFiles {
+            mayHaveRouteFiles = snapshot.session.cardioBlocks.contains(where: CardioRecordingPolicy.recordsGPS)
+        }
+
         if snapshot == storedSnapshot {
             // A failed or deliberately unstored revision must still be retried.
             if shouldPersist, lastPersistedRevision != snapshot.revision,
@@ -188,6 +202,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         }
         snapshot.mutationTimestamp = Date.now.timeIntervalSince1970
         snapshot.revision &+= 1
+        latestRevision = snapshot.revision
         storedSnapshot = snapshot
         routeRecorder?.synchronize(with: snapshot.session)
         refreshLiveActivity()
@@ -202,17 +217,17 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     }
 
     func flushSnapshot() async {
-        let pendingSave = saveTask
-        saveTask?.cancel()
-        saveTask = nil
-        scheduledSave = nil
-        await pendingSave?.value
-
-        guard let snapshot = storedSnapshot,
-              lastPersistedRevision != snapshot.revision else {
-            return
+        while let snapshot = storedSnapshot,
+              !discardingSessionIDs.contains(snapshot.session.id),
+              lastPersistedRevision != snapshot.revision {
+            if scheduledSave?.revision != snapshot.revision {
+                scheduleSnapshotSave(snapshot)
+            }
+            await saveTask?.value
+            // If an edit replaced the write we just awaited, flush that edit too.
+            guard storedSnapshot?.session.id == snapshot.session.id,
+                  storedSnapshot?.revision != snapshot.revision else { return }
         }
-        await persist(snapshot)
     }
 
     func restore() async {
@@ -249,7 +264,10 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 }
                 return
             }
+            // A route journal can be newer than a draft restored from disk.
+            mayHaveRouteFiles = true
             storedSnapshot = snapshot
+            latestRevision = max(latestRevision, snapshot.revision)
             lastPersistedRevision = snapshot.revision
             persistenceWarning = nil
             let outdoorActivities = snapshot.session.cardioBlocks.filter {
@@ -319,31 +337,48 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         }
     }
 
-    func discard() async {
-        hasResolvedLiveActivitySession = true
-        let discardedSessionID = storedSnapshot?.session.id
-        let discardedActivityIDs = Set(storedSnapshot?.session.cardioBlocks.map(\.id) ?? [])
-        if let discardedSessionID { routeRecorder?.stop(sessionID: discardedSessionID) }
+    func discard() async throws {
+        guard let discardedSnapshot = storedSnapshot else { return }
+        let session = discardedSnapshot.session
+        guard discardingSessionIDs.insert(session.id).inserted else { return }
+        defer {
+            discardingSessionIDs.remove(session.id)
+            if let snapshot = storedSnapshot, snapshot.session.id == session.id,
+               lastPersistedRevision != snapshot.revision {
+                scheduleSnapshotSave(snapshot)
+            }
+        }
+
+        // Every snapshot write goes through saveTask. Superseded tasks are already
+        // canceled, and the store serializes removal with any write already on disk.
         saveTask?.cancel()
         saveTask = nil
         scheduledSave = nil
-        completionTask?.cancel()
-        completionTask = nil
-        storedSnapshot = nil
-        lastPersistedRevision = nil
-        refreshLiveActivity()
-        var cleanupWarnings: [String] = []
-        if let discardedSessionID {
-            do {
-                try await CardioRouteStore.shared.delete(
-                    sessionID: discardedSessionID, activityIDs: discardedActivityIDs
-                )
-            }
-            catch { cleanupWarnings.append(String(describing: error)) }
+        try await snapshotStore.discardSession(discardedSnapshot, mayHaveRouteFiles: mayHaveRouteFiles)
+
+        routeRecorder?.stop(sessionID: session.id)
+        if storedSnapshot?.session.id == session.id {
+            completionTask?.cancel()
+            completionTask = nil
+            storedSnapshot = nil
+            lastPersistedRevision = nil
+            persistenceWarning = nil
+            refreshLiveActivity()
         }
-        do { try await snapshotStore.delete() }
-        catch { cleanupWarnings.append(String(describing: error)) }
-        persistenceWarning = cleanupWarnings.isEmpty ? nil : cleanupWarnings.joined(separator: "\n")
+        // Route cleanup can scan saved journals. The removed draft is enough to dismiss the workout.
+        let sessionID = session.id
+        let activityIDs = Set(session.cardioBlocks.map(\.id))
+        let revision = discardedSnapshot.revision
+        Task(priority: .utility) { [weak self, snapshotStore, deleteDiscardedRoutes] in
+            do {
+                try await snapshotStore.cleanUpDiscardedRoutes(sessionID: sessionID, activityIDs: activityIDs,
+                                                              using: deleteDiscardedRoutes)
+            } catch {
+                if let self, self.storedSnapshot == nil, self.latestRevision == revision {
+                    self.persistenceWarning = String(describing: error)
+                }
+            }
+        }
     }
 
     /// A restore may finish after the user has started or edited a workout.
@@ -385,6 +420,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     }
 
     private func scheduleSnapshotSave(_ snapshot: ActiveWorkoutStoredSnapshot) {
+        guard !discardingSessionIDs.contains(snapshot.session.id) else { return }
         saveTask?.cancel()
         let saveID = UUID()
         scheduledSave = (saveID, snapshot.revision)
@@ -403,6 +439,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     private func persist(_ snapshot: ActiveWorkoutStoredSnapshot) async {
         do {
             let result = try await snapshotStore.save(snapshot)
+            guard storedSnapshot?.session.id == snapshot.session.id else { return }
             switch result {
             case .written, .unchanged:
                 lastPersistedRevision = snapshot.revision
@@ -413,6 +450,7 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         } catch is CancellationError {
             return
         } catch {
+            guard storedSnapshot?.session.id == snapshot.session.id else { return }
             persistenceWarning = String(describing: error)
         }
     }
@@ -587,6 +625,14 @@ private actor ActiveWorkoutPreviewSnapshotStore: ActiveWorkoutSnapshotStoring {
     func delete() async throws {
         snapshot = nil
     }
+
+    func discardSession(_ discarded: ActiveWorkoutStoredSnapshot, mayHaveRouteFiles: Bool) {
+        if snapshot?.session.id == discarded.session.id {
+            snapshot = nil
+        }
+    }
+
+    func cleanUpDiscardedRoutes(sessionID: UUID, activityIDs: Set<UUID>, using deleteRoutes: DiscardedRouteDeletion) async throws { }
 }
 
 private actor ActiveWorkoutPreviewPersistence: ActiveWorkoutPersistence {

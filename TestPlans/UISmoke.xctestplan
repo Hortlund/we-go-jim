@@ -27,6 +27,7 @@
         "AdaptiveLayoutUITests/testSupersetWarmupsMoveToPartnerBeforeResting",
         "AdaptiveLayoutUITests/testTemplateDropsStayIndependentAndCarryIntoCompactWorkoutRows",
         "AdaptiveLayoutUITests/testWorkoutDropsStackAtAccessibilityTextSize",
+        "AdaptiveLayoutUITests/testLargeTextWorkoutStripAndFinishConfirmationStayReachable",
         "AdaptiveLayoutUITests/testBackgroundRestNotificationAppearsNearTheTimerDeadline",
         "AdaptiveLayoutUITests/testBackgroundRestNotificationAppearsNearTheDeadlineWithLiveActivity",
         "AdaptiveLayoutUITests/testLiveActivitiesSettingDefaultsOffAndCanBeEnabled",

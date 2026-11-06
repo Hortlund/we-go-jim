@@ -966,17 +966,23 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
 }
 
 nonisolated enum MainTabOverlayLayoutPolicy {
+    private static let verticalTabChromeStripBottomGap: CGFloat = 12
     private static let modernTabChromeStripBottomGap: CGFloat = 45
     private static let compactLegacyTabChromeStripBottomGap: CGFloat = 78
     private static let regularLegacyTabChromeStripBottomGap: CGFloat = 64
     private static let compactScreenHeight: CGFloat = 860
-    private static let activeWorkoutStripHeight: CGFloat = 64
+    private static let minimumWorkoutStripClearance: CGFloat = 64
     private static let activeWorkoutScrollClearance: CGFloat = 18
 
     static func activeWorkoutStripBottomGap(
         screenHeight: CGFloat,
-        usesModernTabChrome: Bool
+        usesModernTabChrome: Bool,
+        usesVerticalTabChrome: Bool
     ) -> CGFloat {
+        if usesVerticalTabChrome {
+            return verticalTabChromeStripBottomGap
+        }
+
         guard !usesModernTabChrome else {
             return modernTabChromeStripBottomGap
         }
@@ -986,8 +992,8 @@ nonisolated enum MainTabOverlayLayoutPolicy {
             : regularLegacyTabChromeStripBottomGap
     }
 
-    static func activeWorkoutScrollBottomInset(stripBottomGap: CGFloat) -> CGFloat {
-        activeWorkoutStripHeight + stripBottomGap + activeWorkoutScrollClearance
+    static func activeWorkoutScrollBottomInset(stripHeight: CGFloat, stripBottomGap: CGFloat) -> CGFloat {
+        max(stripHeight, minimumWorkoutStripClearance) + stripBottomGap + activeWorkoutScrollClearance
     }
 }
 

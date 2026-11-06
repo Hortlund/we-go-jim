@@ -56,20 +56,9 @@ struct StartWorkoutHomeView: View {
 
     private var baseScreen: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 0) {
-                    WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
-                    BirthdayHomeSection(bursts: $birthdayBursts, canCelebrate:
-                        activeWorkoutCoordinator.storedSnapshot == nil
-                        && !completionPresentationState.hasPendingOrPresentedWorkout
-                        && selectedTemplatePreview == nil && templateEditorContext == nil
-                        && !showingFolderEditor && !showingTemplateImporter && shareSheetItem == nil)
-                }
-
-                if WGJTheme.isChristmas { WGJChristmasWelcome() }
-
-                quickStartSection
-                templateWorkspaceSection
+            LazyVStack(alignment: .leading, spacing: 0) {
+                startWorkoutActions
+                    .padding(.bottom, 20)
 
                 if controller.snapshot.sections.isEmpty {
                     WGJEmptyStateCard(
@@ -78,16 +67,15 @@ struct StartWorkoutHomeView: View {
                         icon: "folder"
                     )
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(controller.snapshot.sections) { section in
-                            templateSectionCard(section)
-                        }
+                    ForEach(controller.snapshot.sections) { section in
+                        templateSection(section)
                     }
                 }
             }
             .padding(.top, 8)
             .padding(16)
         }
+        .accessibilityIdentifier("start-workout-scroll-view")
         .wgjScreenBackground()
         .overlay {
             if !reduceMotion {
@@ -99,6 +87,24 @@ struct StartWorkoutHomeView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var startWorkoutActions: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 0) {
+                WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
+                BirthdayHomeSection(bursts: $birthdayBursts, canCelebrate:
+                    activeWorkoutCoordinator.storedSnapshot == nil
+                    && !completionPresentationState.hasPendingOrPresentedWorkout
+                    && selectedTemplatePreview == nil && templateEditorContext == nil
+                    && !showingFolderEditor && !showingTemplateImporter && shareSheetItem == nil)
+            }
+
+            if WGJTheme.isChristmas { WGJChristmasWelcome() }
+
+            quickStartSection
+            templateWorkspaceSection
+        }
     }
 
     private var sheetPresentedScreen: some View {
@@ -339,58 +345,86 @@ struct StartWorkoutHomeView: View {
         .wgjCardContainer(strong: true)
     }
 
-    private func templateSectionCard(_ section: StartWorkoutTemplateSection) -> some View {
+    private func templateSection(_ section: StartWorkoutTemplateSection) -> some View {
         let isExpanded = isSectionExpanded(section.id)
-        let folder = folder(for: section.id)
+        let strong = isExpanded && section.isUnfiled
 
-        return VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                folderBadge(systemImage: section.systemImage, tint: section.isUnfiled ? WGJTheme.accentCyan : WGJTheme.accentBlue)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(section.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(sectionCountText(section.templates.count))
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let folder {
-                    Button {
-                        createTemplate(in: section.folderIDForCreation)
-                    } label: {
-                        StartWorkoutUtilityIcon(systemImage: "plus", tint: WGJTheme.accentBlue)
-                    }
-                    .buttonStyle(.plain)
-
-                    folderActionsMenu(for: folder)
-                }
-
-                Button {
-                    toggleSectionExpansion(section.id)
-                } label: {
-                    StartWorkoutUtilityIcon(
-                        systemImage: "chevron.down",
-                        tint: WGJTheme.textSecondary
-                    )
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(14)
-
+        // The scroll view's lazy stack measures each template independently of its folder.
+        return Section {
             if isExpanded {
-                expandedTemplateSectionContent(section)
+                if let last = section.templates.last {
+                    ForEach(section.templates) { template in
+                        VStack(spacing: 0) {
+                            sectionDivider.padding(.leading, template.id == section.templates.first?.id ? 0 : 14)
+                            templateRow(template)
+                        }
+                        .modifier(StartWorkoutFolderCardSegment(
+                            strong: strong,
+                            roundedEdges: template.id == last.id ? .bottom : []
+                        ))
+                        .transition(folderContentTransition)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        sectionDivider
+                        emptySectionState(section)
+                    }
+                    .modifier(StartWorkoutFolderCardSegment(strong: strong, roundedEdges: .bottom))
                     .transition(folderContentTransition)
+                }
+            }
+        } header: {
+            templateSectionHeader(section, isExpanded: isExpanded)
+                .modifier(StartWorkoutFolderCardSegment(strong: strong, roundedEdges: isExpanded ? .top : .all))
+        } footer: {
+            if section.id != controller.snapshot.sections.last?.id {
+                Color.clear
+                    .frame(height: 12)
+                    .accessibilityHidden(true)
             }
         }
-        .animation(folderExpansionAnimation, value: isExpanded)
-        .wgjCardContainer(strong: isExpanded && section.isUnfiled)
+    }
+
+    private func templateSectionHeader(_ section: StartWorkoutTemplateSection, isExpanded: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            folderBadge(systemImage: section.systemImage, tint: section.isUnfiled ? WGJTheme.accentCyan : WGJTheme.accentBlue)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(section.title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(sectionCountText(section.templates.count))
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let folder = folder(for: section.id) {
+                Button {
+                    createTemplate(in: section.folderIDForCreation)
+                } label: {
+                    StartWorkoutUtilityIcon(systemImage: "plus", tint: WGJTheme.accentBlue)
+                }
+                .buttonStyle(.plain)
+
+                folderActionsMenu(for: folder)
+            }
+
+            Button {
+                toggleSectionExpansion(section.id)
+            } label: {
+                StartWorkoutUtilityIcon(
+                    systemImage: "chevron.down",
+                    tint: WGJTheme.textSecondary
+                )
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
     }
 
     private func folderBadge(systemImage: String, tint: Color) -> some View {
@@ -416,27 +450,6 @@ struct StartWorkoutHomeView: View {
         Rectangle()
             .fill(WGJTheme.rowDivider.opacity(0.55))
             .frame(height: 1)
-    }
-
-    private func expandedTemplateSectionContent(_ section: StartWorkoutTemplateSection) -> some View {
-        LazyVStack(spacing: 0) {
-            sectionDivider
-
-            if section.templates.isEmpty {
-                emptySectionState(section)
-            } else {
-                ForEach(section.templates) { template in
-                    VStack(spacing: 0) {
-                        templateRow(template)
-
-                        if template.id != section.templates.last?.id {
-                            sectionDivider
-                                .padding(.leading, 14)
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private func templateRow(_ template: StartWorkoutTemplateRowSnapshot) -> some View {
@@ -807,7 +820,7 @@ struct StartWorkoutHomeView: View {
 
     private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {
         if let runtimeSession = preparation.runtimeSession {
-            _ = activeWorkoutCoordinator.send(.start(runtimeSession))
+            _ = activeWorkoutCoordinator.send(.start(runtimeSession, isNew: !preparation.isExistingConflict))
         }
         if preparation.isExistingConflict {
             presentActiveWorkoutConflict(for: preparation.sessionID)
@@ -1380,6 +1393,24 @@ private struct StartWorkoutPendingFolderDeletion: Identifiable {
     let id: UUID
     let name: String
     let templateCount: Int
+}
+
+private struct StartWorkoutFolderCardSegment: ViewModifier {
+    let strong: Bool
+    let roundedEdges: VerticalEdge.Set
+
+    func body(content: Content) -> some View {
+        let overflow = WGJRadius.card * 2
+        content.background {
+            // Clip the card's extended ends to join adjacent rows without extra borders.
+            Color.clear
+                .wgjCardContainer(strong: strong)
+                .padding(.top, roundedEdges.contains(.top) ? 0 : -overflow)
+                .padding(.bottom, roundedEdges.contains(.bottom) ? 0 : -overflow)
+                .clipped()
+                .allowsHitTesting(false)
+        }
+    }
 }
 
 private struct StartWorkoutTemplateRowView: View, Equatable {

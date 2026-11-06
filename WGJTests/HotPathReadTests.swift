@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class HotPathReadTests: XCTestCase {
+    func testTemplateRecencyReadsVisibleLinkedWorkoutsAndUsesLegacyStartDate() throws {
+        try withDiskContext { context in
+            let templateID = UUID()
+            func addWorkout(_ seconds: TimeInterval, template: UUID?, archived: Bool = false,
+                            status: WorkoutSessionStatus = .completed, legacy: Bool = false) {
+                let date = Date(timeIntervalSince1970: seconds)
+                let workout = WorkoutSession(templateID: template, name: "Workout", status: status,
+                                             startedAt: date, endedAt: legacy ? nil : date.addingTimeInterval(10))
+                if archived { workout.archivedAt = date }
+                context.insert(workout)
+            }
+            addWorkout(100, template: templateID)
+            addWorkout(200, template: templateID, legacy: true)
+            addWorkout(300, template: templateID, archived: true)
+            addWorkout(400, template: templateID, status: .active)
+            addWorkout(500, template: UUID())
+            addWorkout(600, template: nil)
+            try context.save()
+
+            let read = ModelContext(context.container)
+            let repository = WorkoutSessionRepository(modelContext: read)
+            XCTAssertEqual(try repository.latestCompletedDates(forTemplateIDs: [templateID]),
+                           [templateID: Date(timeIntervalSince1970: 200)])
+            XCTAssertTrue(try repository.latestCompletedDates(forTemplateIDs: []).isEmpty)
+            XCTAssertFalse(read.hasChanges)
+        }
+    }
+
     func testPageStartedDuringReloadCannotRestoreHiddenWorkoutAfterReloadPublishes() throws {
         try withDiskContext { context in
             _ = insertWorkout(context, at: 100, exerciseUUID: "bench", weight: 50)

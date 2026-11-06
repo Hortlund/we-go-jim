@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class AdaptiveLayoutUITests: XCTestCase {
@@ -125,31 +126,38 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let addFirst = app.buttons["template-set-0-add-drop-stage-button"]
         let addSecond = app.buttons["template-set-1-add-drop-stage-button"]
         tapDropsetElement(addFirst, in: app)
+        tapDropsetElement(addSecond, in: app)
         let weight = app.textFields["template-set-0-drop-stage-0-weight-field"]
         tapDropsetElement(weight, in: app)
-        weight.typeText("040")
+        typeTemplateDropText("040", into: weight, in: app)
         XCTAssertEqual(weight.value as? String, "040", "Keep in-progress input while focused")
         let reps = app.textFields["template-set-0-drop-stage-0-reps-field"]
         tapDropsetElement(reps, in: app)
         XCTAssertEqual(weight.value as? String, "40", "Normalize when switching drop fields")
-        reps.typeText("008")
+        typeTemplateDropText("008", into: reps, in: app)
         XCTAssertEqual(reps.value as? String, "008", "Keep in-progress input while focused")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            typeTemplateDropText(".5", into: reps, in: app)
+            XCTAssertEqual(reps.value as? String, "008.5", "Keep the invalid edit available for correction")
+        }
         tapDropsetElement(weight, in: app)
-        XCTAssertEqual(reps.value as? String, "8", "Normalize when leaving the reps field")
-        // Editing an otherwise unchanged sibling must read the latest whole set list.
-        tapDropsetElement(addSecond, in: app)
-        XCTAssertTrue(weight.exists)
-        XCTAssertEqual(weight.value as? String, "40")
-        XCTAssertEqual(reps.value as? String, "8")
+        XCTAssertEqual(reps.value as? String, "8", "Restore the last valid count when leaving the reps field")
+        let hideKeyboard = app.keyboards.buttons["Hide keyboard"].firstMatch
+        if hideKeyboard.exists && hideKeyboard.isHittable { hideKeyboard.tap() }
+
+        // Editing an otherwise unchanged sibling must preserve the first set's drafts.
         let siblingWeight = app.textFields["template-set-1-drop-stage-0-weight-field"]
         tapDropsetElement(siblingWeight, in: app)
-        siblingWeight.typeText("025")
+        typeTemplateDropText("025", into: siblingWeight, in: app)
         let siblingReps = app.textFields["template-set-1-drop-stage-0-reps-field"]
         tapDropsetElement(siblingReps, in: app)
         XCTAssertEqual(siblingWeight.value as? String, "25")
-        siblingReps.typeText("006")
-        tapDropsetElement(addFirst, in: app)
-        XCTAssertTrue(app.textFields["template-set-0-drop-stage-1-weight-field"].exists)
+        typeTemplateDropText("006", into: siblingReps, in: app)
+        XCTAssertEqual(siblingReps.value as? String, "006")
+        tapDropsetElement(addFirst, in: app, requiresSoftwareKeyboard: UIDevice.current.userInterfaceIdiom == .pad)
+        XCTAssertTrue(app.textFields["template-set-0-drop-stage-1-weight-field"].waitForExistence(timeout: 4))
+        XCTAssertEqual(weight.value as? String, "40")
+        XCTAssertEqual(reps.value as? String, "8")
         XCTAssertTrue(app.textFields["template-set-1-drop-stage-0-weight-field"].exists)
         XCTAssertFalse(app.textFields["template-editor-name-field"].isHittable,
             "Adding a drop should preserve the editor's scroll position")
@@ -269,42 +277,113 @@ final class AdaptiveLayoutUITests: XCTestCase {
     }
 
     @MainActor
-    private func tapDropsetElement(_ element: XCUIElement, in app: XCUIApplication) {
+    func testLargeTextWorkoutStripAndFinishConfirmationStayReachable() {
+        let app = launchLocalApp(additionalArguments: [
+            "UITEST_SEED_TEMPLATE_REVIEW", "UITEST_TEMPLATE_PREVIOUS_MULTIPLE",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ])
+        tapDropsetElement(app.buttons["start-workout-template-start-button-review-fixture"], in: app)
+        let start = app.buttons["template-preview-start-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        tapDropsetElement(app.buttons["active-workout-exercise-ui-test-bench-expand-button"], in: app)
+
+        let weight = app.textFields["workout-set-1-weight-field"]
+        tapDropsetElement(weight, in: app)
+        weight.typeText("50")
+        let reps = app.textFields["workout-set-1-reps-field"]
+        tapDropsetElement(reps, in: app)
+        reps.typeText("8")
+        tapDropsetElement(app.buttons["workout-set-1-completion-button"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["active-workout-rest-timer"].firstMatch.waitForExistence(timeout: 4))
+
+        app.buttons["active-workout-minimize-button"].tap()
+        let strip = app.buttons["active-workout-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 4))
+        XCTAssertTrue(strip.isHittable)
+        XCTAssertLessThan(strip.frame.height, app.frame.height / 3)
+        XCTAssertTrue(strip.label.contains("Bench Press"))
+        strip.tap()
+
+        let finish = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 4))
+        finish.tap()
+        let confirmation = app.scrollViews["active-workout-finish-confirmation-sheet"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 4))
+        let confirm = confirmation.buttons["Finish Anyway"]
+        for _ in 0..<4 where !confirm.isHittable { confirmation.swipeUp() }
+        XCTAssertTrue(confirm.isHittable)
+        confirm.tap()
+        XCTAssertTrue(app.otherElements["workout-completion-summary"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    private func typeTemplateDropText(_ text: String, into field: XCUIElement, in app: XCUIApplication) {
+        for character in text {
+            let key = app.keyboards.keys[String(character)].firstMatch
+            if key.isHittable {
+                key.tap()
+            } else if key.exists && app.frame.contains(key.frame), !key.frame.isEmpty {
+                key.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else {
+                field.typeText(String(character))
+            }
+        }
+    }
+
+    @MainActor
+    private func tapDropsetElement(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        requiresSoftwareKeyboard: Bool = false
+    ) {
         _ = element.waitForExistence(timeout: 2)
+        let templateScroll = app.scrollViews["template-editor-scroll-view"].firstMatch
+        let workoutScroll = app.scrollViews["active-workout-scroll-view"].firstMatch
+        let homeScroll = app.scrollViews["start-workout-scroll-view"].firstMatch
+        let keyboard = app.keyboards.firstMatch
         for _ in 0..<12 {
-            let keyboardTop = app.keyboards.firstMatch.exists
-                ? app.keyboards.firstMatch.frame.minY : app.frame.maxY
-            var visibleBottom = min(app.frame.maxY - 100, keyboardTop - 24)
+            let scroll = [templateScroll, workoutScroll, homeScroll].first(where: \.exists) ?? app
+            let viewport = scroll.frame
+            let visibleTop = max(app.frame.minY + 96, viewport.minY + 84)
+            let keyboardFrame = keyboard.exists ? keyboard.frame.intersection(app.frame) : .null
+            var visibleBottom = min(app.frame.maxY - 110, viewport.maxY - 65)
+            if !keyboardFrame.isNull, keyboardFrame.height > 40 {
+                visibleBottom = min(visibleBottom, keyboardFrame.minY - 55)
+            }
             let timerTitle = app.staticTexts.matching(NSPredicate(
                 format: "label BEGINSWITH[c] %@ OR label BEGINSWITH[c] %@",
                 "Elapsed time", "Rest timer"
             )).firstMatch
-            if timerTitle.exists && timerTitle.frame.minY > 220 {
-                visibleBottom = min(visibleBottom, timerTitle.frame.minY - 24)
+            if scroll == workoutScroll, timerTitle.exists && timerTitle.frame.minY > visibleTop {
+                visibleBottom = min(visibleBottom, timerTitle.frame.minY - 16)
             }
-            if element.exists && element.isHittable && element.frame.minY > 175
-                && element.frame.maxY < visibleBottom { break }
-            // The editor sheet and home both expose scroll views. Drag inside the
-            // visible content above the keyboard, rather than scrolling the home.
-            let targetY = (175 + visibleBottom) / 2
-            let distance = element.exists
-                ? min(140, max(40, abs(element.frame.midY - targetY))) : 140
-            let upper = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: 20, dy: 220))
-            let lower = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: 20, dy: visibleBottom - 20))
-            if element.exists && element.frame.minY < 175 {
-                let end = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: 20, dy: 220 + distance))
-                upper.press(forDuration: 0.1, thenDragTo: end, withVelocity: 200, thenHoldForDuration: 0.2)
-            } else {
-                let end = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: 20, dy: visibleBottom - 20 - distance))
-                lower.press(forDuration: 0.1, thenDragTo: end, withVelocity: 200, thenHoldForDuration: 0.2)
+            let target = element.exists ? element.frame : .null
+            if element.isHittable && target.midY > visibleTop && target.midY < visibleBottom {
+                if requiresSoftwareKeyboard {
+                    XCTAssertGreaterThan(keyboardFrame.height, 40,
+                        "Keep the software keyboard visible while adding another drop")
+                }
+                element.tap()
+                return
             }
+            let travel = visibleBottom - visibleTop
+            guard travel > 40 else { break }
+            let distance = target.isNull ? travel : min(travel, max(60, abs(target.midY - (visibleTop + travel / 2))))
+            let towardStart = !target.isNull && target.midY < visibleTop
+            let startY = towardStart ? visibleTop : visibleBottom
+            let endY = towardStart ? startY + distance : startY - distance
+            let x = keyboardFrame.isNull ? 0.3 : min(42 / viewport.width, 0.12)
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: x, dy: (startY - viewport.minY) / viewport.height))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: x, dy: (endY - viewport.minY) / viewport.height))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 400, thenHoldForDuration: 0.15)
         }
         XCTAssertTrue(element.exists, element.debugDescription)
         XCTAssertTrue(element.isHittable, app.debugDescription)
+        if requiresSoftwareKeyboard {
+            XCTAssertGreaterThan(keyboard.frame.intersection(app.frame).height, 40,
+                "Keep the software keyboard visible while adding another drop")
+        }
         element.tap()
     }
 
@@ -347,7 +426,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS", "UITEST_SEED_HISTORY_CARDIO_ROUTE", "UITEST_PROGRESS_PRIOR_YEAR"])
         openTrainingJourneyFromProgress(in: app)
         let recap = app.buttons["training-year-recap-entry"]
-        for _ in 0..<3 where !recap.isHittable { app.swipeUp() }
+        let journeyScroll = app.scrollViews["training-journey-screen"]
+        for _ in 0..<3 where !recap.isHittable { scrollVertically(journeyScroll) }
         XCTAssertTrue(recap.isHittable)
         recap.tap()
         XCTAssertTrue(app.images["training-year-recap-image"].waitForExistence(timeout: 8))
@@ -366,7 +446,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Year in training"].exists)
         let picker = app.buttons["training-year-recap-picker"]
         let pickerFrame = picker.frame
-        app.scrollViews.firstMatch.swipeUp()
+        scrollVertically(app.scrollViews.firstMatch)
         XCTAssertTrue(picker.exists)
         XCTAssertEqual(picker.frame.minY, pickerFrame.minY, accuracy: 2)
         // Menu's isHittable result is unreliable on iOS 18. Verify a real selection
@@ -374,7 +454,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         picker.tap()
         XCTAssertTrue(app.buttons[previousYear].firstMatch.waitForExistence(timeout: 4))
         app.buttons[previousYear].firstMatch.tap()
-        app.scrollViews.firstMatch.swipeDown()
+        scrollVertically(app.scrollViews.firstMatch, towardEnd: false)
         let previousYearAttachment = XCTAttachment(screenshot: app.screenshot())
         previousYearAttachment.name = "Previous year recap"
         previousYearAttachment.lifetime = .keepAlways
@@ -394,8 +474,10 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         openTrainingJourneyFromProgress(in: app)
+        let scroll = app.scrollViews["training-journey-screen"]
         let recap = app.buttons["training-year-recap-entry"]
-        for _ in 0..<5 where !recap.isHittable { app.swipeUp() }
+        XCTAssertTrue(scroll.waitForExistence(timeout: 4))
+        for _ in 0..<10 where !recap.isHittable { scrollVertically(scroll) }
         XCTAssertTrue(recap.isHittable)
         recap.tap()
         XCTAssertTrue(app.images["training-year-recap-image"].waitForExistence(timeout: 8))
@@ -427,7 +509,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
         }
         let fixtureMonth = Calendar.current.component(.month, from: fixtureDate)
         let month = app.buttons["journey-month-\(fixtureMonth)"]
-        for _ in 0..<4 where !month.isHittable { app.swipeUp() }
+        let scroll = app.scrollViews["training-journey-screen"]
+        for _ in 0..<8 where !month.isHittable { scrollVertically(scroll) }
         XCTAssertTrue(month.isHittable)
         month.tap()
         let workout = app.buttons.containing(.staticText, identifier: "Progress Fixture 1").firstMatch
@@ -438,7 +521,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         app.buttons["Close"].firstMatch.tap()
 
         let strength = app.buttons["journey-milestone-strength"].firstMatch
-        for _ in 0..<6 where !strength.isHittable { app.swipeUp() }
+        for _ in 0..<14 where !strength.isHittable { scrollVertically(scroll) }
         XCTAssertTrue(strength.isHittable)
         strength.tap()
         XCTAssertTrue(app.navigationBars["Workout"].waitForExistence(timeout: 8))
@@ -449,7 +532,8 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"])
         openTrainingJourneyFromProgress(in: app)
         let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "share-pr-")).firstMatch
-        for _ in 0..<10 where !share.isHittable { app.swipeUp() }
+        let scroll = app.scrollViews["training-journey-screen"]
+        for _ in 0..<16 where !share.isHittable { scrollVertically(scroll) }
         XCTAssertTrue(share.isHittable, app.debugDescription)
         share.tap()
         XCTAssertTrue(app.navigationBars["Personal Record"].waitForExistence(timeout: 8))
@@ -484,11 +568,12 @@ final class AdaptiveLayoutUITests: XCTestCase {
             ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"] : additionalArguments
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_EXERCISE_PROGRESS"] + textSize)
         openTrainingJourneyFromProgress(in: app)
+        let journeyScroll = app.scrollViews["training-journey-screen"]
         let next = app.staticTexts["Next up"]
-        for _ in 0..<8 where !next.isHittable { app.swipeUp() }
+        for _ in 0..<18 where !next.isHittable { scrollVertically(journeyScroll) }
         XCTAssertTrue(next.isHittable)
         let allGoals = app.buttons["journey-all-goals"]
-        for _ in 0..<3 where !allGoals.isHittable { app.swipeUp() }
+        for _ in 0..<5 where !allGoals.isHittable { scrollVertically(journeyScroll) }
         XCTAssertTrue(allGoals.isHittable)
         allGoals.tap()
         XCTAssertTrue(app.navigationBars["Achievements"].waitForExistence(timeout: 8))
@@ -496,23 +581,23 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(goalFilter.isHittable)
         verifyScrollingFilterStaysInItsRow(goalFilter, choose: "To unlock", in: app)
         let future = app.descendants(matching: .any)["journey-goal-first-cardio"].firstMatch
-        for _ in 0..<5 where !future.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !future.isHittable { scrollVertically(app.scrollViews.firstMatch) }
         XCTAssertTrue(future.isHittable, app.debugDescription)
         let goalScreenshot = XCTAttachment(screenshot: app.screenshot())
         goalScreenshot.name = "Achievement goals still to unlock"
         goalScreenshot.lifetime = .keepAlways
         add(goalScreenshot)
         let workoutSeries = app.buttons["journey-goal-series-workouts"]
-        for _ in 0..<12 where !workoutSeries.isHittable { app.swipeUp() }
+        for _ in 0..<16 where !workoutSeries.isHittable { scrollVertically(app.scrollViews.firstMatch) }
         XCTAssertTrue(workoutSeries.isHittable)
         workoutSeries.tap()
         XCTAssertTrue(app.navigationBars["Showing up"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Current goal"].exists)
         let laterGoal = app.descendants(matching: .any)["journey-goal-workouts-100"].firstMatch
-        for _ in 0..<8 where !laterGoal.isHittable { app.swipeUp() }
+        for _ in 0..<10 where !laterGoal.isHittable { scrollVertically(app.scrollViews.firstMatch) }
         XCTAssertTrue(laterGoal.isHittable)
         app.navigationBars["Showing up"].buttons.element(boundBy: 0).tap()
-        for _ in 0..<5 where !goalFilter.isHittable { app.swipeDown() }
+        for _ in 0..<14 where !goalFilter.isHittable { scrollVertically(app.scrollViews.firstMatch, towardEnd: false) }
         goalFilter.tap()
         app.buttons["Cleared"].tap()
         let beginning = app.descendants(matching: .any)["journey-goal-beginning"].firstMatch
@@ -527,12 +612,12 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(moments.waitForExistence(timeout: 5))
         selectAchievementPage("Earned", in: app)
         let earnedFilter = app.buttons["journey-earned-filter"]
-        for _ in 0..<3 where !earnedFilter.isHittable { app.swipeDown() }
+        for _ in 0..<3 where !earnedFilter.isHittable { scrollVertically(app.scrollViews.firstMatch, towardEnd: false) }
         verifyScrollingFilterStaysInItsRow(earnedFilter, choose: "All achievements", in: app)
         earnedFilter.tap()
         app.buttons["Milestones"].tap()
         let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "share-milestone-")).firstMatch
-        for _ in 0..<10 where !share.isHittable { app.swipeUp() }
+        for _ in 0..<10 where !share.isHittable { scrollVertically(app.scrollViews.firstMatch) }
         XCTAssertTrue(share.isHittable, app.debugDescription)
         share.tap()
         XCTAssertTrue(app.navigationBars["Milestone"].waitForExistence(timeout: 8))
@@ -553,7 +638,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Your Journey"].waitForExistence(timeout: 8))
         if !additionalArguments.isEmpty {
             let filter = app.buttons["journey-filter-picker"]
-            for _ in 0..<12 where !filter.isHittable { app.swipeUp() }
+            for _ in 0..<12 where !filter.isHittable { scrollVertically(journeyScroll) }
             XCTAssertTrue(filter.isHittable)
             verifyScrollingFilterStaysInItsRow(filter, choose: "All", in: app)
         }
@@ -578,11 +663,17 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertEqual(button.frame.minY, originalFrame.minY, accuracy: 4,
             "Dismissing the options must return the source button to its row")
         let scroll = app.scrollViews.firstMatch
-        scroll.swipeUp()
+        scrollVertically(scroll)
         XCTAssertTrue(!button.isHittable || button.frame.maxY < originalFrame.maxY - 40,
             "The filter must scroll with its content, without a floating copy")
-        for _ in 0..<6 where !button.isHittable { scroll.swipeDown() }
+        let pagePicker = app.buttons["journey-achievement-page-picker"]
+        for _ in 0..<6 {
+            let isBelowPagePicker = !pagePicker.exists || button.frame.midY > pagePicker.frame.maxY + 8
+            if button.isHittable && isBelowPagePicker { break }
+            scrollVertically(scroll, towardEnd: false)
+        }
         XCTAssertTrue(button.isHittable)
+        if pagePicker.exists { XCTAssertGreaterThan(button.frame.midY, pagePicker.frame.maxY) }
     }
 
     @MainActor
@@ -591,8 +682,10 @@ final class AdaptiveLayoutUITests: XCTestCase {
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         openTrainingJourneyFromProgress(in: app)
         XCTAssertTrue(app.staticTexts["Look how far you've come."].waitForExistence(timeout: 8))
+        let scroll = app.scrollViews["training-journey-screen"]
         let month = app.buttons["journey-month-2"]
-        for _ in 0..<5 where !month.isHittable { app.swipeUp() }
+        XCTAssertTrue(scroll.waitForExistence(timeout: 4))
+        for _ in 0..<10 where !month.isHittable { scrollVertically(scroll) }
         XCTAssertTrue(month.isHittable)
         month.tap()
         XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 8))
@@ -957,8 +1050,20 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let cancel = app.alerts["Cancel workout?"].buttons["Cancel Workout"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 4))
         cancel.tap()
-        XCTAssertTrue(cardio.waitForExistence(timeout: 8))
+        XCTAssertTrue(primary.waitForNonExistence(timeout: 8))
+
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT" }
+        app.launch()
+        let continueLocally = app.buttons["Continue Locally"].firstMatch
+        XCTAssertTrue(continueLocally.waitForExistence(timeout: 8))
+        continueLocally.tap()
+        let start = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
         XCTAssertFalse(primary.exists)
+        XCTAssertFalse(resume.exists)
+        start.tap()
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 8))
     }
 
     @MainActor
@@ -993,7 +1098,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: ",", with: "."), "2.5")
         XCTAssertFalse(app.staticTexts["GPS distance"].exists)
         XCTAssertFalse(app.staticTexts["cardio-result-recorded-distance"].exists)
-        XCTAssertTrue(app.staticTexts["Time recorded. Review your distance below."].exists)
+        XCTAssertTrue(app.staticTexts["Review your result before saving."].exists)
         app.buttons["cardio-result-save-button"].tap()
         XCTAssertTrue(edit.waitForExistence(timeout: 8))
         edit.tap()
@@ -1078,7 +1183,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertFalse(app.textFields["cardio-result-distance-field"].exists)
         finish.tap()
         XCTAssertTrue(finishAlert.waitForExistence(timeout: 4))
-        let confirmFinish = finishAlert.buttons["cardio-recording-confirm-finish-button"]
+        let confirmFinish = finishAlert.buttons["cardio-recording-confirm-finish-button"].firstMatch
         XCTAssertTrue(confirmFinish.waitForExistence(timeout: 4))
         let finishScreenshot = XCTAttachment(screenshot: app.screenshot())
         finishScreenshot.name = "Centered cardio finish confirmation"
@@ -1268,7 +1373,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         markFirstSetAsWarmup(in: app)
         let fill = app.buttons["workout-set-0-use-last-button"]
         XCTAssertTrue(fill.waitForExistence(timeout: 5))
-        fill.tap()
+        tapDropsetElement(fill, in: app)
         XCTAssertEqual(app.textFields["workout-set-0-weight-field"].value as? String, "20 kilograms")
         XCTAssertEqual(app.textFields["workout-set-0-reps-field"].value as? String, "10 reps")
     }
@@ -1325,12 +1430,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     private func markFirstSetAsWarmup(in app: XCUIApplication) {
         let actions = app.buttons["workout-set-actions-button-0"].firstMatch
-        for _ in 0..<5 {
-            if actions.isHittable && actions.frame.maxY < app.frame.maxY - 160 { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        XCTAssertTrue(actions.waitForExistence(timeout: 5))
-        actions.tap()
+        tapDropsetElement(actions, in: app)
         app.buttons["Mark as warmup"].firstMatch.tap()
     }
 
@@ -1747,7 +1847,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         search.tap()
         search.typeText("bench")
 
-        let bench = app.staticTexts["Barbell Bench Press"].firstMatch
+        let bench = app.buttons["exercise-catalog-detail-seed-bench-press"]
         XCTAssertTrue(bench.waitForExistence(timeout: 4))
         bench.tap()
 
@@ -1804,7 +1904,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
         let search = app.textFields["exercises-search-field"]
         XCTAssertTrue(search.waitForExistence(timeout: 4))
 
-        for query in ["bench", "zzzznoexercise"] {
+        for query in ["bench", "zzzz"] {
             search.tap()
             XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
             let visibleKey = app.keyboards.keys["b"]
@@ -1812,12 +1912,15 @@ final class AdaptiveLayoutUITests: XCTestCase {
                           "Enable the Simulator software keyboard before running this test")
             // Focusing an empty field alone must hide the strip.
             XCTAssertTrue(strip.waitForNonExistence(timeout: 3))
-            search.typeText(query)
+            for letter in query {
+                app.keyboards.keys[String(letter)].firstMatch.tap()
+            }
             if query == "bench" {
                 XCTAssertTrue(app.staticTexts["Barbell Bench Press"].firstMatch.waitForExistence(timeout: 4))
             } else {
                 XCTAssertTrue(app.staticTexts["Barbell Bench Press"].firstMatch.waitForNonExistence(timeout: 4))
             }
+            XCTAssertTrue(visibleKey.isHittable)
             XCTAssertFalse(strip.exists)
 
             app.buttons["exercises-body-part-filter"].tap()
@@ -2087,26 +2190,40 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     func testTemplateLibraryScrollsToOffscreenRowsAndBack() {
         let app = launchLocalApp(additionalArguments: ["UITEST_SEED_TEMPLATE_LIBRARY"])
-        let first = app.staticTexts["Library Plan 01"].firstMatch
-        let last = app.staticTexts["Library Plan 16"].firstMatch
-        let scroll = app.scrollViews.firstMatch
+        let first = app.buttons["start-workout-template-start-button-library-plan-01"]
+        let last = app.buttons["start-workout-template-start-button-library-plan-40"]
+        let scroll = app.scrollViews["start-workout-scroll-view"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 8))
         for _ in 0..<5 {
             if first.exists && first.isHittable { break }
-            scroll.swipeUp()
+            scrollVertically(scroll)
         }
         XCTAssertTrue(first.isHittable)
-        for _ in 0..<20 {
+        for _ in 0..<30 {
             if last.exists && last.isHittable { break }
-            scroll.swipeUp()
+            scrollVertically(scroll)
         }
-        XCTAssertTrue(last.isHittable, "The last template should be reachable in the lazy library")
-        for _ in 0..<20 {
+        XCTAssertTrue(last.isHittable, "The last template should be reachable in the library")
+        last.tap()
+        let preview = app.scrollViews["template-preview-sheet"]
+        XCTAssertTrue(preview.staticTexts["Library Plan 40"].waitForExistence(timeout: 4))
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(preview.waitForNonExistence(timeout: 4))
+        for _ in 0..<30 {
             if first.exists && first.isHittable { break }
-            scroll.swipeDown()
+            scrollVertically(scroll, towardEnd: false)
         }
-        XCTAssertTrue(first.isHittable, "Returning to recycled template rows should preserve content")
+        XCTAssertTrue(first.isHittable, "Scrolling back should return to the first template")
         XCTAssertTrue(app.buttons["start-workout-new-folder-button"].exists)
+    }
+
+    @MainActor
+    private func scrollVertically(_ scrollView: XCUIElement, towardEnd: Bool = true) {
+        let top = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.24))
+        let bottom = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.76))
+        let start = towardEnd ? bottom : top
+        let end = towardEnd ? top : bottom
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     @MainActor
@@ -2215,7 +2332,10 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(keep.waitForExistence(timeout: 10))
         for _ in 0..<2 {
             XCUIDevice.shared.press(.home)
-            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            if !app.wait(for: .runningBackground, timeout: 3), app.state != .runningBackgroundSuspended {
+                XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()
+            }
+            XCTAssertTrue(app.state == .runningBackground || app.state == .runningBackgroundSuspended)
             app.activate()
             XCTAssertTrue(keep.waitForExistence(timeout: 8))
             XCTAssertTrue(keep.isHittable)
@@ -2248,12 +2368,7 @@ final class AdaptiveLayoutUITests: XCTestCase {
     @MainActor
     private func finishTemplateReviewFixture(in app: XCUIApplication) {
         let start = app.buttons["start-workout-template-start-button-review-fixture"]
-        for _ in 0..<5 {
-            if start.exists && start.isHittable { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
+        tapDropsetElement(start, in: app)
 
         let previewStart = app.buttons["template-preview-start-button"]
         XCTAssertTrue(previewStart.waitForExistence(timeout: 4))
@@ -2263,22 +2378,16 @@ final class AdaptiveLayoutUITests: XCTestCase {
         XCTAssertTrue(expand.waitForExistence(timeout: 8))
         expand.tap()
         let setActions = app.buttons["workout-set-actions-button-0"].firstMatch
-        for _ in 0..<5 {
-            if setActions.exists && setActions.isHittable && setActions.frame.maxY < app.frame.maxY - 160 { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        XCTAssertTrue(setActions.waitForExistence(timeout: 8))
-        setActions.tap()
+        tapDropsetElement(setActions, in: app)
         app.buttons["Insert below"].firstMatch.tap()
 
         let weight = app.textFields["workout-set-0-weight-field"]
-        XCTAssertTrue(weight.waitForExistence(timeout: 4))
-        weight.tap()
+        tapDropsetElement(weight, in: app)
         weight.typeText("50")
         let reps = app.textFields["workout-set-0-reps-field"]
-        reps.tap()
+        tapDropsetElement(reps, in: app)
         reps.typeText("8")
-        app.buttons["workout-set-0-completion-button"].tap()
+        tapDropsetElement(app.buttons["workout-set-0-completion-button"], in: app)
 
         let finish = app.buttons["active-workout-finish-button"]
         XCTAssertTrue(finish.waitForExistence(timeout: 4))

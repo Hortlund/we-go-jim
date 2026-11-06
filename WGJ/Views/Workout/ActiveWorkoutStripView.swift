@@ -5,6 +5,7 @@ import SwiftUI
 struct ActiveWorkoutStripView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(RestTimerState.self) private var restTimerState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let sessionID: UUID
     let onExpand: () -> Void
@@ -19,35 +20,12 @@ struct ActiveWorkoutStripView: View {
             let status = statusPresentation(now: timeline.date)
 
             Button(action: onExpand) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(WGJTheme.success)
-                        .frame(width: 12, height: 12)
-                        .overlay {
-                            Circle()
-                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
-                        }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session?.name ?? "Workout in progress")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.84)
-
-                        Text(status.statusText)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(status.statusTint)
-                            .monospacedDigit()
-                            .wgjSingleLineText(scale: 0.84)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        accessibilityLabelContent(status: status)
+                    } else {
+                        standardLabelContent(status: status)
                     }
-
-                    Spacer()
-
-                    WGJMetricPill(
-                        systemImage: status.pillIcon,
-                        value: status.pillText,
-                        tint: status.pillTint
-                    )
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -68,6 +46,61 @@ struct ActiveWorkoutStripView: View {
         }
     }
 
+    private var workoutTitle: some View {
+        Text(session?.name ?? "Workout in progress")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(WGJTheme.textPrimary)
+    }
+
+    private func standardLabelContent(status: ActiveWorkoutStripStatusPresentation) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(WGJTheme.success)
+                .frame(width: 12, height: 12)
+                .overlay {
+                    Circle()
+                        .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                workoutTitle.wgjSingleLineText(scale: 0.84)
+
+                Text(status.statusText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(status.statusTint)
+                    .monospacedDigit()
+                    .wgjSingleLineText(scale: 0.84)
+            }
+
+            Spacer()
+
+            WGJMetricPill(systemImage: status.pillIcon, value: status.pillText, tint: status.pillTint)
+        }
+    }
+
+    private func accessibilityLabelContent(status: ActiveWorkoutStripStatusPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            workoutTitle
+                .lineLimit(1)
+
+            HStack(spacing: 8) {
+                Text(status.compactStatusText)
+                    .foregroundStyle(status.statusTint)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .accessibilityLabel(status.statusText)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.up")
+                    .foregroundStyle(WGJTheme.accentBlue)
+                    .accessibilityHidden(true)
+            }
+            .font(.caption.weight(.medium))
+        }
+    }
+
     private var session: ActiveWorkoutRuntimeSession? {
         guard activeWorkoutCoordinator.storedSnapshot?.session.id == sessionID else {
             return nil
@@ -85,15 +118,12 @@ struct ActiveWorkoutStripView: View {
     private func statusPresentation(now: Date) -> ActiveWorkoutStripStatusPresentation {
         if let remaining = restTimerState.restTimerRemaining(at: now) {
             let restText = formattedRest(remaining)
-            let statusText: String
-            if let context = restTimerState.restTimerContextLabel() {
-                statusText = "Rest \(restText) · \(context)"
-            } else {
-                statusText = "Rest \(restText)"
-            }
+            let compactStatusText = "Rest \(restText)"
+            let context = restTimerState.restTimerContextLabel()
 
             return ActiveWorkoutStripStatusPresentation(
-                statusText: statusText,
+                statusText: context.map { "\(compactStatusText) · \($0)" } ?? compactStatusText,
+                compactStatusText: compactStatusText,
                 statusTint: WGJTheme.success,
                 pillText: restText,
                 pillIcon: "timer",
@@ -101,8 +131,10 @@ struct ActiveWorkoutStripView: View {
             )
         }
 
+        let statusText = "Elapsed \(elapsedText(now: now))"
         return ActiveWorkoutStripStatusPresentation(
-            statusText: "Elapsed \(elapsedText(now: now))",
+            statusText: statusText,
+            compactStatusText: statusText,
             statusTint: WGJTheme.textSecondary,
             pillText: "Open",
             pillIcon: "chevron.up",
@@ -119,6 +151,7 @@ struct ActiveWorkoutStripView: View {
 
 private struct ActiveWorkoutStripStatusPresentation {
     let statusText: String
+    let compactStatusText: String
     let statusTint: Color
     let pillText: String
     let pillIcon: String

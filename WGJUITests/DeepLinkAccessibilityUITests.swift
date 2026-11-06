@@ -2,6 +2,28 @@ import XCTest
 
 final class DeepLinkAccessibilityUITests: XCTestCase {
     @MainActor
+    func testContinueLocallyIsReachableAtLargestTextSize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_SKIP_SPLASH", "UITEST_IN_MEMORY_STORE", "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+
+        let gate = app.scrollViews["login-gate"]
+        XCTAssertTrue(gate.waitForExistence(timeout: 8))
+        let continueLocally = gate.buttons["Continue Locally"]
+        for _ in 0..<5 where !continueLocally.isHittable {
+            let bottom = gate.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+            let top = gate.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24))
+            bottom.press(forDuration: 0.05, thenDragTo: top)
+        }
+        XCTAssertTrue(continueLocally.isHittable)
+        continueLocally.tap()
+        XCTAssertTrue(app.buttons["start-workout-empty-button"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testAllRootTabsRemainSelectableAfterRepeatedNavigation() {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_SKIP_SPLASH", "UITEST_IN_MEMORY_STORE", "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]

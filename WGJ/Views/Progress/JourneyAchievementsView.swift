@@ -47,9 +47,9 @@ struct JourneyAchievementsView: View {
             goalFilter == 2 || (goalFilter == 1 ? $0.latestCleared != nil : $0.nextGoal != nil)
         }
     }
-    private var categories: [String] {
+    private func categories(in series: [JourneyAchievementSeries]) -> [String] {
         var seen = Set<String>()
-        return series.map(\.category).filter { seen.insert($0).inserted }
+        return series.compactMap { seen.insert($0.category).inserted ? $0.category : nil }
     }
     private var goalFilterTitle: String {
         [String(localized: "To unlock"), String(localized: "Cleared"), String(localized: "All goals")][goalFilter]
@@ -63,6 +63,8 @@ struct JourneyAchievementsView: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 switch page {
                 case .goals:
+                    let series = series
+                    let seriesByCategory = Dictionary(grouping: series, by: \.category)
                     Text("\(snapshot.achievementGoals.filter(\.isEarned).count) of \(snapshot.achievementGoals.count) goals cleared")
                         .font(.title3.bold())
                     WGJActionMenuButton(String(localized: "Show goals")) {
@@ -75,9 +77,9 @@ struct JourneyAchievementsView: View {
                     .foregroundStyle(WGJTheme.accentBlue)
                     .accessibilityLabel("Show goals").accessibilityValue(goalFilterTitle)
                     .accessibilityIdentifier("journey-goal-filter")
-                    ForEach(categories, id: \.self) { category in
+                    ForEach(categories(in: series), id: \.self) { category in
                         Section {
-                            ForEach(series.filter { $0.category == category }) { item in
+                            ForEach(seriesByCategory[category, default: []]) { item in
                                 if let goal = goalFilter == 1 ? item.latestCleared : item.currentGoal {
                                     if item.goals.count > 1 {
                                         NavigationLink {
@@ -98,6 +100,7 @@ struct JourneyAchievementsView: View {
                     }
                     if series.isEmpty { Text("No goals in this view yet.").foregroundStyle(WGJTheme.textSecondary) }
                 case .earned:
+                    let earned = earned
                     Text("\(earned.count) achievements").font(.title3.bold())
                     WGJActionMenuButton(String(localized: "Show achievements")) {
                         Button("All achievements") { recordFilter = 0 }
@@ -135,12 +138,33 @@ struct JourneyAchievementsView: View {
         .toolbar {
             if page != .goals {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Picker("Year", selection: $selectedYear) {
-                        Text("All time").tag(nil as Date?)
-                        ForEach(snapshot.years) { Text($0.title).tag(Optional($0.id)) }
-                    }.pickerStyle(.menu).accessibilityIdentifier("journey-achievement-year")
+                    yearPicker
+                        .accessibilityIdentifier("journey-achievement-year")
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var yearPicker: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            WGJActionMenuButton(String(localized: "Year")) {
+                Button("All time") { selectedYear = nil }
+                ForEach(snapshot.years) { year in
+                    Button(year.title) { selectedYear = year.id }
+                }
+            } label: {
+                Image(systemName: "calendar")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Year")
+            .accessibilityValue(year?.title ?? String(localized: "All time"))
+        } else {
+            Picker("Year", selection: $selectedYear) {
+                Text("All time").tag(nil as Date?)
+                ForEach(snapshot.years) { Text($0.title).tag(Optional($0.id)) }
+            }
+            .pickerStyle(.menu)
         }
     }
 

@@ -28,62 +28,24 @@ struct LoginGateView: View {
             ZStack {
                 Color.clear.wgjScreenBackground()
 
-                VStack(spacing: WGJSpacing.section) {
-                    WGJRootHeader("We Go Jim", subtitle: "Lift solo or with a private bro circle, with iCloud sync when available.")
+                ScrollView {
+                    VStack(spacing: WGJSpacing.section) {
+                        WGJRootHeader("We Go Jim", subtitle: "Log your training locally and back it up to iCloud when available.")
 
-                    VStack(spacing: WGJSpacing.control) {
-                        Image(systemName: "person.crop.circle.badge.checkmark")
-                            .font(.system(size: 50, weight: .semibold))
-                            .foregroundStyle(WGJTheme.accentBlue)
-                            .frame(width: 78, height: 78)
-                            .background {
-                                Circle()
-                                    .fill(WGJTheme.fieldStrong.opacity(0.96))
-                                    .overlay {
-                                        Circle()
-                                            .fill(WGJTheme.headerOverlayGradient.opacity(0.8))
-                                    }
-                                    .overlay {
-                                        Circle()
-                                            .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                                    }
-                            }
-
-                        Text("Continue with iCloud")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-
-                        Text(statusDescription)
-                            .font(.subheadline)
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .multilineTextAlignment(.center)
+                        if cloudSyncEnabled {
+                            iCloudStatusCard
+                            cloudEnabledActions
+                        } else {
+                            cloudDisabledActions
+                        }
                     }
+                    .padding(.top, 8)
+                    .frame(maxWidth: 520)
                     .padding(WGJSpacing.page)
-                    .wgjCardContainer(strong: true)
-
-                    if cloudSyncEnabled {
-                        cloudEnabledActions
-                    } else {
-                        cloudDisabledActions
-                    }
-
-                    VStack(spacing: 6) {
-                        Text(userDataSyncStatus.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(WGJTheme.accentBlue)
-
-                        Text(userDataSyncStatus.detail)
-                            .font(.caption)
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, WGJSpacing.page)
-
-                    Spacer()
+                    .frame(maxWidth: .infinity)
+                    .wgjGlassContainer(spacing: WGJSpacing.section)
                 }
-                .padding(.top, 8)
-                .padding(WGJSpacing.page)
-                .wgjGlassContainer(spacing: WGJSpacing.section)
+                .accessibilityIdentifier("login-gate")
             }
             .toolbar(.hidden, for: .navigationBar)
             .task {
@@ -99,6 +61,34 @@ struct LoginGateView: View {
                 Text(seedErrorMessage)
             }
         }
+    }
+
+    private var iCloudStatusCard: some View {
+        VStack(spacing: WGJSpacing.control) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.system(size: 50, weight: .semibold))
+                .foregroundStyle(WGJTheme.accentBlue)
+                .frame(width: 78, height: 78)
+                .background {
+                    Circle()
+                        .fill(WGJTheme.fieldStrong.opacity(0.96))
+                        .overlay { Circle().fill(WGJTheme.headerOverlayGradient.opacity(0.8)) }
+                        .overlay { Circle().stroke(WGJTheme.outlineStrong, lineWidth: 1) }
+                }
+                .accessibilityHidden(true)
+
+            Text("iCloud Backup")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Text(statusDescription)
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(WGJSpacing.page)
+        .wgjCardContainer(strong: true)
     }
 
     @ViewBuilder
@@ -183,10 +173,6 @@ struct LoginGateView: View {
     }
 
     private var statusDescription: String {
-        if !cloudSyncEnabled {
-            return userDataSyncStatus.detail
-        }
-
         switch accountStatus {
         case .checking:
             return "Checking your iCloud account status."

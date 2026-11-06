@@ -56,6 +56,7 @@ struct WGJApp: App {
             }
             .task {
                 _ = await AppDataArtifactCleanupQueue.shared.retryPending()
+                await ActiveWorkoutSnapshotStore.shared.retryDiscardedRouteCleanups()
             }
         }
     }
@@ -225,10 +226,11 @@ struct WGJApp: App {
         }
         if ProcessInfo.processInfo.arguments.contains("UITEST_SEED_TEMPLATE_LIBRARY") {
             let context = ModelContext(container)
-            for index in 1...16 {
+            for index in 1...40 {
                 context.insert(WorkoutTemplate(
                     folderID: TemplateRepository.unfiledFolderID,
                     name: String(format: "Library Plan %02d", index),
+                    notes: index.isMultiple(of: 3) ? "Allow extra rest between the main working sets." : "",
                     sortOrder: index
                 ))
             }
